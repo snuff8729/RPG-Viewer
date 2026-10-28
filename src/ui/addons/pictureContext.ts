@@ -16,7 +16,7 @@ const sizeCaches = new WeakMap<object, Map<string, PicSize | null>>();
  */
 export function usePictureContext(records: LogRecord[], on: boolean): PictureContext | null {
   const { data, assets } = useGame();
-  const { pictureRoles } = useAddons();
+  const { pictureRoles, spriteRoles } = useAddons();
   const screen = data?.screenSize ?? DEFAULT_SCREEN;
   const counts = useMemo(() => (on ? snapshotCounts(records) : null), [on, records]);
   // 크기가 기록에 없는 그림 이름들
@@ -52,6 +52,6 @@ export function usePictureContext(records: LogRecord[], on: boolean): PictureCon
     const cache = assets ? sizeCaches.get(assets) : undefined;
     const sizeOf = (name: string) => cache?.get(name) ?? null;
     void version; // 크기를 더 읽으면 다시 만든다
-    return { screen, roles: pictureRoles, sizeOf, hud: hudKeys(counts, screen, sizeOf) };
-  }, [counts, assets, screen, pictureRoles, version]);
+    return { screen, roles: pictureRoles, spriteRoles, sizeOf, hud: hudKeys(counts, screen, sizeOf) };
+  }, [counts, assets, screen, pictureRoles, spriteRoles, version]);
 }

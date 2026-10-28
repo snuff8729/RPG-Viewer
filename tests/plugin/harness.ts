@@ -71,6 +71,12 @@ export interface Harness {
   setBitmapSize(name: string, w: number, h: number): void;
   /** The message window opens and starts drawing text (Window_Message.updateMessage with a text state). */
   drawMessageText(): void;
+  /** Bitmaps ImageManager.loadPicture handed out that are still loading (1.10.0 tests). */
+  pendingLoads: any[];
+  /** Finishes every pending picture load (calls its load listeners). */
+  completeLoads(): void;
+  /** One real frame: SceneManager.updateScene (the bridge reads the screen after it). */
+  frame(): void;
 }
 
 export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: number } = {}): Harness {
@@ -403,6 +409,31 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     }
     return false;
   };
+  // ImageManager.loadPicture: Bitmap with _url like rpg_managers.js (MV) / rmmz_managers.js (MZ), loading until completeLoads
+  const pendingLoads: any[] = [];
+  const pictureCache: Record<string, any> = {};
+  function makeBitmap(url: string, w: number, h: number) {
+    const b: any = { _url: url, _ready: false, _listeners: [] as any[], _w: w, _h: h };
+    Object.defineProperty(b, "width", { get() { return this._ready ? this._w : 0; } });
+    Object.defineProperty(b, "height", { get() { return this._ready ? this._h : 0; } });
+    b.isReady = function () { return this._ready; };
+    b.isError = function () { return false; };
+    b.addLoadListener = function (fn: any) { if (this._ready) fn(this); else this._listeners.push(fn); };
+    b.finish = function () { this._ready = true; const l = this._listeners; this._listeners = []; l.forEach((fn: any) => fn(this)); };
+    return b;
+  }
+  const ImageManager = {
+    loadPicture(name: string) {
+      const url = "img/pictures/" + (engine === "MZ" ? encodeURI(name) : encodeURIComponent(name)) + ".png";
+      if (pictureCache[url]) return pictureCache[url];
+      const [w, h] = bitmapSizes[name] ?? [100, 100];
+      const b = makeBitmap(url, w, h);
+      pictureCache[url] = b;
+      pendingLoads.push(b);
+      return b;
+    },
+    loadEnemy(name: string) { const b = makeBitmap("img/enemies/" + name + ".png", 200, 200); b.finish(); return b; },
+  };
   const BattleManager = {
     _phase: null as string | null, _canEscape: true, _canLose: false, _escapeRatio: 0.5, _escaped: false,
     calls: [] as string[],
@@ -472,7 +503,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
-    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture,
+    SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
@@ -515,6 +546,9 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       return { scene, spriteset, container, sprites, update: () => sprites.forEach((s) => s.update()) };
     },
     setBitmapSize(name, w, h) { bitmapSizes[name] = [w, h]; },
+    pendingLoads,
+    completeLoads() { while (pendingLoads.length) pendingLoads.shift().finish(); },
+    frame() { SceneManager.updateScene(); },
     drawMessageText() {
       const wm = new (Window_Message as any)();
       wm.startMessage();

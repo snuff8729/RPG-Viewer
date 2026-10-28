@@ -36,7 +36,9 @@ export type ReaderItem =
   /** 전투 로그 한 줄(제어 문자·줄 태그 처리). action: 기술·아이템 사용 줄. screen: 이 줄에서 새로 보일 화면 그림 */
   | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot }
   /** 1.9.0 알림 문구(티커·코멘트 등). text = 제어 문자 처리한 글, source = 보일 출처 이름 */
-  | { kind: "notice"; key: string; seq: number; text: string; source: string };
+  | { kind: "notice"; key: string; seq: number; text: string; source: string }
+  /** 1.10.0 기록 사이에 바뀐 화면 그림(다른 플러그인이 잠깐 띄운 컷인 등) — 새로 보일 그림이 있을 때만 */
+  | { kind: "screen"; key: string; seq: number; screen: ScreenShot };
 
 export type BattleResult = "win" | "lose" | "escape" | "abort";
 const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
@@ -197,6 +199,12 @@ export function readerItems(
         if (!it) continue;
         if (it.kind === "record") {
           const rec = it.record;
+          // 1.10.0 화면 기록: 그림만 보인다(글자 그림 설명용 플러그인 기록 이어짐도 끊지 않는다)
+          if (rec?.type === "screen") {
+            const shot = shotAt(rec.seq, false);
+            if (shot) out.push({ kind: "screen", key: `r${rec.seq}`, seq: rec.seq, screen: shot });
+            continue;
+          }
           // 알림 문구는 다른 플러그인이 띄운 것이라 이어진 플러그인 기록(글자 그림 설명)을 끊지 않는다
           if (rec?.type === "notice" && !notices) continue;
           const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);

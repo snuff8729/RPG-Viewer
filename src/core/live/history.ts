@@ -201,7 +201,8 @@ function srcKey(src: Location | null | undefined): string | null {
   try { return locationKey(src) ?? JSON.stringify(src); } catch { return null; }
 }
 
-interface Episode { key: string | null; lastCmd: number; records: EpisodeRecord[] }
+/** records: 대화 기록과 그 사이 화면 기록(1.10.0) */
+interface Episode { key: string | null; lastCmd: number; records: (EpisodeRecord | RecordOf<"screen">)[] }
 
 /** 전투 묶음을 끊는 기록(전투 끝 기록이 없을 때): 갈래 시작·장소 이동·불러오기·다음 전투 시작 */
 const BATTLE_STOP = new Set(["branchStart", "transfer", "load", "save"]);
@@ -336,7 +337,12 @@ function fold(
       i = j - 1;
       continue;
     }
-    if (EPISODE_TYPES.has(r.type)) {
+    if (r.type === "screen") {
+      // 1.10.0 화면 기록은 접기에 영향이 없다: 진행 중인 대화 안이면 그 대화와 함께(반복으로 접히면 함께 접힌다),
+      // 아니면 그 자리에 넣되 대화·상태 변경 묶음의 이어짐은 끊지 않는다
+      if (episode) episode.records.push(r);
+      else { flushGroup(); push({ kind: "record", record: r, uncertain: false, changed: false }); }
+    } else if (EPISODE_TYPES.has(r.type)) {
       const er = r as EpisodeRecord;
       flushGroup();
       const key = srcKey(er.src);

@@ -93,7 +93,7 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
     case "message": return <MessageLine r={r} ctx={ctx} uncertain={uncertain} changed={changed} />;
     case "scroll":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><div className="whitespace-pre-line text-muted-foreground">{formatText(r.text, ctx.data)}</div></Line>;
-    case "choices": case "error": return null;
+    case "choices": case "error": case "screen": return null;
     case "choice":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
     // 파일 이름 없는 그림 표시는 화면에 보이는 것이 없다(앞의 D_TEXT 플러그인 줄이 글을 보여 준다)

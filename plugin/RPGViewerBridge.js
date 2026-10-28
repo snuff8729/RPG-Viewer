@@ -18,6 +18,8 @@
  * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사 글자가 그려지기
  * 시작할 때 화면에 실제로 보이는 그림(스탠딩 이미지 등)의 이름·위치·크기도
  * 기록합니다(숨겨졌거나 투명한 그림은 빼고). 전투 화면의 그림도 같습니다.
+ * 다른 플러그인이 그림 폴더(img/pictures)의 이미지를 직접 띄우는 것(전투 컷인 등)도
+ * 화면 위치 그대로 기록하고, 대사 사이에 잠깐 나타난 그림은 따로 남깁니다(초당 최대 8번).
  * 전투는 시작(적 무리 이름)·전투 로그 글(공격·피해·상태·승리·경험치 등)·
  * 결과(승리/패배/도주/중단, 보상)를 기록합니다. 전투 한 번에 최대 2000줄,
  * 초당 50줄까지만 남깁니다(배속 중에도 전투를 느리게 하지 않음).
@@ -38,7 +40,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.9.0",
+    VERSION: "1.10.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -126,6 +128,7 @@
   // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
   var capturePictures = false;
   var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
+  var lastPicsNames = null;   // names of that snapshot (1.10.0 screen watch: images appearing / disappearing)
   var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
   // 1.7.0: a message record waits in the buffer (unserialized) until its text starts drawing, then takes the
   // snapshot of what is actually on screen; flushes write only up to it (at most PICS_HOLD_MS, then snapshot now).
@@ -456,7 +459,7 @@
     run = newRun;
     branch = meta.nextBranch++;
     lastChoices = null;
-    lastPicsKey = null;
+    lastPicsKey = null; lastPicsNames = null;
     battleLog = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
@@ -472,7 +475,7 @@
     run = r;
     branch = b;
     lastChoices = null;
-    lastPicsKey = null;
+    lastPicsKey = null; lastPicsNames = null;
     battleLog = null;
     deferredNewGame = false;
   }
@@ -709,7 +712,7 @@
     if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
     if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
     var cap = c.capturePictures === true;
-    if (cap !== capturePictures) lastPicsKey = null; // turned on again: the next snapshot is written in full
+    if (cap !== capturePictures) { lastPicsKey = null; lastPicsNames = null; } // turned on again: the next snapshot is written in full
     capturePictures = cap;
     captureNotices = c.captureNotices === true;
     noticeExtra = noticePaths(c.noticeHooks);
@@ -917,6 +920,7 @@
   bridge._tick = tick;
   bridge._runScheduled = runScheduled;
   bridge._frame = function () { return frameStart(G.SceneManager); };
+  bridge._scanVisited = function () { return lastScanVisited; };
 
   // ---------------------------------------------------------------- engine helpers
   function pageIndexOf(pages, list) {
@@ -1049,27 +1053,113 @@
   }
 
   // Picture sprites of the current scene: the spriteset's _pictureContainer first, then any moved elsewhere.
-  function pictureSprites(sc) {
+  // 1.10.0: the same walk collects every other sprite showing an img/pictures bitmap (plugins drawing cut-ins with
+  // plain Sprites), its world transform and alpha accumulated down the tree. Bounded: depth 8, PICS_TREE_MAX nodes;
+  // a tilemap and sprites showing other img folders (characters, battlers, system...) are not entered.
+  // Returns { pictures: [Sprite_Picture], sprites: [{ s, name, m, alpha }], pending: picture bitmaps still loading }.
+  var SPRITE_ID_BASE = 1000, lastScanVisited = 0;
+  var IDENTITY = [1, 0, 0, 1, 0, 0];
+  function numOr(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
+  function localMatrix(n) {
+    var s = n.scale || {}, pv = n.pivot || {};
+    var sx = numOr(s.x, 1), sy = numOr(s.y, 1), r = numOr(n.rotation, 0);
+    var cos = r ? Math.cos(r) : 1, sin = r ? Math.sin(r) : 0;
+    var a = cos * sx, b = sin * sx, c = -sin * sy, d = cos * sy;
+    var px = numOr(pv.x, 0), py = numOr(pv.y, 0);
+    return [a, b, c, d, numOr(n.x, 0) - (px * a + py * c), numOr(n.y, 0) - (px * b + py * d)];
+  }
+  function mulMatrix(p, l) {
+    return [p[0] * l[0] + p[2] * l[1], p[1] * l[0] + p[3] * l[1], p[0] * l[2] + p[2] * l[3], p[1] * l[2] + p[3] * l[3],
+      p[0] * l[4] + p[2] * l[5] + p[4], p[1] * l[4] + p[3] * l[5] + p[5]];
+  }
+  function ownAlpha(n) { return n.visible === false ? 0 : numOr(n.alpha, 1); }
+  function worldOf(node, sc) {
+    var chain = [], n = node, k = 0;
+    while (n && n !== sc && k++ < 50) { chain.push(n); n = n.parent; }
+    var m = IDENTITY, a = 1;
+    for (var i = chain.length - 1; i >= 0; i--) { m = mulMatrix(m, localMatrix(chain[i])); a *= ownAlpha(chain[i]); }
+    return { m: m, alpha: n === sc ? a : 0 };
+  }
+  function bitmapUrl(b) {
+    if (!b || typeof b !== "object") return null;
+    if (typeof b._url === "string") return b._url;
+    try { if (typeof b.url === "string") return b.url; } catch (e) { /* no url */ }
+    return null;
+  }
+  // "img/pictures/organ/a%20b.png" -> "organ/a b" (any extension, e.g. .rpgmvp / .png_); null when not a picture
+  function pictureNameOfUrl(u) {
+    var s = String(u).replace(/\\/g, "/");
+    var i = s.indexOf("img/pictures/");
+    if (i < 0) return null;
+    s = s.slice(i + 13);
+    var q = s.search(/[?#]/);
+    if (q >= 0) s = s.slice(0, q);
+    s = s.replace(/\.[A-Za-z0-9_]{1,8}$/, "");
+    try { s = decodeURIComponent(s); } catch (e) { /* keep as is */ }
+    return s === "" ? null : s;
+  }
+  function scanScene(sc) {
     if (!sc || !sc._spriteset) return null;
-    var SP = G.Sprite_Picture;
-    var out = [], visited = 0;
-    var walk = function (node, depth) {
+    var SP = G.Sprite_Picture, TM = G.Tilemap;
+    var res = { pictures: [], sprites: [], pending: 0 };
+    var visited = 0;
+    var container = sc._spriteset._pictureContainer || null;
+    var walk = function (node, depth, m, alpha, skip) {
       var ch = node && node.children;
       if (!ch || typeof ch.length !== "number" || depth > 8) return;
       for (var i = 0; i < ch.length && visited < PICS_TREE_MAX; i++) {
         var c = ch[i];
         visited++;
-        if (!c || typeof c !== "object") continue;
+        if (!c || typeof c !== "object" || c === skip) continue;
         if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
-          if (out.indexOf(c) < 0) out.push(c);
-        } else {
-          walk(c, depth + 1);
+          res.pictures.push(c);
+          continue;
         }
+        if (typeof TM === "function" && c instanceof TM) continue;
+        var cm = mulMatrix(m, localMatrix(c));
+        var ca = alpha * ownAlpha(c);
+        var url = bitmapUrl(c.bitmap);
+        if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
+          var name = pictureNameOfUrl(url);
+          if (name === null) continue; // another img folder: what it carries is effects / icons
+          var b = c.bitmap;
+          if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
+            var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
+            if (ready) res.sprites.push({ s: c, name: name, m: cm, alpha: ca });
+            else res.pending++;
+          }
+        }
+        walk(c, depth + 1, cm, ca, skip);
       }
     };
-    if (sc._spriteset._pictureContainer) walk(sc._spriteset._pictureContainer, 0);
-    walk(sc, 0);
-    return out.length ? out : null;
+    if (container) {
+      var w = worldOf(container, sc);
+      walk(container, 0, w.m, w.alpha, null);
+    }
+    walk(sc, 0, IDENTITY, 1, container);
+    lastScanVisited = visited;
+    return res;
+  }
+
+  // Entry of a plain sprite (1.10.0): world position / scale / angle decomposed from its world matrix (no skew),
+  // drawn opacity, tone, bitmap size; marked "sprite" (index 13). id is set by the caller.
+  function plainEntry(it) {
+    var s = it.s, m = it.m, b = s.bitmap;
+    var op = picNum(it.alpha * 255, 0);
+    var sxw = Math.sqrt(m[0] * m[0] + m[1] * m[1]);
+    if (!(op > 0) || !(sxw > 0)) return null;
+    var syw = (m[0] * m[3] - m[1] * m[2]) / sxw;
+    if (!syw) return null;
+    var an = s.anchor || {};
+    var ax = picNum(an.x, 0), ay = picNum(an.y, 0);
+    var origin = ax === 0 && ay === 0 ? 0 : (ax === 0.5 && ay === 0.5 ? 1 : [ax, ay]);
+    var tone = toneOf(s._colorTone);
+    if (!tone && typeof s.getColorTone === "function") {
+      try { tone = toneOf(s.getColorTone()); } catch (et) { tone = null; }
+    }
+    return [0, picName(it.name), origin, picNum(m[4], 0), picNum(m[5], 0), picNum(sxw * 100, 100), picNum(syw * 100, 100), op,
+      typeof s.blendMode === "number" ? s.blendMode : 0, tone || 0, picNum(Math.atan2(m[1], m[0]) * 180 / Math.PI, 0),
+      picNum(b.width, 0), picNum(b.height, 0), "sprite"];
   }
 
   // The opacity a sprite is drawn with (own opacity times every parent's alpha); 0 when it or a parent is
@@ -1121,18 +1211,30 @@
     return toneOf(typeof p._toneDuration === "number" && p._toneDuration > 0 && p._toneTarget ? p._toneTarget : p._tone);
   }
   function picturesNow() {
+    var s = screenNow();
+    return s ? s.pics : null;
+  }
+  // { pics, pending } of what is drawn now (pending: picture bitmaps of plain sprites still loading); null = no screen.
+  // Picture sprites first (by picture id), then plain sprites in drawing order with ids SPRITE_ID_BASE + n.
+  function screenNow() {
     var sc = G.SceneManager && G.SceneManager._scene;
-    var sprites = pictureSprites(sc);
-    if (sprites) {
+    var res = scanScene(sc);
+    if (res && (res.pictures.length || res.sprites.length || res.pending)) {
       var out = [], ids = {};
-      for (var i = 0; i < sprites.length; i++) {
-        var e = spriteEntry(sprites[i], sc);
+      for (var i = 0; i < res.pictures.length; i++) {
+        var e = spriteEntry(res.pictures[i], sc);
         if (e && ids[e[0]] !== true) { ids[e[0]] = true; out.push(e); }
       }
       out.sort(function (a, b) { return a[0] - b[0]; });
-      return out.length > PICS_MAX ? out.slice(0, PICS_MAX) : out;
+      var n = 0;
+      for (var j = 0; j < res.sprites.length; j++) {
+        var pe = plainEntry(res.sprites[j]);
+        if (pe) { pe[0] = SPRITE_ID_BASE + n++; out.push(pe); }
+      }
+      return { pics: out.length > PICS_MAX ? out.slice(0, PICS_MAX) : out, pending: res.pending };
     }
-    return gamePictures();
+    var g = gamePictures();
+    return g === null ? null : { pics: g, pending: 0 };
   }
   function gamePictures() {
     var s = G.$gameScreen;
@@ -1164,7 +1266,84 @@
     var key = JSON.stringify(pics);
     if (key === lastPicsKey) return { picsSame: true };
     lastPicsKey = key;
+    lastPicsNames = picsNames(pics);
     return { pics: pics };
+  }
+  function picsNames(pics) {
+    var out = [];
+    for (var i = 0; i < pics.length; i++) out.push(pics[i][1]);
+    return out.join("\n");
+  }
+
+  // ---------------------------------------------------------------- screen snapshots between records (1.10.0)
+  // Images other plugins show briefly (battle cut-ins) appear and vanish between messages. Event-driven: picture
+  // loads (ImageManager.loadPicture & co, and when their bitmap becomes ready), plugin commands, battle actions /
+  // log lines, picture commands and message starts mark the screen dirty; after the next scene update the drawn
+  // pictures are read and, when they differ from the last snapshot written, recorded as { type: "screen", scene, pics }.
+  // For SCREEN_WATCH_MS after a dirty frame the screen is re-read every SCREEN_WATCH_GAP_MS and recorded when images
+  // appear / disappear (names). A slow poll (SCREEN_POLL_MS) records anything else once it stayed the same for two
+  // checks. Never while a message waits for its own snapshot; at most SCREEN_RATE_MAX per second.
+  var SCREEN_RATE_MAX = 8, SCREEN_RATE_MS = 1000, SCREEN_WATCH_MS = 600, SCREEN_WATCH_GAP_MS = 100, SCREEN_POLL_MS = 1000;
+  var screenDirty = false;
+  var screenWatch = { until: -Infinity, lastT: -Infinity, pollT: -Infinity, pollSig: null, pollN: 0, times: [] };
+  function markScreenDirty() { if (capturePictures) screenDirty = true; }
+  function watchBitmap(b) {
+    if (!capturePictures) return;
+    screenDirty = true;
+    try {
+      if (b && typeof b.addLoadListener === "function" && typeof b.isReady === "function" && !b.isReady()) {
+        b.addLoadListener(function () { screenDirty = true; });
+      }
+    } catch (e) { reportError(e); }
+  }
+  function pollKey(snap) {
+    var parts = [];
+    for (var i = 0; i < snap.pics.length; i++) {
+      var e = snap.pics[i];
+      parts.push(e[1] + "|" + Math.round(e[3] / 8) + "|" + Math.round(e[4] / 8) + "|" + Math.floor(e[7] / 32));
+    }
+    return parts.join("\n") + "#" + snap.pending;
+  }
+  // true when nothing is left to do (written, or nothing new); false = try again on a later frame
+  function writeScreen(snap, t) {
+    if (heldMsg) return false;
+    var key = JSON.stringify(snap.pics);
+    if (key === lastPicsKey) return true;
+    if (lastPicsKey === null && snap.pics.length === 0) return true; // nothing on screen, nothing known yet
+    var times = screenWatch.times;
+    while (times.length && t - times[0] >= SCREEN_RATE_MS) times.shift();
+    if (times.length >= SCREEN_RATE_MAX) return false;
+    times.push(t);
+    lastPicsKey = key;
+    lastPicsNames = picsNames(snap.pics);
+    emit("screen", { scene: inBattleNow() ? "battle" : "map", pics: snap.pics });
+    return true;
+  }
+  // After each real frame's scene update (what is about to be rendered).
+  function screenFrame() {
+    if (!capturePictures || run === null) { screenDirty = false; return; }
+    var t = now();
+    var dirty = screenDirty;
+    var watching = t < screenWatch.until && t - screenWatch.lastT >= SCREEN_WATCH_GAP_MS;
+    var polling = t - screenWatch.pollT >= SCREEN_POLL_MS;
+    if (!dirty && !watching && !polling) return;
+    var sc = G.SceneManager && G.SceneManager._scene;
+    var snap = sc && sc._spriteset ? screenNow() : null;
+    if (!snap) { screenDirty = false; return; }
+    screenWatch.lastT = t;
+    if (dirty) {
+      screenWatch.until = t + SCREEN_WATCH_MS;
+      // still loading: its load listener marks the screen dirty again
+      if (snap.pending > 0 || writeScreen(snap, t)) screenDirty = false;
+    } else if (watching && snap.pending === 0 && picsNames(snap.pics) !== lastPicsNames) {
+      writeScreen(snap, t);
+    }
+    if (polling) {
+      screenWatch.pollT = t;
+      var pk = pollKey(snap);
+      if (pk !== screenWatch.pollSig) { screenWatch.pollSig = pk; screenWatch.pollN = 1; }
+      else if (++screenWatch.pollN === 2 && !dirty) writeScreen(snap, t);
+    }
   }
 
   // ---------------------------------------------------------------- battle log (1.8.0)
@@ -1678,7 +1857,9 @@
       hook(GI, "Game_Interpreter", "command" + code, function (orig) {
         return function () {
           try { notePlugin(this, code); } catch (e) { reportError(e); }
-          return orig.apply(this, arguments);
+          var r = orig.apply(this, arguments);
+          markScreenDirty();
+          return r;
         };
       });
     }
@@ -1793,12 +1974,42 @@
           // the action line displayAction queued was already written with who used it (until the next action)
           if (skip != null && skip === (text == null ? "" : String(text))) this._rpgvSkip = null;
           else if (battleLog && inBattleNow()) battleLine(text);
+          markScreenDirty();
         } catch (e) { reportError(e); }
         return orig.apply(this, arguments);
       };
     });
     try { ensureActionHook(); } catch (eh) { reportError(eh); }
     try { ensureNoticeHooks(); } catch (en) { reportError(en); }
+
+    // 1.10.0 screen watch: every image of the picture folder passes through these
+    var IM = G.ImageManager;
+    var pictureLoads = ["loadPicture", "reservePicture", "requestPicture"];
+    for (var pl = 0; pl < pictureLoads.length; pl++) {
+      hook(IM, "ImageManager", pictureLoads[pl], function (orig) {
+        return function () {
+          var b = orig.apply(this, arguments);
+          try { watchBitmap(b); } catch (e) { reportError(e); }
+          return b;
+        };
+      });
+    }
+    var dirtyAfter = function (owner, ownerName, name) {
+      hook(owner, ownerName, name, function (orig) {
+        return function () {
+          var r = orig.apply(this, arguments);
+          markScreenDirty();
+          return r;
+        };
+      });
+    };
+    var GSc = G.Game_Screen && G.Game_Screen.prototype;
+    dirtyAfter(GSc, "Game_Screen", "showPicture");
+    dirtyAfter(GSc, "Game_Screen", "movePicture");
+    dirtyAfter(GSc, "Game_Screen", "erasePicture");
+    dirtyAfter(BM, "BattleManager", "startAction");
+    dirtyAfter(BM, "BattleManager", "invokeAction");
+    dirtyAfter(BM, "BattleManager", "endAction");
 
     try { installAssist(); } catch (ea) { reportError(ea); } // the log hooks below must still install
 
@@ -1938,6 +2149,7 @@
           var n = frameStart(this);
           var r = orig.apply(this, arguments);
           if (n > 1) extraUpdates(this, orig, arguments, n);
+          try { screenFrame(); } catch (es) { reportError(es); }
           return r;
         } finally {
           inFrame = false;
@@ -1957,6 +2169,7 @@
       return function () {
         var key = pendingMsgKey;
         pendingMsgKey = null;
+        markScreenDirty();
         try {
           if (!messageHasText()) key = null;
           this._rpgvWait = 0;

@@ -46,6 +46,11 @@ export type LogRecord = RecordBase & (
    * text = 게임이 \n[]·\v[] 등을 풀어 쓴 글(\c[]·\i[] 등은 그대로), raw = 원문
    */
   | { type: "notice"; source: string; text: string; raw?: string }
+  /**
+   * 1.10.0+, 화면 그림 따라 그리기가 켜진 게임만: 기록 사이에 화면 그림이 바뀌었을 때(다른 플러그인이 잠깐 띄운 컷인 등)
+   * 그때 화면 그림 전체. 이야기 기록이 아니고 반복 대화·전투 묶음·갈래 판정에 영향을 주지 않는다. scene = 맵/전투 화면.
+   */
+  | { type: "screen"; scene?: "battle" | "map"; pics?: unknown[] }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
   | { type: "save"; slot: number }
   | { type: "load"; slot: number }

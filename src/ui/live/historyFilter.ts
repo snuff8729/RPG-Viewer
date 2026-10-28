@@ -36,10 +36,12 @@ export function filterItems(
   for (const it of items) {
     if (hidePlugin && it.kind === "record" && it.record.type === "plugin" && hidePlugin(it.record)) continue;
     if (hideNotices && it.kind === "record" && it.record.type === "notice") continue;
+    // 기록 사이 화면 그림(1.10.0)은 읽기에서만 그린다
+    if (it.kind === "record" && it.record.type === "screen") continue;
     const k = itemKind(it);
     if (k !== null && !enabled.has(k)) continue;
     // 전투 묶음 안은 숨길 플러그인 명령·알림 문구만 거른다(묶음이 보이면 그 안의 대사·상태 변경은 그대로 보인다)
-    if (it.kind === "battle" && (hidePlugin || hideNotices)) {
+    if (it.kind === "battle") {
       const inner = filterItems(it.items, new Set(ALL_KINDS), hidePlugin, hideNotices);
       if (inner.length === it.items.length) { out.push(it); continue; }
       const notices = hideNotices ? it.items.filter(x => x.kind === "record" && x.record.type === "notice").length : 0;

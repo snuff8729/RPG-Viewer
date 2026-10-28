@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useAddons } from "@/app/AddonsProvider";
 import { useLive } from "@/app/LiveProvider";
-import { groupById, isPictureRole, seenPictures, type PictureRole } from "@/core/addons/screenPictures";
+import { groupById, isPictureRole, seenPictures, seenSprites, type PictureRole } from "@/core/addons/screenPictures";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -37,11 +37,12 @@ function RoleSelect({ id, value, auto, onChange, label }: {
  */
 export function PictureRolesSection() {
   const { records } = useLive();
-  const { pictureRoles, setPictureRole } = useAddons();
+  const { pictureRoles, setPictureRole, spriteRoles, setSpriteRole } = useAddons();
   const ctx = usePictureContext(records, true);
   const seen = useMemo(() => (ctx ? seenPictures(records, ctx) : []), [records, ctx]);
+  const sprites = useMemo(() => (ctx ? seenSprites(records, ctx) : []), [records, ctx]);
   const groups = useMemo(() => groupById(seen), [seen]);
-  if (groups.length === 0) {
+  if (groups.length === 0 && sprites.length === 0) {
     return <p className="text-sm text-muted-foreground">아직 기록된 그림이 없어요. 게임에서 대사가 나오면 여기에 그림 번호가 보여요.</p>;
   }
   return (
@@ -95,6 +96,27 @@ export function PictureRolesSection() {
           </div>
         );
       })}
+      {sprites.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Separator />
+          <div>
+            <p className="text-sm font-medium">플러그인이 띄운 그림</p>
+            <p className="text-sm text-muted-foreground">전투 컷인처럼 그림 번호 없이 나온 그림이에요. 이름으로 구분해요.</p>
+          </div>
+          {sprites.map((s, i) => (
+            <div key={s.key} className="flex items-center justify-between gap-2 pl-2">
+              <Label htmlFor={`pic-sprite-${i}`} className="min-w-0 flex-col items-start gap-0 font-normal">
+                <span className="truncate" title={s.key}>{s.key}</span>
+                <span className="truncate text-xs text-muted-foreground" title={s.names.join(", ")}>{s.names.join(", ")}</span>
+              </Label>
+              <RoleSelect
+                id={`pic-sprite-${i}`} value={spriteRoles[s.key] ?? "auto"} auto={ROLE_LABEL[s.auto]} label={`그림 ${s.key}`}
+                onChange={(r) => setSpriteRole([s.key], r)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
