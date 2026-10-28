@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "scripts/launcher.ts"]
+  "include": ["vite.config.ts", "scripts/launcher.ts", "scripts/backups.ts", "scripts/gameProcess.ts"]
 }

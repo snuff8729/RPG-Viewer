@@ -55,6 +55,15 @@ export function loadGamePath(gameKey: string): string | null {
   }
 }
 
+const pathListeners = new Set<() => void>();
+
+/** 게임 폴더 경로가 바뀌면 알림(실행·백업 버튼이 같은 경로를 쓴다). */
+export function onGamePathChanged(cb: () => void): () => void {
+  pathListeners.add(cb);
+  return () => { pathListeners.delete(cb); };
+}
+
 export function saveGamePath(gameKey: string, path: string): void {
   try { localStorage.setItem(gamePathKey(gameKey), path); } catch { /* 저장 못 해도 이번 실행은 된다 */ }
+  for (const cb of [...pathListeners]) cb();
 }
