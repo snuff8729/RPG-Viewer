@@ -143,6 +143,15 @@ export class ServerFolder implements WritableGameFolder {
     return this.bytes("read", { path });
   }
 
+  /** 없으면(404·잘못된 경로 400) null. 네트워크 오류·그 밖의 상태(500 등)는 throw. */
+  async readBinaryStrict(path: string): Promise<ArrayBuffer | null> {
+    const r = await this.call("read", { path });
+    if (!r) throw new Error(NETWORK_ERROR);
+    if (r.status === 404 || r.status === 400) return null;
+    if (r.status !== 200) throw new Error(`read failed: ${r.status}`);
+    return await r.arrayBuffer();
+  }
+
   readRange(path: string, start: number, end: number): Promise<ArrayBuffer | null> {
     return this.bytes("range", { path, start, end });
   }

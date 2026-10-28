@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FaceImage } from "../script/FaceImage";
-import { useAssetUrl } from "../script/useAssetUrl";
+import { AssetPlaceholder } from "../script/AssetPlaceholder";
+import { useAsset } from "../script/useAssetUrl";
 import { PluginLine } from "./PluginLine";
 import { usePluginShowAll } from "./pluginDisplay";
 
@@ -21,10 +22,10 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
 }
 
 function Picture({ name }: { name: string }) {
-  const url = useAssetUrl("pictures", name);
-  if (url === undefined) return <Skeleton className="h-40 w-full" />;
-  if (!url) return <p className="text-center text-sm text-muted-foreground">{name}</p>;
-  return <img src={url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
+  const a = useAsset("pictures", name);
+  if (a.status === "loading") return <Skeleton className="h-40 w-full" />;
+  if (a.status !== "ok") return <AssetPlaceholder view={a} name={name} className="mx-auto w-fit max-w-full" />;
+  return <img src={a.url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
 }
 
 /** 플러그인 명령 줄. 기술 명령은 `플러그인 명령 모두 보기`를 켰을 때만. */
