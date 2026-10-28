@@ -91,7 +91,10 @@ describe("stateChange descriptions", () => {
     expect(one(cmd(122, 0, [1, 1, 4, 0, 5])).description).toBe("변수 호감도 /= 5");
     expect(one(cmd(122, 0, [1, 1, 5, 0, 5])).description).toBe("변수 호감도 %= 5");
     expect(one(cmd(122, 0, [1, 1, 0, 1, 1]))).toMatchObject({ description: "변수 호감도 = [변수: 호감도]",
-      refs: [{ type: "variable", id: 1 }, { type: "variable", id: 1 }] });
+      refs: [{ type: "variable", id: 1 }] });
+    expect(one(cmd(122, 0, [1, 1, 0, 1, 1])).refs).toEqual([{ type: "variable", id: 1 }]);
+    // operand variable is a read, not a write: refs hold only the target
+    expect(one(cmd(122, 0, [2, 2, 0, 1, 1])).refs).toEqual([{ type: "variable", id: 2 }]);
     expect(one(cmd(122, 0, [1, 1, 0, 2, 1, 6])).description).toBe("변수 호감도 = 랜덤 1~6");
     expect(one(cmd(122, 0, [1, 1, 0, 3, 0, 0, 0])).description).toBe("변수 호감도 = (게임 데이터)");
     expect(one(cmd(122, 0, [1, 1, 0, 4, "1+1"])).description).toBe("변수 호감도 = (스크립트)");
@@ -101,12 +104,17 @@ describe("stateChange descriptions", () => {
   it("gold", () => {
     expect(one(cmd(125, 0, [0, 0, 100]))).toMatchObject({ target: "gold", description: "소지금 +100G", refs: [] });
     expect(one(cmd(125, 0, [1, 0, 100])).description).toBe("소지금 -100G");
-    expect(one(cmd(125, 0, [0, 1, 1]))).toMatchObject({ description: "소지금 +[변수: 호감도]G", refs: [{ type: "variable", id: 1 }] });
+    expect(one(cmd(125, 0, [0, 1, 1])).description).toBe("소지금 +[변수: 호감도]G");
+    expect(one(cmd(125, 0, [0, 1, 1])).refs).toEqual([]);
+    const gil = { ...data, system: { ...data.system, currencyUnit: "Gil" } };
+    expect((interpret([cmd(125, 0, [0, 0, 5])], gil)[0] as any).description).toBe("소지금 +5Gil");
+    const none = { ...data, system: { ...data.system, currencyUnit: "" } };
+    expect((interpret([cmd(125, 0, [0, 0, 5])], none)[0] as any).description).toBe("소지금 +5G");
   });
   it("items/weapons/armors", () => {
     expect(one(cmd(126, 0, [2, 0, 0, 1]))).toMatchObject({ target: "item", description: "아이템 은 반지 +1", refs: [{ type: "item", id: 2 }] });
-    expect(one(cmd(126, 0, [2, 0, 1, 1]))).toMatchObject({ description: "아이템 은 반지 +[변수: 호감도]",
-      refs: [{ type: "item", id: 2 }, { type: "variable", id: 1 }] });
+    expect(one(cmd(126, 0, [2, 0, 1, 1])).description).toBe("아이템 은 반지 +[변수: 호감도]");
+    expect(one(cmd(126, 0, [2, 0, 1, 1])).refs).toEqual([{ type: "item", id: 2 }]);
     expect(one(cmd(127, 0, [1, 1, 0, 1, false]))).toMatchObject({ target: "weapon", refs: [{ type: "weapon", id: 1 }] });
     expect(one(cmd(127, 0, [1, 1, 0, 1, false])).description).toMatch(/^무기 .+ -1$/);
     expect(one(cmd(128, 0, [1, 0, 0, 1, false])).description).toMatch(/^방어구 .+ \+1$/);
