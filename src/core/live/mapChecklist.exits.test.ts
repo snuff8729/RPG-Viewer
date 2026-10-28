@@ -24,7 +24,7 @@ const page = (list: EventCommand[], o: Omit<Partial<EventPage>, "image"> & { sw?
   };
 };
 const ev = (id: number, name: string, pages: EventPage[], o: Partial<MapEvent> = {}): MapEvent => ({ id, name, x: id, y: 1, pages, ...o });
-const transfer = (mapId: number) => c(201, [0, mapId, 3, 4, 2, 0]);
+const transfer = (mapId: number, indent = 0) => c(201, [0, mapId, 3, 4, 2, 0], indent);
 
 const house: MapData = {
   displayName: "", width: 16, height: 10,
@@ -49,8 +49,16 @@ const house: MapData = {
     ev(10, "숨은 것", [page(msg("숨은 말"), { image: null })]),                           // 스크립트 event(10)로 불림
     ev(11, "연출", [page([c(355, ["$gameMap.event(10).start();"])], { trigger: 3, image: null })]),
     ev(12, "갇힌 사람", [page(msg("여기서 못 나가"))], { x: 8, y: 8 }),
-    ev(13, "새 출구", [page([...msg("나가자"), transfer(2)], { trigger: 1, image: null })]),
+    // 대사·선택지 뒤에 이동하는 책: 출구가 아니라 다음에 할 이야기
+    ev(13, "回忆书", [page([
+      ...msg("오래된 책이다"), c(102, [["읽는다", "그만둔다"], 1, 0, 2, 0]), c(402, [0, "읽는다"]), transfer(2, 1), c(0, [], 1),
+      c(402, [1, "그만둔다"]), c(0, [], 1), c(404),
+    ], { image: img("!_clutter") })]),
     ev(14, "잡동사니", [page([...msg("시스템"), c(117, [10])])]),                          // 많이 불리는 공통 이벤트 안의 이동은 무시
+    // TemplateEvent로 부른 원래 페이지에 대사가 있으면 출구가 아니다
+    ev(15, "TE책", [page([c(356, ["TE固有イベント呼び出し"])], { image: img("!_clutter") })], {
+      originalPages: [page([...msg("책 속으로"), transfer(2)], { image: null })],
+    }),
   ],
 };
 const ce = (id: number, list: EventCommand[]): CommonEvent => ({ id, name: `CE${id}`, trigger: 0, switchId: 1, list: [...list, c(0)] });
@@ -119,13 +127,15 @@ describe("mapChecklist exits", () => {
     expect(find(m.events, 14).section).not.toBe("exit");
   });
 
-  it("an exit with unseen dialogue keeps its badge and counts", () => {
-    const door = find(m.events, 13);
-    expect(door).toMatchObject({ section: "exit", unseen: 1 });
-    const counted = m.remaining;
-    const seen = mapChecklist(data, index, coverage([at(13)]), live())!;
-    expect(find(seen.events, 13).section).toBe("exit");
-    expect(seen.remaining).toBe(counted - 1);
+  it("pages with dialogue or choices that transfer are not exits; describe says where it can take you", () => {
+    const book = find(m.events, 13);
+    expect(book).toMatchObject({ section: "now", unseen: 1, unpicked: 2 });
+    expect(book.exit).toBeUndefined();
+    expect(book.describe).toBe("물건 · 말 걸기·조사 · “오래된 책이다” · → 밖로 이동할 수 있음");
+    const teBook = find(m.events, 15);
+    expect(teBook.section).toBe("now");
+    expect(teBook.exit).toBeUndefined();
+    expect(teBook.describe).toContain("→ 밖로 이동할 수 있음");
   });
 });
 
@@ -182,7 +192,7 @@ describe("mapChecklist numbers", () => {
   it("fixed by map data in event id order; story events leave a gap", () => {
     const m = mapChecklist(data, index, coverage(), live())!;
     // 7·10(다른 이벤트가 부름)은 번호 7·10을 갖지만 안 보인다. 11은 자동 실행뿐이라 번호 없음
-    expect([...numbers(m)]).toEqual([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [8, 8], [9, 9], [12, 11], [13, 12], [14, 13]]);
+    expect([...numbers(m)]).toEqual([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [8, 8], [9, 9], [12, 11], [13, 12], [14, 13], [15, 14]]);
   });
   it("are identical with and without map tiles", () => {
     const without = numbers(mapChecklist(data, index, coverage(), live()));
@@ -193,7 +203,7 @@ describe("mapChecklist numbers", () => {
   });
   it("do not change when sections change", () => {
     const before = mapChecklist(data, index, coverage(), live())!;
-    const after = mapChecklist(data, index, coverage([at(5), at(6), at(13), at(4), at(14), at(12)]), live({ switches: [5] }))!;
+    const after = mapChecklist(data, index, coverage([at(5), at(6), at(4), at(14), at(12)]), live({ switches: [5] }))!;
     expect(find(before.events, 5).section).toBe("now");
     expect(find(after.events, 5).section).toBe("talk");
     expect(numbers(after)).toEqual(numbers(before));
