@@ -4,7 +4,7 @@ import { buildIndex } from "../index/buildIndex";
 import { loadGame } from "../loader/loadGame";
 import { interpret } from "../interpret/interpret";
 import type { Condition, EventCommand, GameData, ScriptNode } from "../types";
-import { remainingNodes } from "./remaining";
+import { firstMessage, remainingNodes, untilStop } from "./remaining";
 
 let ev1p0: ScriptNode[];
 let list: EventCommand[];
@@ -135,5 +135,29 @@ describe("remainingNodes with the raw command list (branch-aware)", () => {
       .toEqual(remainingNodes(ev1p0, 17));
     expect(() => remainingNodes(ev1p0, 17, [null, 5, "x"] as unknown as EventCommand[])).not.toThrow();
     expect(() => remainingNodes(ev1p0, 17, {} as unknown as EventCommand[])).not.toThrow();
+  });
+});
+
+describe("untilStop / firstMessage", () => {
+  it("stops before the first top-level choices", () => {
+    const r = untilStop(remainingNodes(ev1p0, 0));
+    expect(r.nodes.map(n => n.kind)).toEqual(["message", "message", "message", "picture", "message"]);
+    expect(r.stop?.kind).toBe("choices");
+  });
+  it("after a branch, stops before the transfer", () => {
+    const r = untilStop(remainingNodes(ev1p0, 14, list));
+    expect(r.stop?.kind).toBe("transfer");
+    expect(r.nodes.some(n => n.kind === "transfer" || n.kind === "choices")).toBe(false);
+  });
+  it("no stop → null", () => {
+    const r = untilStop([{ kind: "message", cmd: 1, lines: ["a"] } as ScriptNode]);
+    expect(r.stop).toBeNull();
+    expect(r.nodes).toHaveLength(1);
+  });
+  it("firstMessage finds the first message in document order", () => {
+    const ch = ev1p0.find(n => n.kind === "choices")!;
+    if (ch.kind !== "choices") throw new Error();
+    expect(firstMessage(ch.branches[0].body)).toMatchObject({ kind: "message", cmd: 12 });
+    expect(firstMessage([])).toBeNull();
   });
 });

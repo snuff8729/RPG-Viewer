@@ -253,3 +253,30 @@ export function remainingNodes(nodes: ScriptNode[], cmd: number, list?: EventCom
     return all;
   }
 }
+
+export type Stop = { kind: "choices"; node: ScriptNode } | { kind: "transfer"; node: ScriptNode };
+
+/** 최상위에서 첫 choices/transfer 직전까지. 멈춤 노드는 nodes에 포함하지 않는다. */
+export function untilStop(nodes: ScriptNode[]): { nodes: ScriptNode[]; stop: Stop | null } {
+  const out: ScriptNode[] = [];
+  for (const n of arr<ScriptNode | null>(nodes)) {
+    if (!isNode(n)) continue;
+    if (n.kind === "choices") return { nodes: out, stop: { kind: "choices", node: n } };
+    if (n.kind === "transfer") return { nodes: out, stop: { kind: "transfer", node: n } };
+    out.push(n);
+  }
+  return { nodes: out, stop: null };
+}
+
+/** 문서 순서상 첫 message(하위 블록 포함). */
+export function firstMessage(nodes: ScriptNode[]): ScriptNode | null {
+  for (const n of arr<ScriptNode | null>(nodes)) {
+    if (!isNode(n)) continue;
+    if (n.kind === "message") return n;
+    for (const b of childBlocks(n)) {
+      const m = firstMessage(b);
+      if (m) return m;
+    }
+  }
+  return null;
+}
