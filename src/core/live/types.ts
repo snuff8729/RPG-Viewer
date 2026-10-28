@@ -49,7 +49,7 @@ export interface HistoryModel {
   /** run 오름차순, branches는 대표 갈래만 생성 순(이어진 갈래는 빠진다) */
   runs: { run: number; branches: number[] }[];
   /**
-   * 이어진 갈래 → 대표 갈래. 불러오기로 시작했는데 부모 갈래(와 그 이어진 후손)에 저장 지점(fromSeq) 뒤
+   * 이어진 갈래 → 대표 갈래. 불러오기로 시작했는데 부모가 속한 대표 갈래 묶음 전체(대표 + 이어진 갈래들)에 저장 지점(fromSeq) 뒤
    * 이야기 기록(message·scroll·choices·choice·picture)이 없으면 그 갈래는 부모를 이어 간 것으로 보고
    * 같은 갈래로 보인다(사슬이면 맨 위 갈래). 갈래가 시작될 때 정하고 바꾸지 않는다.
    * 대표 갈래는 여기에 없다 — representative(model, id)를 쓸 것. branches의 parent·children은 원본 그대로.

@@ -195,6 +195,29 @@ describe("createAccumulator", () => {
     }
   });
 
+  it("a pick just before save → quit → continue gets its aftermath from the continuation", () => {
+    const fix = fixtureRecords();
+    const head = fix.filter(r => r.seq <= 9);   // ... 선택(seq 9)까지
+    const tail = fix.filter(r => r.seq === 10 || r.seq === 11).map((r, i) => ({ ...r, seq: 22 + i, branch: 2 }) as LogRecord);
+    const log: LogRecord[] = [
+      ...head,
+      { v: 1, seq: 20, t: 1_020_000, run: 1, branch: 1, type: "save", slot: 1 },
+      { v: 1, seq: 21, t: 1_021_000, run: 1, branch: 2, type: "branchStart", reason: "load", parentBranch: 1, fromSeq: 20 },
+      ...tail,
+    ];
+    expect(buildHistory(log).alias).toEqual(new Map([[2, 1]]));
+    const batch = computeCoverage(log, data);
+    expect(batch.picks.get("map:2:1:0#10")!.map(p => p.aftermath)).toEqual([['촌장: "고맙네!"', "스위치 숲 개방 → ON"]]);
+    const acc = createAccumulator(data);
+    for (const r of log) {
+      acc.append([r]);
+      expectSameAsBatch(acc);
+    }
+    const rev = createAccumulator(data);
+    rev.append(log.slice().reverse());
+    expectSameAsBatch(rev);
+  });
+
   it("aftermath of a pick in branch 2 fills as later records arrive", () => {
     const recs = fixtureRecords();
     const upTo = (s: number) => recs.filter(r => r.seq <= s);

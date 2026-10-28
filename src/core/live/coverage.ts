@@ -3,7 +3,8 @@ import { formatText } from "../text/escape";
 import { switchName } from "../text/names";
 import type { GameData, Location } from "../types";
 import { mismatchOf, pageList } from "./mismatch";
-import type { Coverage, LogRecord, PickInfo } from "./types";
+import { buildHistory, representative } from "./history";
+import type { Coverage, HistoryModel, LogRecord, PickInfo } from "./types";
 
 const AFTERMATH_MAX = 3;
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
@@ -86,28 +87,39 @@ export function coverRecord(
   return null;
 }
 
+/** 선택 뒤 결과를 모을 갈래 묶음: 대표 갈래(이어진 갈래는 이어 간 갈래와 같은 묶음). branch가 숫자가 아니면 그대로. */
+export function aftermathGroup(model: HistoryModel, branch: unknown): unknown {
+  return typeof branch === "number" ? representative(model, branch) : branch;
+}
+
 /**
  * 모든 회차·갈래에 걸친 진행도. 구조(명령 코드·얼굴·선택지 개수)가 맞으면 연결하고, 본문만 다르면 changedSeqs에도 넣는다.
  * 구조 불일치·위치 없음은 uncertainSeqs로 빼고 제외한다. 예외를 던지지 않는다.
+ * 선택 뒤 결과는 같은 대표 갈래 묶음의 이후 기록에서 모은다(저장 → 종료 → 이어하기 뒤 기록도 이어서 본다).
+ * model: 그 묶음을 정할 갈래 모델(buildHistory(records)와 같아야 한다). 없으면 records로 만든다.
  */
-export function computeCoverage(records: LogRecord[], data: GameData): Coverage {
+export function computeCoverage(records: LogRecord[], data: GameData, model?: HistoryModel): Coverage {
   const cov: Coverage = { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() };
   const recs = Array.isArray(records) ? records : [];
-  // 갈래별 기록 위치 목록(배열 순서)을 한 번 만들어, 선택 뒤 결과는 자기 갈래 기록만 본다.
-  const byBranch = new Map<unknown, number[]>();
-  const posInBranch: number[] = new Array<number>(recs.length);
+  const m = model ?? buildHistory(recs);
+  // 묶음별 기록 위치 목록(배열 순서)을 한 번 만들어, 선택 뒤 결과는 자기 묶음 기록만 본다.
+  const byGroup = new Map<unknown, number[]>();
+  const groupOf: unknown[] = new Array<unknown>(recs.length);
+  const posInGroup: number[] = new Array<number>(recs.length);
   for (let i = 0; i < recs.length; i++) {
     const r = recs[i];
     if (!isObj(r)) continue;
-    let l = byBranch.get(r.branch);
-    if (!l) { l = []; byBranch.set(r.branch, l); }
-    posInBranch[i] = l.length;
+    const g = aftermathGroup(m, r.branch);
+    let l = byGroup.get(g);
+    if (!l) { l = []; byGroup.set(g, l); }
+    groupOf[i] = g;
+    posInGroup[i] = l.length;
     l.push(i);
   }
   // `${branch}|${pickKey}` → 그 갈래에서 가장 최근 choices 기록의 옵션
   const lastOptions = new Map<string, unknown>();
   recs.forEach((r, i) => {
-    coverRecord(cov, r, data, lastOptions, () => aftermathOf(recs, byBranch.get(r.branch) ?? [], posInBranch[i], data));
+    coverRecord(cov, r, data, lastOptions, () => aftermathOf(recs, byGroup.get(groupOf[i]) ?? [], posInGroup[i], data));
   });
   return cov;
 }

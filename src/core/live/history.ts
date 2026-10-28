@@ -30,29 +30,15 @@ const STORY_TYPES = new Set(["message", "scroll", "choices", "choice", "picture"
 /**
  * buildHistory의 진행 상태. 증분 누적기와 공유한다.
  * runBranches: 회차별 대표 갈래(이어진 갈래 제외). alias: 이어진 갈래 → 대표 갈래.
- * storyMax: 갈래별 이야기 기록의 최대 seq. contChildren: 갈래 → 바로 이어진 자식 갈래들.
+ * storyMax: 대표 갈래 → 그 묶음(대표 + 이어진 갈래들)의 이야기 기록 최대 seq.
  */
 export interface HistoryState {
   branches: Map<number, BranchInfo>; runBranches: Map<number, number[]>; latestBranch: number | null;
-  alias: Map<number, number>; storyMax: Map<number, number>; contChildren: Map<number, number[]>;
+  alias: Map<number, number>; storyMax: Map<number, number>;
 }
 export const newHistoryState = (): HistoryState => ({
-  branches: new Map(), runBranches: new Map(), latestBranch: null, alias: new Map(), storyMax: new Map(), contChildren: new Map(),
+  branches: new Map(), runBranches: new Map(), latestBranch: null, alias: new Map(), storyMax: new Map(),
 });
-
-/** id와 그 이어진 후손들 중 이야기 기록의 최대 seq(없으면 -Infinity). */
-function subtreeStoryMax(st: HistoryState, id: number): number {
-  let max = -Infinity;
-  const stack = [id], seen = new Set<number>();
-  while (stack.length > 0) {
-    const cur = stack.pop()!;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
-    max = Math.max(max, st.storyMax.get(cur) ?? -Infinity);
-    for (const c of st.contChildren.get(cur) ?? []) stack.push(c);
-  }
-  return max;
-}
 
 /** 유효한 기록(isValidRecord) 하나를 seq 순으로 반영한다. run/branch 0 기록은 무시. */
 export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
@@ -73,13 +59,12 @@ export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
     const parent = b.parent !== null ? st.branches.get(b.parent) : undefined;
     if (parent && parent.id !== id && parent.run === run) {
       parent.children.push(id);
-      // 이어짐: 불러오기로 시작했고, 부모(와 그 이어진 후손)에 저장 지점(fromSeq) 뒤 이야기 기록이 없다.
+      // 이어짐: 불러오기로 시작했고, 부모가 속한 대표 갈래 묶음 전체(대표 + 이어진 갈래들, 형제 포함)에
+      // 저장 지점(fromSeq) 뒤 이야기 기록이 없다.
       // 갈래가 시작되는 순간에 한 번 정하고 바꾸지 않는다(seq 순 처리라 일괄·증분이 같다).
-      if (b.reason === "load" && b.fromSeq !== null && subtreeStoryMax(st, parent.id) <= b.fromSeq) {
-        st.alias.set(id, st.alias.get(parent.id) ?? parent.id);
-        const list = st.contChildren.get(parent.id) ?? [];
-        list.push(id);
-        st.contChildren.set(parent.id, list);
+      const rep = st.alias.get(parent.id) ?? parent.id;
+      if (b.reason === "load" && b.fromSeq !== null && (st.storyMax.get(rep) ?? -Infinity) <= b.fromSeq) {
+        st.alias.set(id, rep);
       }
     }
     if (!st.alias.has(id)) {
@@ -91,8 +76,9 @@ export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
     b.lastSeq = Math.max(b.lastSeq, r.seq);
     b.lastT = Math.max(b.lastT, t);
   }
-  if (STORY_TYPES.has(r.type)) st.storyMax.set(id, Math.max(st.storyMax.get(id) ?? -Infinity, r.seq));
-  st.latestBranch = st.alias.get(id) ?? id;
+  const rep = st.alias.get(id) ?? id;
+  if (STORY_TYPES.has(r.type)) st.storyMax.set(rep, Math.max(st.storyMax.get(rep) ?? -Infinity, r.seq));
+  st.latestBranch = rep;
 }
 
 /** 진행 상태에서 모델을 만든다(내부 Map·배열을 그대로 쓴다). */
@@ -130,8 +116,13 @@ export function branchLabel(model: HistoryModel, branchId: number): string {
   return `${b.run}회차 갈래 ${n > 0 ? n : id}`;
 }
 
-/** 이어진 갈래라 대표 갈래에 합쳐지는가 */
-const isContinuation = (model: HistoryModel, id: number) => model.alias?.has(id) ?? false;
+/**
+ * 이어진 갈래(저장 → 종료 → 이어하기)라 대표 갈래에 합쳐지는가. 화면은 이런 갈래의 시작을
+ * 새 갈래 시작이 아니라 `— 이어하기 —` 같은 구분으로 보이면 된다.
+ */
+export function isContinuation(model: HistoryModel, branchId: number): boolean {
+  return model?.alias?.has(branchId) ?? false;
+}
 
 /**
  * 대표 갈래의 이야기 전체, seq 순: 대표 갈래와 그 이어진 후손 갈래들의 기록 전부 +
