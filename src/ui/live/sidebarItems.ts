@@ -8,8 +8,9 @@ export type NowItem = ChecklistEvent & { location: Location };
 export function nowItems(checklist: MapChecklist | null, limit = 6): NowItem[] {
   if (!checklist) return [];
   const pick = (s: ChecklistEvent["section"]) =>
-    checklist.events.filter((e): e is NowItem => e.section === s && e.location !== null);
-  return [...pick("now"), ...pick("item"), ...pick("repeat")].slice(0, limit);
+    checklist.events.filter((e): e is NowItem => e.section === s && !e.story && e.location !== null);
+  const exits = pick("exit").filter((e) => e.unseen > 0 || e.unpicked > 0);
+  return [...pick("now"), ...pick("item"), ...pick("repeat"), ...exits].slice(0, limit);
 }
 
 /** 사이드바 "가 볼 만한 곳": 지금 갈 수 있는 못 본 것이 있는 다른 맵, 최대 limit개. */

@@ -981,7 +981,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.3.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.4.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1018,6 +1018,18 @@ describe("RPGViewerBridge", () => {
     h.clock.t += 1;
     h.bridge._tick(); // heartbeat
     expect(liveT()).toBe(1_003_000);
+  });
+
+  it("reports live event positions and direction, and rewrites live.json when an event moves", () => {
+    h = newGame();
+    const ev = h.addMapEvent(1, [[cmd(0)]]);
+    Object.assign(ev, { x: 5, y: 6, _direction: 4 });
+    h.bridge._snapshotNow();
+    expect(h.readLive().events).toEqual([{ eventId: 1, page: 0, x: 5, y: 6, d: 4 }]);
+    ev.x = 7; // only the NPC moves
+    h.clock.t += 1000;
+    h.bridge._tick();
+    expect(h.readLive().events).toEqual([{ eventId: 1, page: 0, x: 7, y: 6, d: 4 }]);
   });
 
   it("does not write live.json on the title screen and a title transfer starts no run", () => {
@@ -1602,13 +1614,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.3\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.4\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.3.0");
+    expect(h.bridge.VERSION).toBe("1.4.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

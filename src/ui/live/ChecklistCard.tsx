@@ -1,6 +1,6 @@
 import type { Ref } from "react";
 import { ChevronRight, MapPin } from "lucide-react";
-import type { ChecklistEvent, LockedPage } from "@/core/live/mapChecklist";
+import { hintBody, type ChecklistEvent, type LockedPage } from "@/core/live/mapChecklist";
 import { openPage } from "@/ui/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,7 @@ function Locked({ lp }: { lp: LockedPage }) {
 }
 
 export function ChecklistCard({ ev, number, highlighted, selected, route, onLocate, ref }: {
-  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 것·이야기 진행 조건은 없음 */ number?: number; highlighted: boolean;
+  ev: ChecklistEvent; /** 맵 번호(1부터, 고정). 이야기·자동 진행은 없음 */ number?: number; highlighted: boolean;
   /** 맵에서 고른 이벤트 */
   selected?: boolean;
   /** 고른 이벤트까지 가는 길 설명. null = 길을 못 찾음, undefined = 보여주지 않음 */
@@ -68,7 +68,9 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
   /** 조사·대화 가능 카드와 아직 안 해 본 조사 지점에 보이는 플러그인 명령 글 */
-  const hint = ev.section === "talk" || ev.untried ? ev.pluginHint : undefined;
+  // (이게 뭔지 줄에 이미 그 글이 나오면 다시 쓰지 않는다)
+  const hint = (ev.section === "talk" || ev.untried) && ev.pluginHint && !ev.describe.includes(hintBody(ev.pluginHint).slice(0, 20))
+    ? ev.pluginHint : undefined;
   return (
     <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, selected && "ring-1 ring-ring", highlighted && "ring-2 ring-ring")}>
       <CardHeader className="px-4">
@@ -76,6 +78,8 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           <st.Icon className={cn("size-4 shrink-0", st.text)} aria-hidden />
           <span>{number != null ? `${number}. ` : ""}{ev.title}</span>
           <Badge variant="outline" className={cn(st.text, st.border)}>{st.label}</Badge>
+          {ev.exit && <Badge variant="outline" className={cn(st.text, st.border)}>→ {ev.exit.mapName}</Badge>}
+          {ev.moves && <Badge variant="secondary">돌아다님</Badge>}
           {ev.untried && <Badge>아직 안 해 봄</Badge>}
           {ev.unseen > 0 && <Badge>새 대화 {ev.unseen}</Badge>}
           {ev.unpicked > 0 && <Badge>선택지 {ev.unpicked}</Badge>}
@@ -86,6 +90,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
         <CardDescription>
           {ev.name && ev.name !== ev.title ? `${ev.name} · ` : ""}({ev.x}, {ev.y})
         </CardDescription>
+        {ev.describe && <p className="text-sm">{ev.describe}</p>}
         {route !== undefined && (
           <p className={cn("text-sm font-medium", route === null && "text-muted-foreground")}>
             {route === null ? "갈 수 있는 길을 못 찾았어요" : `가는 길: ${route}`}
