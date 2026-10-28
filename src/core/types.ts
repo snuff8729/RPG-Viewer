@@ -25,7 +25,14 @@ export interface MapEvent {
   /** TemplateEvent로 페이지를 템플릿 것으로 바꾼 이벤트의 원래 페이지(`TE固有イベント呼び出し`가 실행한다). */
   originalPages?: EventPage[];
 }
-export interface MapData { displayName: string; width: number; height: number; events: (MapEvent | null)[] }
+export interface MapEncounter { troopId: number; weight: number; regionSet: number[] }
+export interface MapData {
+  displayName: string; width: number; height: number; events: (MapEvent | null)[];
+  /** 랜덤 인카운트(있을 때만) */
+  encounterList?: MapEncounter[];
+  /** 평균 걸음 수(랜덤 인카운트가 있을 때만) */
+  encounterStep?: number;
+}
 export interface MapInfo { id: number; name: string; parentId: number; order: number }
 export interface CommonEvent { id: number; name: string; trigger: number; switchId: number; list: EventCommand[] }
 export interface TroopPageConditions {

@@ -8,6 +8,7 @@ import type { MapTiles, TilesetInfo } from "../map/tiles";
 import { formatText } from "../text/escape";
 import { armorName, itemName, variableName, weaponName } from "../text/names";
 import type { EventCommand, GameData, GameIndex, Location, MapEvent, PageEntry } from "../types";
+import { describeEnemy, enemyOf, type EnemyInfo } from "./enemies";
 import { evaluate } from "./evaluate";
 import { seenKey } from "./coverage";
 import { activePageIndex, pageEntries, pageNewCounts } from "./interactable";
@@ -21,9 +22,10 @@ import type { Coverage, LiveSnapshot } from "./types";
  * 지금 할 수 있는 것으로 나눈다(잠긴 페이지가 있어도 지금 할 수 있으면 그쪽 구역).
  * now: 지금 상호작용 + 지금 볼 수 있는 안 본 대사·선택지(또는 아직 안 해 본 플러그인 조사 지점) / item: 지금 상호작용 + 얻는 것 / repeat: 반복하면 달라짐 /
  * talk: 그 밖에 지금 조사·대화 가능(다 봄, 다시 가능) / exit: 다른 곳으로 이동하는 이벤트(어느 페이지든 장소 이동) /
+ * enemy: 지금 페이지가 전투를 거는 적(안 본 대사가 있어도 이 구역) /
  * locked: 지금은 못 하고 새 내용이 잠김 / done: 나머지
  */
-export type Section = "now" | "item" | "repeat" | "exit" | "talk" | "locked" | "done";
+export type Section = "now" | "item" | "repeat" | "exit" | "enemy" | "talk" | "locked" | "done";
 /** 다른 맵으로 옮겨 주는 이벤트. mapName: 어디로(변수로 정하면 "다른 곳"), now: 지금 페이지가 옮겨 준다 */
 export interface ExitInfo { mapId: number | null; mapName: string; now: boolean }
 export interface LockedPage {
@@ -70,6 +72,8 @@ export interface ChecklistEvent {
   story: boolean;
   /** 다른 곳으로 옮겨 주는 이벤트(section "exit") */
   exit?: ExitInfo;
+  /** 전투를 거는 이벤트(어느 페이지든). now면 section "enemy" */
+  enemy?: EnemyInfo;
   /**
    * 직접 실행할 수 없는 이벤트: unreachable = 실행할 칸에 걸어서 못 감(맵 타일이 있을 때만 판단),
    * called = 그림이 없고 다른 이벤트가 부름. story가 된다
@@ -92,14 +96,14 @@ export interface MapPassage { map: MapTiles; tileset: TilesetInfo }
 export interface MapChecklist {
   mapId: number; mapName: string; width: number; height: number;
   player: { x: number; y: number };
-  /** 구역 순서(now → item → repeat → exit → talk → locked → 이야기·자동 진행 → done), 같은 구역 안에서는 이벤트 id 순 */
+  /** 구역 순서(now → item → repeat → exit → enemy → talk → locked → 이야기·자동 진행 → done), 같은 구역 안에서는 이벤트 id 순 */
   events: ChecklistEvent[];
-  /** now(아직 안 해 봄 포함) + item + repeat + locked + 안 본 대사가 있는 exit (이야기·자동 진행 제외) 이벤트 수 */
+  /** now(아직 안 해 봄 포함) + item + repeat + locked + 안 본 대사·선택지가 있는 exit·enemy (이야기·자동 진행 제외) 이벤트 수 */
   remaining: number;
 }
 
-const SECTION_ORDER: Record<Section, number> = { now: 0, item: 1, repeat: 2, exit: 3, talk: 4, locked: 5, done: 7 };
-const rank = (e: ChecklistEvent): number => (e.story ? 6 : SECTION_ORDER[e.section]);
+const SECTION_ORDER: Record<Section, number> = { now: 0, item: 1, repeat: 2, exit: 3, enemy: 4, talk: 5, locked: 6, done: 8 };
+const rank = (e: ChecklistEvent): number => (e.story ? 7 : SECTION_ORDER[e.section]);
 const HINT_MAX = 60;
 const PREVIEW_MAX = 40;
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
@@ -260,7 +264,7 @@ function lockedPage(
 
 function checkEvent(
   ev: MapEvent, mapId: number, data: GameData, byKey: Map<string, PageEntry>, coverage: Coverage, live: LiveSnapshot,
-  livePages: Map<number, number>, bg: Background | null, overrides: PluginOverrides | null,
+  livePages: Map<number, number>, bgData: Background | null, overrides: PluginOverrides | null,
 ): ChecklistEvent | null {
   const pages = arr<MapEvent["pages"][number] | null>(ev.pages);
   const entries = pages.map((_, pi) => byKey.get(locationKey({ source: "map", mapId, eventId: ev.id, page: pi })) ?? null);
@@ -269,12 +273,18 @@ function checkEvent(
   const activePage = fromLive !== undefined ? fromLive : activePageIndex(ev, mapId, data, live);
   const activePg = activePage >= 0 ? pages[activePage] : undefined;
   const activeEntry = activePage >= 0 ? entries[activePage] ?? null : null;
+  const enemyFound = enemyOf(ev, mapId, data, activePage);
+  // 사라진 적(지금 페이지 없음·지워짐)은 목록에 안 넣는다
+  if (enemyFound && activePage < 0) return null;
+  const enemyNow = !!enemyFound?.now;
+  // 지금 전투를 거는 적은 돌아다니며 다가오므로 직접 갈 수 없는 곳으로 보지 않는다
+  const bg = enemyNow ? null : bgData;
   const trigger = num(activePg?.trigger);
   const commands = isObj(activePg) ? realCommands(activePg.list) : [];
   const interactable = isObj(activePg) && trigger <= 2 && commands.length > 0;
   // TemplateEvent 호출(원래 이벤트 페이지 등)은 불린 목록의 명령으로 펼쳐 얻는 것·플러그인 명령을 찾는다.
   const runCommands = interactable ? realCommands(flattenCalls(activePg.list, { data, mapId, event: ev, page: activePage })) : [];
-  const exitFound = activePage >= 0 && isObj(activePg) && trigger <= 2 ? exitOf(ev, mapId, data, activePage) : null;
+  const exitFound = !enemyNow && activePage >= 0 && isObj(activePg) && trigger <= 2 ? exitOf(ev, mapId, data, activePage) : null;
   if (!interactable && !exitFound && !entries.some(e => e && hasContent(e))) return null;
 
   const active = !!activeEntry && isObj(activePg);
@@ -287,7 +297,7 @@ function checkEvent(
   const pluginHint = interactable ? pluginHintOf(runCommands, overrides) : undefined;
   // 플러그인 명령은 실행되면 기록되므로(병렬 제외), 그 페이지가 기록에 없으면 아직 안 해 본 것
   const touched = coverage.touched instanceof Set ? coverage.touched : null;
-  const untried = !exitFound && interactable && !!activeEntry && touched !== null && unseen === 0 && unpicked === 0 && gains.length === 0
+  const untried = !exitFound && !enemyNow && interactable && !!activeEntry && touched !== null && unseen === 0 && unpicked === 0 && gains.length === 0
     && repeat.length === 0 && runCommands.some(isPluginCommand) && !touched.has(locationKey(activeEntry.location));
 
   const locked: LockedPage[] = [];
@@ -299,7 +309,8 @@ function checkEvent(
   // 자동 실행·병렬 활성 페이지의 새 내용은 지금 할 수 있는 게 아니라 이야기 진행을 기다리는 것
   const autoNew = auto && (unseen > 0 || unpicked > 0);
 
-  const section: Section = exitFound ? "exit"
+  const section: Section = enemyNow ? "enemy"
+    : exitFound ? "exit"
     : interactable && (unseen > 0 || unpicked > 0 || untried) ? "now"
     : interactable && gains.length > 0 ? "item"
     : repeat.length > 0 ? "repeat"
@@ -321,7 +332,8 @@ function checkEvent(
   const trigText = descTrigger === 0 ? "말 걸기·조사" : descTrigger <= 2 ? "밟으면 시작" : "자동으로 시작";
   const kind = imageKind(descPg);
   let describe: string;
-  if (bg) describe = `직접 갈 수 없는 곳 — 다른 이벤트가 실행시켜요${bg.calledBy ? ` · ${bg.calledBy}이(가) 불러요` : ""}`;
+  if (enemyNow && enemyFound) describe = `${describeEnemy(enemyFound)}${quoted}`;
+  else if (bg) describe = `직접 갈 수 없는 곳 — 다른 이벤트가 실행시켜요${bg.calledBy ? ` · ${bg.calledBy}이(가) 불러요` : ""}`;
   else if (exitFound) describe = exitFound.now ? `출구 · ${trigText}${quoted}` : `출구 · 지금은 이동 안 됨${quoted}`;
   else if (kind === "none") {
     describe = `보이지 않는 이벤트 — ${descTrigger === 0 ? "표시된 칸에서 확인 버튼" : descTrigger <= 2 ? "표시된 칸을 밟으면 시작" : "자동으로 시작"}${quoted}`;
@@ -336,6 +348,7 @@ function checkEvent(
     auto, unseen, unpicked, remainingLines: rem?.now ?? [], laterLines: rem?.later ?? [], later: rem?.laterCount ?? 0,
     repeat, locked, interactable, gains, story, describe, moves,
   };
+  if (enemyFound) item.enemy = enemyFound;
   if (exitFound) item.exit = { mapId: exitFound.target.mapId, mapName: mapNameOf(data, exitFound.target.mapId), now: exitFound.now };
   if (bg) {
     item.background = bg.kind;
@@ -394,7 +407,7 @@ export function mapChecklist(
       player: { x: num(live.x), y: num(live.y) },
       events,
       remaining: events.filter(e => !e.story && e.section !== "talk" && e.section !== "done"
-        && (e.section !== "exit" || e.unseen > 0 || e.unpicked > 0)).length,
+        && ((e.section !== "exit" && e.section !== "enemy") || e.unseen > 0 || e.unpicked > 0)).length,
     };
   } catch {
     return null;

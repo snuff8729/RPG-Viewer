@@ -29,6 +29,8 @@ export function HereMapArea({ here, focus, onPick, compact = false }: {
           focus={focus}
           onPick={onPick}
           compact={compact}
+          avoidEnemies={here.avoidEnemies}
+          onAvoidEnemiesChange={here.setAvoidEnemies}
         />
       )}
       {tilesState.status === "failed" && (

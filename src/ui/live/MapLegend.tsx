@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { sectionStyle } from "./sectionStyle";
 
 /** 맵에 점으로 그리는 구역(범례 순서) */
-const LEGEND: Section[] = ["now", "item", "repeat", "exit", "talk", "locked", "done"];
+const LEGEND: Section[] = ["now", "item", "repeat", "exit", "enemy", "talk", "locked", "done"];
 
 /** 맵 아래 범례: 구역마다 색·아이콘·이름, 그리고 내 위치. */
 export function MapLegend() {

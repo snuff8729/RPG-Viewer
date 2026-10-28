@@ -25,6 +25,7 @@
     --color-section-item: var(--section-item);
     --color-section-repeat: var(--section-repeat);
     --color-section-exit: var(--section-exit);
+    --color-section-enemy: var(--section-enemy);
     --color-section-talk: var(--section-talk);
     --color-section-locked: var(--section-locked);
     --color-section-done: var(--section-done);
@@ -80,11 +81,12 @@
     --chart-3: oklch(0.398 0.07 227.392);
     --chart-4: oklch(0.828 0.189 84.429);
     --chart-5: oklch(0.769 0.188 70.08);
-    /* 이 맵 구역 색: 안 본 내용 파랑 · 아이템 호박 · 반복 분홍 · 이동 보라 · 다시 가능 초록 · 잠김 회청 · 다 봄 연회색 · 이야기 돌색 */
+    /* 이 맵 구역 색: 안 본 내용 파랑 · 아이템 호박 · 반복 분홍 · 이동 보라 · 적 빨강 · 다시 가능 초록 · 잠김 회청 · 다 봄 연회색 · 이야기 돌색 */
     --section-now: oklch(0.546 0.245 262.881);
     --section-item: oklch(0.666 0.179 58.318);
     --section-repeat: oklch(0.592 0.249 0.584);
     --section-exit: oklch(0.541 0.281 293.009);
+    --section-enemy: oklch(0.505 0.213 27.518);
     --section-talk: oklch(0.596 0.145 163.225);
     --section-locked: oklch(0.554 0.046 257.417);
     --section-done: oklch(0.82 0 0);
@@ -128,6 +130,7 @@
     --section-item: oklch(0.828 0.189 84.429);
     --section-repeat: oklch(0.718 0.202 349.761);
     --section-exit: oklch(0.702 0.183 293.541);
+    --section-enemy: oklch(0.637 0.237 25.331);
     --section-talk: oklch(0.765 0.177 163.223);
     --section-locked: oklch(0.704 0.04 256.788);
     --section-done: oklch(0.439 0 0);

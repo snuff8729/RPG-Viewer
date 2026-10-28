@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { livePositions, withLivePositions } from "@/core/live/positions";
-import { routeTo, standTiles } from "@/core/map/route";
+import { enemyTiles } from "@/core/live/enemies";
+import { routeAvoiding, routeTo, standTiles } from "@/core/map/route";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blockersFor, currentEvents, mapNumbers, pagesKey, targetOf, type LiveEventEntry } from "./mapEvents";
 import { useMapChecklist } from "./useMapChecklist";
@@ -38,16 +39,34 @@ export function useHereMap() {
   const selected = sel && sel.mapId === mapId ? sel.id : null;
   const selectedEv: ChecklistEvent | undefined = selected != null ? listed.find((e) => e.eventId === selected) : undefined;
   const px = live?.x ?? 0, py = live?.y ?? 0;
-  const route = useMemo(() => {
+  /** 적(지금 위치)을 피해서 길 찾기 */
+  const [avoidEnemies, setAvoidEnemies] = useState(true);
+  const enemies = useMemo(
+    () => listed.filter((e) => e.section === "enemy" && !e.story).map((e) => ({ eventId: e.eventId, x: e.x, y: e.y, chase: !!e.enemy?.chase })),
+    [listed],
+  );
+  const found = useMemo(() => {
     if (!tiles || !selectedEv) return null;
     const stands = standTiles(targetOf(mapData, selectedEv), tiles.map, tiles.tileset);
-    return routeTo(tiles.map, tiles.tileset, { x: px, y: py }, stands, blockersFor(current, selectedEv.eventId));
-  }, [tiles, selectedEv, mapData, current, px, py]);
+    const blockers = blockersFor(current, selectedEv.eventId);
+    const from = { x: px, y: py };
+    if (!avoidEnemies) return { route: routeTo(tiles.map, tiles.tileset, from, stands, blockers), throughAvoid: false };
+    return routeAvoiding(
+      tiles.map, tiles.tileset, from, stands, blockers,
+      enemyTiles(enemies, selectedEv.eventId, true), enemyTiles(enemies, selectedEv.eventId, false),
+    );
+  }, [tiles, selectedEv, mapData, current, px, py, avoidEnemies, enemies]);
+  const route = found?.route ?? null;
   const select = (id: number) => { if (mapId != null) setSel({ mapId, id }); };
   /** 고른 이벤트의 길 설명: 타일을 못 읽으면 보여주지 않는다(undefined), 길이 없으면 null */
-  const routeText: string | null | undefined = tiles ? (route?.text ?? null) : undefined;
+  const routeText: string | null | undefined = tiles
+    ? (route ? `${route.text}${found?.throughAvoid ? " · 적을 지나가야 해요" : ""}` : null)
+    : undefined;
 
-  return { live, checklist, tilesState, tiles, current, listed, numbers, selected, select, route, routeText };
+  return {
+    live, checklist, tilesState, tiles, current, listed, numbers, selected, select, route, routeText,
+    avoidEnemies, setAvoidEnemies,
+  };
 }
 
 export type HereMap = ReturnType<typeof useHereMap>;

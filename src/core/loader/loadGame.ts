@@ -101,10 +101,21 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
     const m = v as MapData;
     // 타일 데이터(data) 등은 버리고 필요한 필드만 보관한다.
     const dim = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
-    return {
+    const out: MapData = {
       displayName: typeof m.displayName === "string" ? m.displayName : "",
       width: dim(m.width), height: dim(m.height), events: m.events,
     };
+    // 랜덤 인카운트(있을 때만)
+    const enc = Array.isArray(m.encounterList) ? m.encounterList.filter((e) => !!e && typeof e === "object") : [];
+    if (enc.length > 0) {
+      out.encounterList = enc.map((e) => ({
+        troopId: typeof e.troopId === "number" ? e.troopId : 0,
+        weight: typeof e.weight === "number" ? e.weight : 0,
+        regionSet: Array.isArray(e.regionSet) ? e.regionSet.filter((r): r is number => typeof r === "number") : [],
+      }));
+      out.encounterStep = typeof m.encounterStep === "number" ? m.encounterStep : 30;
+    }
+    return out;
   }
   let next = 0;
   const worker = async () => {

@@ -7,11 +7,11 @@ export type NowItem = ChecklistEvent & { location: Location };
 /** 지금 해 볼 것: 안 본 내용·아이템·반복하면 달라짐, 그리고 안 본 대사·선택지가 남은 다른 곳으로 이동. 이야기·자동 진행은 뺀다. */
 export function isActionable(e: ChecklistEvent): boolean {
   if (e.story) return false;
-  if (e.section === "exit") return e.unseen > 0 || e.unpicked > 0;
+  if (e.section === "exit" || e.section === "enemy") return e.unseen > 0 || e.unpicked > 0;
   return e.section === "now" || e.section === "item" || e.section === "repeat";
 }
 
-const ACTION_ORDER: ChecklistEvent["section"][] = ["now", "item", "repeat", "exit"];
+const ACTION_ORDER: ChecklistEvent["section"][] = ["now", "item", "repeat", "exit", "enemy"];
 
 /** 지금 해 볼 것만 안 본 내용 → 아이템 → 반복 → 이동 순으로(같은 구역 안에서는 받은 순서 그대로). */
 export function actionableItems<T extends ChecklistEvent>(events: readonly T[]): T[] {
