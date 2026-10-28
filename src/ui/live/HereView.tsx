@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Info } from "lucide-react";
+import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
+import { routeTo, standTiles } from "@/core/map/route";
 import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { ChecklistCard } from "./ChecklistCard";
+import { MapCanvas } from "./MapCanvas";
 import { MapGrid } from "./MapGrid";
+import { blockersFor, currentEvents, pagesKey, targetOf } from "./mapEvents";
+import { sectionStyle } from "./sectionStyle";
 import { useMapChecklist } from "./useMapChecklist";
+import { useMapTiles } from "./useMapTiles";
 
 const HIGHLIGHT_MS = 1500;
 const SECTIONS: [Exclude<Section, "done">, string][] = [
@@ -18,14 +26,24 @@ const SECTIONS: [Exclude<Section, "done">, string][] = [
 
 type CardRefs = Map<number, HTMLDivElement>;
 
-function Cards({ events, refs, highlight }: { events: ChecklistEvent[]; refs: CardRefs; highlight: number | null }) {
+function Cards({ events, numbers, refs, highlight, selected, route, onLocate }: {
+  events: ChecklistEvent[]; numbers: Map<number, number>; refs: CardRefs; highlight: number | null;
+  selected: number | null;
+  /** 고른 카드에 보일 길 설명(ChecklistCard의 route) */
+  route: string | null | undefined;
+  onLocate: (ev: ChecklistEvent) => void;
+}) {
   return (
     <div className="space-y-3">
       {events.map((ev) => (
         <ChecklistCard
           key={ev.eventId}
           ev={ev}
+          number={numbers.get(ev.eventId)}
           highlighted={highlight === ev.eventId}
+          selected={selected === ev.eventId}
+          route={selected === ev.eventId ? route : undefined}
+          onLocate={() => onLocate(ev)}
           ref={(el) => { if (el) refs.set(ev.eventId, el); else refs.delete(ev.eventId); }}
         />
       ))}
@@ -43,6 +61,28 @@ export function HereView() {
   /** n: 같은 점을 다시 눌러도 스크롤·강조가 다시 일어나게 */
   const [pick, setPick] = useState<{ id: number; n: number } | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
+  const { data } = useGame();
+  const mapId = checklist?.mapId ?? null;
+  const tilesState = useMapTiles(mapId);
+  const tiles = tilesState.status === "ready" ? tilesState.tiles : null;
+  const mapData = mapId != null ? data?.maps.get(mapId) : undefined;
+  // 활성 페이지가 바뀔 때만 이벤트 그림·길막음을 다시 계산한다
+  const livePages = live && live.mapId === mapId ? live.events : null;
+  const pk = livePages ? pagesKey(livePages) : "";
+  const [pagesFor, setPagesFor] = useState<{ pk: string; pages: { eventId: number; page: number }[] }>({ pk: "", pages: [] });
+  if (pagesFor.pk !== pk) setPagesFor({ pk, pages: livePages ?? [] });
+  const current = useMemo(() => currentEvents(mapData, pagesFor.pages), [mapData, pagesFor]);
+  /** 맵에서 고른 이벤트(맵이 바뀌면 풀린다) */
+  const [sel, setSel] = useState<{ mapId: number; id: number } | null>(null);
+  const selected = sel && sel.mapId === mapId ? sel.id : null;
+  const [focus, setFocus] = useState<{ x: number; y: number; n: number } | null>(null);
+  const selectedEv = selected != null ? checklist?.events.find((e) => e.eventId === selected) : undefined;
+  const px = live?.x ?? 0, py = live?.y ?? 0;
+  const route = useMemo(() => {
+    if (!tiles || !selectedEv) return null;
+    const stands = standTiles(targetOf(mapData, selectedEv), tiles.map, tiles.tileset);
+    return routeTo(tiles.map, tiles.tileset, { x: px, y: py }, stands, blockersFor(current, selectedEv.eventId));
+  }, [tiles, selectedEv, mapData, current, px, py]);
 
   useEffect(() => {
     if (!pick) return;
@@ -64,8 +104,18 @@ export function HereView() {
 
   const bySection = (s: Section) => checklist.events.filter((e) => e.section === s);
   const done = bySection("done");
+  // 목록 순서(지금 → 반복 → 잠김)대로 1..n 번호. 맵 점과 카드 제목이 같이 쓴다
+  const numbers = new Map<number, number>();
+  for (const [s] of SECTIONS) for (const e of bySection(s)) numbers.set(e.eventId, numbers.size + 1);
+  const onLocate = (ev: ChecklistEvent) => {
+    setSel({ mapId: checklist.mapId, id: ev.eventId });
+    setFocus((f) => ({ x: ev.x, y: ev.y, n: (f?.n ?? 0) + 1 }));
+  };
+  /** 고른 카드의 길 설명: 타일을 못 읽으면 보여주지 않는다 */
+  const routeText = tiles ? (route?.text ?? null) : undefined;
   const onPick = (id: number) => {
     if (done.some((e) => e.eventId === id)) setDoneOpen(true);
+    setSel({ mapId: checklist.mapId, id });
     setHighlight(id);
     setPick((p) => ({ id, n: (p?.n ?? 0) + 1 }));
   };
@@ -77,15 +127,35 @@ export function HereView() {
         <span className="text-sm text-muted-foreground">내 위치 ({live.x}, {live.y})</span>
         <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>할 것 {checklist.remaining}개 남음</Badge>
       </div>
-      <MapGrid width={checklist.width} height={checklist.height} events={checklist.events} player={{ x: live.x, y: live.y }} onPick={onPick} />
+      {tilesState.status === "loading" && <Skeleton className="h-[min(60vh,32rem)] w-full" />}
+      {tiles && (
+        <MapCanvas
+          tiles={tiles}
+          events={current}
+          listed={checklist.events}
+          numbers={numbers}
+          player={{ x: live.x, y: live.y }}
+          route={route}
+          selected={selected}
+          focus={focus}
+          onPick={onPick}
+        />
+      )}
+      {tilesState.status === "failed" && (
+        <MapGrid width={checklist.width} height={checklist.height} events={checklist.events} player={{ x: live.x, y: live.y }} numbers={numbers} onPick={onPick} />
+      )}
       {checklist.events.length === 0 && <p className="text-sm text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}
       {SECTIONS.map(([s, label]) => {
         const evs = bySection(s);
         if (evs.length === 0) return null;
+        const st = sectionStyle(s);
         return (
           <section key={s} className="space-y-2">
-            <h3 className="text-sm font-semibold">{label} <span className="font-normal text-muted-foreground">({evs.length})</span></h3>
-            <Cards events={evs} refs={refs} highlight={highlight} />
+            <h3 className={cn("flex items-center gap-1.5 text-sm font-semibold", st.text)}>
+              <st.Icon className="size-4 shrink-0" aria-hidden />
+              {label} <span className="font-normal text-muted-foreground">({evs.length})</span>
+            </h3>
+            <Cards events={evs} numbers={numbers} refs={refs} highlight={highlight} selected={selected} route={routeText} onLocate={onLocate} />
           </section>
         );
       })}
@@ -96,7 +166,7 @@ export function HereView() {
             다 봤어요 ({done.length})
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">
-            <Cards events={done} refs={refs} highlight={highlight} />
+            <Cards events={done} numbers={numbers} refs={refs} highlight={highlight} selected={selected} route={routeText} onLocate={onLocate} />
           </CollapsibleContent>
         </Collapsible>
       )}

@@ -11,6 +11,7 @@ import { useLive } from "@/app/LiveProvider";
 import { formatRoute } from "@/app/route";
 import { openPage } from "../navigation";
 import { nowItems } from "./sidebarItems";
+import { sectionStyle } from "./sectionStyle";
 import { useMapChecklist } from "./useMapChecklist";
 
 /** 사이드바 "지금": 이 맵에서 지금 할 것. 연결되지 않았으면 아무것도 그리지 않는다. */
@@ -36,9 +37,12 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
         <p className="truncate px-2 pb-1 text-sm">{mapName} ({live.x}, {live.y})</p>
         {items.length === 0 && <p className="px-2 pb-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>}
         <SidebarMenu>
-          {items.map((e) => (
+          {items.map((e) => {
+            const st = sectionStyle(e.section);
+            return (
             <SidebarMenuItem key={e.eventId}>
               <SidebarMenuButton onClick={() => openPage(e.location)}>
+                <st.Icon className={st.text} aria-label={st.label} />
                 <span className="truncate">{e.title}</span>
                 <span className="ml-auto flex shrink-0 gap-1">
                   {e.section === "now" && e.unseen > 0 && <Badge variant="secondary" className="text-xs">새 대화</Badge>}
@@ -47,7 +51,8 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
                 </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-          ))}
+            );
+          })}
           {checklist && (
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="text-muted-foreground">
