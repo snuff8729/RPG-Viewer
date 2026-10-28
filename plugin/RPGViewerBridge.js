@@ -21,6 +21,7 @@
  * 기록합니다(숨겨졌거나 투명한 그림은 빼고). 전투 화면의 그림도 같습니다.
  * 다른 플러그인이 그림 폴더(img/pictures)의 이미지를 직접 띄우는 것(전투 컷인 등)도
  * 화면 위치 그대로 기록하고, 대사 사이에 잠깐 나타난 그림은 따로 남깁니다(초당 최대 8번).
+ * 그림 파일을 자기 그림판에 통째로 옮겨 그려 띄우는 플러그인(전투 중 흔들리는 스탠딩 등)도 그 그림으로 기록합니다.
  * 전투는 시작(적 무리 이름)·전투 로그 글(공격·피해·상태·승리·경험치 등)·
  * 결과(승리/패배/도주/중단, 보상)를 기록합니다. 전투 한 번에 최대 2000줄,
  * 초당 50줄까지만 남깁니다(배속 중에도 전투를 느리게 하지 않음).
@@ -45,7 +46,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.17.1",
+    VERSION: "1.18.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1579,6 +1580,48 @@
     try { s = decodeURIComponent(s); } catch (e) { /* keep as is */ }
     return s === "" ? null : s;
   }
+  // 1.18.0: plugins that load a picture (ImageManager.loadNormalBitmap("img/pictures/...") & co) and draw it whole
+  // into their own canvas (BYWorkElement images: the standing portrait that slides and changes on hits in battle)
+  // show no picture URL. Bitmap.blt / bltImage of a whole picture onto the whole canvas tags the canvas with it
+  // ({ name, w, h }: the picture and its own size); a full clear / clearRect forgets it. A part of a picture (a sheet
+  // frame) or a picture drawn into a part of the canvas (window contents) is no tag.
+  var DRAWN_KEY = "_rpgvDrawnPic";
+  function drawnPicture(b) {
+    if (!b || typeof b !== "object") return null;
+    var d = b[DRAWN_KEY];
+    return d && typeof d.name === "string" ? d : null;
+  }
+  function near(a, b) { return typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1; }
+  function noteBlt(dest, args) {
+    var src = args[0];
+    var u = bitmapUrl(src);
+    var name = u ? pictureNameOfUrl(u) : null;
+    if (name === null) return;
+    var own = bitmapUrl(dest);
+    if (own) return; // a loaded image drawn on: its own URL tells what it is
+    var sw = args[3], sh = args[4], dw = args[7], dh = args[8];
+    if (!dw) dw = sw; // like Bitmap.blt: dw = dw || sw
+    if (!dh) dh = sh;
+    var w = numOr(src.width, 0), h = numOr(src.height, 0);
+    if (!(w > 0 && h > 0)) return;
+    if (!near(args[1], 0) || !near(args[2], 0) || !near(sw, w) || !near(sh, h)) return;
+    if (!near(args[5], 0) || !near(args[6], 0) || !near(dw, dest.width) || !near(dh, dest.height)) return;
+    var old = drawnPicture(dest);
+    if (old && old.name === name && old.w === w && old.h === h) return;
+    try {
+      Object.defineProperty(dest, DRAWN_KEY, { value: { name: name, w: w, h: h }, configurable: true, writable: true, enumerable: false });
+    } catch (e) { dest[DRAWN_KEY] = { name: name, w: w, h: h }; }
+    markScreenDirty();
+  }
+  function forgetDrawn(dest, args) {
+    if (!drawnPicture(dest)) return;
+    if (args && args.length >= 4) {
+      // clearRect(x, y, width, height): only a clear of the whole canvas
+      if (!(numOr(args[0], 1) <= 0 && numOr(args[1], 1) <= 0 && numOr(args[2], 0) >= dest.width && numOr(args[3], 0) >= dest.height)) return;
+    }
+    dest[DRAWN_KEY] = null;
+    markScreenDirty();
+  }
   function scanScene(sc) {
     if (!sc || (!sc._spriteset && !extCaptures(sc))) return null;
     var SP = G.Sprite_Picture;
@@ -1608,10 +1651,12 @@
       }
       if (skipped(c)) return;
       var url = bitmapUrl(c.bitmap);
-      var name = null;
+      var name = null, drawn = null;
       if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
         name = pictureNameOfUrl(url);
         if (name === null) return; // another img folder: what it carries is effects / icons
+      } else if ((drawn = drawnPicture(c.bitmap)) !== null) {
+        name = drawn.name; // 1.18.0: a canvas that is a whole picture drawn into it (Bitmap.blt)
       }
       var ch = c.children;
       var kids = !!ch && typeof ch.length === "number" && ch.length > 0;
@@ -1623,7 +1668,7 @@
         var b = c.bitmap;
         if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
           var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
-          if (ready) out.push({ s: c, name: name, m: cm, alpha: ca });
+          if (ready) out.push({ s: c, name: name, m: cm, alpha: ca, drawn: drawn });
           else res.pending++;
         }
       }
@@ -1664,6 +1709,12 @@
     if (!(op > 0) || !(sxw > 0)) return null;
     var syw = (m[0] * m[3] - m[1] * m[2]) / sxw;
     if (!syw) return null;
+    var bw = b.width, bh = b.height;
+    // 1.18.0: a picture drawn into a canvas: the picture's own size, scaled as the canvas stretched it
+    var dr = it.drawn;
+    if (dr && dr.w > 0 && dr.h > 0 && bw > 0 && bh > 0) {
+      sxw *= bw / dr.w; syw *= bh / dr.h; bw = dr.w; bh = dr.h;
+    }
     var an = s.anchor || {};
     var ax = picNum(an.x, 0), ay = picNum(an.y, 0);
     var origin = ax === 0 && ay === 0 ? 0 : (ax === 0.5 && ay === 0.5 ? 1 : [ax, ay]);
@@ -1673,7 +1724,7 @@
     }
     return [0, picName(it.name), origin, picNum(m[4], 0), picNum(m[5], 0), picNum(sxw * 100, 100), picNum(syw * 100, 100), op,
       typeof s.blendMode === "number" ? s.blendMode : 0, tone || 0, picNum(Math.atan2(m[1], m[0]) * 180 / Math.PI, 0),
-      picNum(b.width, 0), picNum(b.height, 0), "sprite"];
+      picNum(bw, 0), picNum(bh, 0), "sprite"];
   }
 
   // The opacity a sprite is drawn with (own opacity times every parent's alpha); 0 when it or a parent is
@@ -1876,7 +1927,7 @@
     lastPicsKey = JSON.stringify(out);
     lastPicsSet = set;
     var kind = sceneKind();
-    emit("screen", { scene: inBattleNow() ? "battle" : (kind === "menu" ? "menu" : "map"), pics: out });
+    emit("screen", { scene: inBattleNow() || kind === "battle" ? "battle" : (kind === "menu" ? "menu" : "map"), pics: out });
   }
   // After each real frame's scene update (what is about to be rendered).
   function screenFrame() {
@@ -2503,16 +2554,19 @@
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
         var r = orig.apply(this, arguments);
-        try { battleStartT = now(); } catch (eb) { reportError(eb); }
-        try { ensureActionHook(); } catch (eh) { reportError(eh); }
-        try {
-          battleLog = { lines: 0, dropped: 0, times: [], lastText: null, lastT: -Infinity, picsT: -Infinity };
-          // capturing: the start record waits for the battle scene (Scene_Battle.start) to take its pictures
-          emit("battle", battleStartFields(this, troopId), capturePictures ? BATTLE_HOLD_MS : false);
-        } catch (e) { reportError(e); }
+        beginBattle(this, troopId);
         return r;
       };
     });
+    // the battle start record; capturing: it waits for the battle scene (Scene_Battle.start) to take its pictures
+    var beginBattle = function (bm, troopId) {
+      try { battleStartT = now(); } catch (eb) { reportError(eb); }
+      try { ensureActionHook(); } catch (eh) { reportError(eh); }
+      try {
+        battleLog = { lines: 0, dropped: 0, times: [], lastText: null, lastT: -Infinity, picsT: -Infinity };
+        emit("battle", battleStartFields(bm, troopId), capturePictures ? BATTLE_HOLD_MS : false);
+      } catch (e) { reportError(e); }
+    };
     hook(BM, "BattleManager", "endBattle", function (orig) {
       return function (result) {
         try {
@@ -2544,6 +2598,13 @@
     hook(SB, "Scene_Battle", "start", function (orig) {
       return function () {
         var r = orig.apply(this, arguments);
+        // 1.18.0: a battle whose BattleManager.setup this plugin never saw (set up before it loaded, or by a plugin
+        // that replaced BattleManager.setup without calling it) still gets its start record
+        try {
+          if (battleLog === null && run !== null && inBattleNow()) {
+            beginBattle(BM, G.$gameTroop && typeof G.$gameTroop._troopId === "number" ? G.$gameTroop._troopId : 0);
+          }
+        } catch (eb) { reportError(eb); }
         try { if (heldMsg && heldMsg.rec.type === "battle") { finishHeld(); scheduleFlush(); } } catch (e) { reportError(e); }
         try { ensureNoticeHooks(); } catch (en) { reportError(en); }
         return r;
@@ -2582,6 +2643,35 @@
           var b = orig.apply(this, arguments);
           try { watchBitmap(b); } catch (e) { reportError(e); }
           return b;
+        };
+      });
+    }
+    // 1.18.0: a picture loaded by its path (plugins drawing it into their own canvas), and that drawing
+    hook(IM, "ImageManager", "loadNormalBitmap", function (orig) {
+      return function (path) {
+        var b = orig.apply(this, arguments);
+        try { if (typeof path === "string" && pictureNameOfUrl(path) !== null) watchBitmap(b); } catch (e) { reportError(e); }
+        return b;
+      };
+    });
+    var BP = G.Bitmap && G.Bitmap.prototype;
+    var bltNames = ["blt", "bltImage"];
+    for (var bn = 0; bn < bltNames.length; bn++) {
+      hook(BP, "Bitmap", bltNames[bn], function (orig) {
+        return function () {
+          var r = orig.apply(this, arguments);
+          try { noteBlt(this, arguments); } catch (e) { reportError(e); }
+          return r;
+        };
+      });
+    }
+    var clearNames = ["clear", "clearRect"];
+    for (var cn = 0; cn < clearNames.length; cn++) {
+      hook(BP, "Bitmap", clearNames[cn], function (orig) {
+        return function () {
+          var r = orig.apply(this, arguments);
+          try { forgetDrawn(this, arguments); } catch (e) { reportError(e); }
+          return r;
         };
       });
     }
