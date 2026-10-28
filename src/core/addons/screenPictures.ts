@@ -371,18 +371,48 @@ function chosenRole(p: ScreenPicture, ctx: PictureContext): PictureRole | null {
   return null;
 }
 
-/** 크기로 정하는 구분. small = 작아서 화면 장식으로 본 것 */
-function autoRole(p: ScreenPicture, ctx: PictureContext): { role: PictureRole; small: boolean } {
+/**
+ * 크기로 정하는 구분. small = 작아서 화면 장식으로 본 것.
+ * stacked = 투명도 통계를 아직 모르는 화면 크기 그림인데 같은 자리·크기로 여러 겹 겹쳐 있다(stackedLayers) —
+ * 화면 크기의 투명한 겹으로 몸을 나눠 그린 스탠딩으로 본다(통계를 읽으면 그것으로 다시 정한다).
+ */
+function autoRole(p: ScreenPicture, ctx: PictureContext, stacked = false): { role: PictureRole; small: boolean } {
   // 크기는 실제로 보이는 부분으로 본다: 화면 크기의 투명한 그림 위에 몸 한 부분만 그린 겹(스탠딩 부품)은 이벤트 그림이 아니다
   const r = contentRect(p, ctx);
   if (r) {
     const cover = coverage(r, ctx.screen);
     const st = statsOfPic(p, ctx);
-    if (cover >= CG_COVER && (!st || st.opaque >= CG_OPAQUE)) return { role: "cg", small: false };
+    if (cover >= CG_COVER && (st ? st.opaque >= CG_OPAQUE : !stacked)) return { role: "cg", small: false };
     // 1.10.1: 작은 그림은 화면 장식(플러그인이 띄운 것은 화면의 5%, 그림 명령은 2%보다 작을 때 — 티커 배경 막대 등)
     if (cover < (p.kind === "sprite" ? SMALL_SPRITE : SMALL_PICTURE)) return { role: "hud", small: true };
   }
   return { role: "stand", small: false };
+}
+
+/** 같은 자리·크기로 이만큼 이상 겹친 화면 크기 그림은(투명도 통계를 모를 때) 스탠딩 겹으로 본다 */
+const STACKED_LAYERS = 3;
+
+/**
+ * 투명도 통계를 아직 모르는(암호화된 그림을 읽는 중이거나 읽을 수 없는) 화면 크기 그림 중, 같은 자리·기준점·배율·각도·크기로
+ * STACKED_LAYERS개 이상 겹친 것들. 캐릭터를 화면 크기의 투명한 겹(몸·팔·눈·입…)으로 나눠 그리는 게임의 스탠딩이다
+ * (이벤트 그림 한 장 + 어둡게 덮는 그림 한 장은 이보다 적다). 예외를 던지지 않는다.
+ */
+function stackedLayers(pics: ScreenPicture[], ctx: PictureContext): Set<ScreenPicture> {
+  const out = new Set<ScreenPicture>();
+  try {
+    const groups = new Map<string, ScreenPicture[]>();
+    for (const p of pics) {
+      if (statsOfPic(p, ctx)) continue;
+      const s = sizeOfPic(p, ctx.sizeOf);
+      const r = s ? pictureRect(p, ctx.sizeOf) : null;
+      if (!s || !r || coverage(r, ctx.screen) < CG_COVER) continue;
+      const k = [p.origin, p.anchor?.join(",") ?? "", p.x, p.y, p.scaleX, p.scaleY, p.angle ?? 0, s.w, s.h].join("|");
+      const g = groups.get(k);
+      if (g) g.push(p); else groups.set(k, [p]);
+    }
+    for (const g of groups.values()) if (g.length >= STACKED_LAYERS) for (const p of g) out.add(p);
+  } catch { /* 겹 판정 없음 */ }
+  return out;
 }
 
 const overlaps = (a: Rect, b: Rect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -395,9 +425,11 @@ export function rolesOf(pics: ScreenPicture[], ctx: PictureContext): Map<ScreenP
   const out = new Map<ScreenPicture, PictureRole>();
   const small: ScreenPicture[] = [];
   const drawnRects: Rect[] = [];
+  const chosen = new Map(pics.map(p => [p, chosenRole(p, ctx)] as const));
+  const stacked = stackedLayers(pics.filter(p => chosen.get(p) === null), ctx);
   for (const p of pics) {
-    const chosen = chosenRole(p, ctx);
-    const a = chosen ? { role: chosen, small: false } : autoRole(p, ctx);
+    const c = chosen.get(p);
+    const a = c ? { role: c, small: false } : autoRole(p, ctx, stacked.has(p));
     out.set(p, a.role);
     if (a.small && p.kind !== "sprite") small.push(p);
     else if (a.role === "cg" || a.role === "stand") { const r = contentRect(p, ctx); if (r) drawnRects.push(r); }

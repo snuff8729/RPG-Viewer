@@ -1,4 +1,4 @@
-import { alphaStatsOf, type AlphaStats, type PicSize } from "@/core/addons/screenPictures";
+import { alphaStatsOf, pngSize, type AlphaStats, type PicSize } from "@/core/addons/screenPictures";
 
 /** 투명도 통계를 읽을 때 줄이는 최대 폭(px) */
 const SCAN_WIDTH = 256;
@@ -31,6 +31,25 @@ export function imageAlphaStats(img: ImageBitmap): AlphaStats | null {
   const st = scan(img, s.w, s.h);
   byImage.set(img, st);
   return st;
+}
+
+/** 그림 저장소(AssetStore): 암호화된 그림(.png_·.rpgmvp)도 내용으로 풀어 이미지 Blob으로 돌려준다 */
+export interface PictureSource { load(kind: "pictures", name: string): Promise<Blob | null> }
+
+/**
+ * 그림 하나의 크기·투명도 통계. 반드시 그림 저장소(복호화한 Blob)에서 읽는다 — 암호화된 파일의 바이트를 그대로 읽으면
+ * PNG 머리도 디코드도 실패해 크기·통계를 모르게 되고, 화면 크기의 투명한 스탠딩 겹이 모두 이벤트 그림으로 보인다.
+ * knownSize: 이미 아는 크기(있으면 머리를 다시 읽지 않는다). 그림이 없으면 null. 읽기 실패는 예외로 던진다(다시 읽게).
+ */
+export async function pictureInfo(
+  source: PictureSource, name: string, knownSize?: PicSize | null,
+): Promise<{ size: PicSize | null; stats: AlphaStats | null } | null> {
+  const blob = await source.load("pictures", name);
+  if (!blob) return null;
+  const head = knownSize !== undefined ? knownSize : pngSize(new Uint8Array(await blob.slice(0, 24).arrayBuffer()));
+  // 머리에서 크기를 못 읽으면 디코드한 원래 크기를 쓴다
+  const r = await blobAlphaStats(blob, head);
+  return { size: head ?? r.size, stats: r.stats };
 }
 
 /**

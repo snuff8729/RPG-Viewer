@@ -179,6 +179,32 @@ describe("picture groups", () => {
       expect([...s.cg, ...s.stand]).toHaveLength(10);
     });
 
+    it("before the alpha stats are known (encrypted files still loading), stacked full-canvas layers are a stand", () => {
+      // 크기는 기록·PNG 머리로 알지만 투명도 통계는 아직 모른다
+      const unknown: PictureContext = { screen: S, sizeOf: () => ({ w: 816, h: 624 }) };
+      const s = sceneOf(pics(), unknown);
+      expect(s.cg).toEqual([]);
+      expect(s.stand).toHaveLength(10);
+      expect(nextShot(null, s).shot?.kind).toBe("stand");
+      // 크기도 모르는 겹(0×0 기록 + 머리를 못 읽음)은 원래대로 스탠딩
+      expect(sceneOf(pics(), { screen: S }).cg).toEqual([]);
+      // 1.13.0 기록 그대로(18겹 모두 816×624, 통계·파일 크기 모름)
+      const all = names.map((n, i) => layer(i + 2, n));
+      expect(sceneOf(all, { screen: S }).stand).toHaveLength(10);
+    });
+
+    it("an event image with one or two full-screen overlays stays an event image while stats are unknown", () => {
+      const cg = P([1, "OP_Past", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
+      const dark = P([61, "Darkness", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
+      expect(sceneOf([cg, dark], { screen: S })).toEqual({ cg: [cg, dark], stand: [] });
+      // 다른 자리(줌한 그림)는 같은 겹으로 세지 않는다
+      const zoomed = P([2, "OP_Past2", 0, -100, -50, 120, 120, 255, 0, 0, 0, 816, 624]);
+      expect(sceneOf([cg, zoomed, dark], { screen: S }).cg).toHaveLength(3);
+      // 통계를 읽은 뒤에는 통계로 정한다: 불투명한 그림이면 겹쳐 있어도 이벤트 그림
+      const opaque: PictureContext = { screen: S, statsOf: () => ({ opaque: 1, box: [0, 0, 1, 1] }) };
+      expect(sceneOf(names.map((n, i) => layer(i + 2, n)), opaque).cg.length).toBeGreaterThan(0);
+    });
+
     it("an opaque full-screen picture is still an event image", () => {
       const cg = P([60, "eve_01", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
       expect(roleOf(cg, { ...ctx, statsOf: () => ({ opaque: 1, box: [0, 0, 1, 1] }) })).toBe("cg");
