@@ -4,6 +4,10 @@
  * - GET  /api/game/ping   → { ok: true }
  * - POST /api/game/check  { path } → { ok, title?, engine?, exe?, error? }
  * - POST /api/game/launch { path } → { ok, error? }
+ * - POST /api/game/running { path } → { ok, running }
+ * - POST /api/game/restart-restore { path, id, launch? } → { ok, killed, relaunched, error? }
+ *   (실행 중이면 강제 종료 → 복원 → 다시 실행)
+ * - POST /api/game/backups/{list,create,restore,delete,state} { path, … } → scripts/backups.ts
  *
  * 셸을 쓰지 않고, 찾은 게임 폴더 안의 실행 파일 하나만 실행한다.
  * 요청은 자기 localhost 출처에서 온 것만 받는다.
@@ -13,12 +17,18 @@ import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { BACKUP_ROUTES, ERR_BAD_ID, handleBackupRoute, isValidBackupId, restoreBackup } from "./backups.ts";
+import { GameProcesses, nodeProcessOps, type ProcessOps } from "./gameProcess.ts";
 
 export const ERR_NOT_FOUND = "폴더를 찾을 수 없어요";
 export const ERR_NOT_GAME = "RPG Maker 게임 폴더가 아니에요";
 export const ERR_NO_EXE = "실행 파일(Game.exe)을 찾을 수 없어요";
 
+export const ERR_BUSY = "다른 복원이 진행 중이에요";
+
 const MAX_BODY = 4 * 1024;
+
+const GAME_ROUTES = ["check", "launch", "running", "restart-restore"] as const;
 
 export type GameCheck =
   | { ok: true; root: string; title: string; engine: "MV" | "MZ"; exe: string }
@@ -70,8 +80,21 @@ function readTitle(systemJson: string): string {
   }
 }
 
+export type GameRoot =
+  | { ok: true; root: string; title: string; engine: "MV" | "MZ" }
+  | { ok: false; error: string };
+
 /** 폴더 또는 .exe 경로에서 게임 루트·제목·엔진·실행 파일을 찾는다. */
 export function resolveGame(raw: string): GameCheck {
+  const game = findGameRoot(raw);
+  if (!game.ok) return game;
+  const exe = findExecutable(game.root);
+  if (exe === null) return { ok: false, error: ERR_NO_EXE };
+  return { ...game, exe };
+}
+
+/** 폴더 또는 .exe 경로에서 게임 루트·제목·엔진을 찾는다(실행 파일은 보지 않는다). */
+export function findGameRoot(raw: string): GameRoot {
   const input = normalizeInputPath(raw);
   if (input === "") return { ok: false, error: ERR_NOT_FOUND };
   const abs = path.resolve(input);
@@ -86,9 +109,7 @@ export function resolveGame(raw: string): GameCheck {
     for (const [engine, rel] of [["MV", "www/data/System.json"], ["MZ", "data/System.json"]] as const) {
       const sys = path.join(root, rel);
       if (!isFile(sys)) continue;
-      const exe = findExecutable(root);
-      if (exe === null) return { ok: false, error: ERR_NO_EXE };
-      return { ok: true, root, title: readTitle(sys), engine, exe };
+      return { ok: true, root, title: readTitle(sys), engine };
     }
   }
   return { ok: false, error: ERR_NOT_GAME };
@@ -120,6 +141,7 @@ export interface SpawnedLike {
   once(event: "spawn", cb: () => void): unknown;
   once(event: "error", cb: (err: Error) => void): unknown;
   unref(): void;
+  readonly pid?: number;
 }
 export type SpawnFn = (
   command: string,
@@ -128,7 +150,11 @@ export type SpawnFn = (
 ) => SpawnedLike;
 
 /** 찾은 실행 파일을 게임 루트에서 분리 실행한다(셸 없음). */
-export async function launchResolved(game: Extract<GameCheck, { ok: true }>, spawn: SpawnFn): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function launchResolved(
+  game: Extract<GameCheck, { ok: true }>,
+  spawn: SpawnFn,
+  onSpawned?: (pid: number | undefined) => void,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   let child: SpawnedLike;
   try {
     child = spawn(game.exe, [], { cwd: game.root, detached: true, stdio: "ignore", windowsHide: false });
@@ -136,7 +162,7 @@ export async function launchResolved(game: Extract<GameCheck, { ok: true }>, spa
     return { ok: false, error: `실행하지 못했어요: ${(e as Error).message}` };
   }
   return new Promise((resolve) => {
-    child.once("spawn", () => { child.unref(); resolve({ ok: true }); });
+    child.once("spawn", () => { child.unref(); onSpawned?.(child.pid); resolve({ ok: true }); });
     child.once("error", (err) => resolve({ ok: false, error: `실행하지 못했어요: ${err.message}` }));
   });
 }
@@ -166,9 +192,55 @@ function readBody(req: IncomingMessage): Promise<string | null> {
 
 type Next = (err?: unknown) => void;
 
+type ResolvedGame = Extract<GameCheck, { ok: true }>;
+
+export interface RestartRestoreResult {
+  ok: boolean;
+  error?: string;
+  killed: number;
+  relaunched: boolean;
+}
+
+/**
+ * 실행 중인 게임을 강제로 끄고(다 꺼질 때까지 기다림) 백업으로 되돌린 뒤 다시 실행한다.
+ * 게임이 안 돌고 있었으면 `launch`가 참일 때만 실행한다. 꺼지지 않으면 복원하지 않는다.
+ */
+export async function restartRestore(
+  game: ResolvedGame,
+  id: unknown,
+  opts: { launch: boolean },
+  deps: { spawn: SpawnFn; procs: GameProcesses; waitMs?: number },
+): Promise<RestartRestoreResult> {
+  if (!isValidBackupId(id)) return { ok: false, error: ERR_BAD_ID, killed: 0, relaunched: false };
+  const stop = await deps.procs.killAndWait(game.exe, deps.waitMs);
+  if (!stop.ok) return { ok: false, error: stop.error, killed: 0, relaunched: false };
+  const restored = restoreBackup(game, id);
+  const wantLaunch = stop.killed > 0 || opts.launch;
+  let relaunched = false;
+  let launchError: string | undefined;
+  if (wantLaunch) {
+    // 복원에 실패해도 원래 세이브는 그대로이므로, 끈 게임은 다시 켜 준다.
+    const r = await launchResolved(game, deps.spawn, (pid) => deps.procs.track(game.exe, pid));
+    relaunched = r.ok;
+    if (!r.ok) launchError = r.error;
+  }
+  if (!restored.ok) return { ok: false, error: restored.error, killed: stop.killed, relaunched };
+  return { ok: true, killed: stop.killed, relaunched, ...(launchError ? { error: launchError } : {}) };
+}
+
 /** connect 미들웨어. /api/game/* 외의 요청은 그대로 넘긴다. */
-export function createLauncherMiddleware(deps: { spawn: SpawnFn }) {
+export function createLauncherMiddleware(deps: { spawn: SpawnFn; procs?: ProcessOps }) {
+  const procs = new GameProcesses(deps.procs ?? nodeProcessOps);
+  let restoring = false;
   return async (req: IncomingMessage, res: ServerResponse, next: Next): Promise<void> => {
+    try {
+      await handle(req, res, next);
+    } catch (e) {
+      send(res, 500, { ok: false, error: `처리하지 못했어요: ${(e as Error).message}` });
+    }
+  };
+
+  async function handle(req: IncomingMessage, res: ServerResponse, next: Next): Promise<void> {
     const url = (req.url ?? "").split("?")[0];
     if (!url.startsWith("/api/game/")) { next(); return; }
     const route = url.slice("/api/game/".length);
@@ -180,7 +252,11 @@ export function createLauncherMiddleware(deps: { spawn: SpawnFn }) {
       send(res, 200, { ok: true });
       return;
     }
-    if (route !== "check" && route !== "launch") { send(res, 404, { ok: false, error: "not found" }); return; }
+    const isBackup = (BACKUP_ROUTES as readonly string[]).includes(route);
+    if (!isBackup && !(GAME_ROUTES as readonly string[]).includes(route)) {
+      send(res, 404, { ok: false, error: "not found" });
+      return;
+    }
     if (req.method !== "POST") { send(res, 405, { ok: false, error: "POST only" }); return; }
     if (!isAllowedRequest(headers, { requireOrigin: true })) { send(res, 403, { ok: false, error: "forbidden" }); return; }
 
@@ -191,14 +267,43 @@ export function createLauncherMiddleware(deps: { spawn: SpawnFn }) {
     const p = (input as { path?: unknown } | null)?.path;
     if (typeof p !== "string") { send(res, 400, { ok: false, error: "path required" }); return; }
 
+    const body = input as Record<string, unknown>;
+
+    if (isBackup) {
+      const root = findGameRoot(p);
+      if (!root.ok) { send(res, 200, root); return; }
+      if (route === "backups/restore") {
+        if (restoring) { send(res, 200, { ok: false, error: ERR_BUSY }); return; }
+        restoring = true;
+        try { send(res, 200, handleBackupRoute(route, root, body)); } finally { restoring = false; }
+        return;
+      }
+      send(res, 200, handleBackupRoute(route, root, body));
+      return;
+    }
+
     const game = resolveGame(p);
+    if (route === "running") {
+      send(res, 200, { ok: true, running: game.ok ? await procs.running(game.exe) : false });
+      return;
+    }
     if (!game.ok) { send(res, 200, game); return; }
     if (route === "check") {
       send(res, 200, { ok: true, title: game.title, engine: game.engine, exe: game.exe });
       return;
     }
-    send(res, 200, await launchResolved(game, deps.spawn));
-  };
+    if (route === "restart-restore") {
+      if (restoring) { send(res, 200, { ok: false, error: ERR_BUSY, killed: 0, relaunched: false }); return; }
+      restoring = true;
+      try {
+        send(res, 200, await restartRestore(game, body.id, { launch: body.launch === true }, { spawn: deps.spawn, procs }));
+      } finally {
+        restoring = false;
+      }
+      return;
+    }
+    send(res, 200, await launchResolved(game, deps.spawn, (pid) => procs.track(game.exe, pid)));
+  }
 }
 
 /** vite.config.ts에 등록: dev·preview 서버 모두에 API를 붙인다. */

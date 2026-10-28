@@ -213,6 +213,29 @@ describe("launcher middleware", () => {
     expect((await call(mw, { method: "POST", url: "/api/game/launch", headers: own, body: "{}" })).status).toBe(400);
     expect((await call(mw, { method: "POST", url: "/api/game/launch", headers: own, body: JSON.stringify({ path: "x".repeat(5000) }) })).status).toBe(413);
     expect((await call(mw, { method: "POST", url: "/api/game/other", headers: own, body })).status).toBe(404);
+    expect((await call(mw, { method: "POST", url: "/api/game/backups/list", headers: { host: "localhost:5173", origin: "http://evil.example" }, body })).status).toBe(403);
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it("serves backups and reports running games through the injected process lookup", async () => {
+    touch("data/System.json", system("x"));
+    const exe = touch("Game.exe");
+    touch("save/global.rpgsave", "G");
+    const procs = {
+      findByExe: async (e: string) => (e === exe ? [77] : []),
+      killTree: async () => {},
+      isAlive: () => false,
+      sleep: async () => {},
+    };
+    const mw = createLauncherMiddleware({ ...fakeSpawn("spawn"), procs });
+    const post = (url: string, extra: Record<string, unknown> = {}) =>
+      call(mw, { method: "POST", url, headers: own, body: JSON.stringify({ path: tmp, ...extra }) });
+    expect((await post("/api/game/running")).body).toEqual({ ok: true, running: true });
+    const created = await post("/api/game/backups/create", { kind: "manual", name: "n" });
+    expect(created.body).toMatchObject({ ok: true, backup: { kind: "manual", name: "n", fileCount: 1 } });
+    const list = await post("/api/game/backups/list");
+    expect((list.body as { backups: unknown[] }).backups).toHaveLength(1);
+    expect((await post("/api/game/backups/restore", { id: "../.." })).body).toMatchObject({ ok: false });
+    expect((await post("/api/game/backups/list", { path: path.join(tmp, "nope") })).body).toEqual({ ok: false, error: ERR_NOT_FOUND });
   });
 });
