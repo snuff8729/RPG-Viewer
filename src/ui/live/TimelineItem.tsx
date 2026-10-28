@@ -9,7 +9,7 @@ import { troopName } from "@/core/live/reader";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
 import { NoticeLine } from "./NoticeLine";
-import { noticeSourceLabel } from "@/core/addons/notices";
+import { noticeRecordKind, noticeSourceLabel } from "@/core/addons/notices";
 import { battleActionOf, battleLogText } from "@/core/live/battleLine";
 import { explainRecord, reasonLabel } from "@/core/live/mismatch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -108,7 +108,7 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
     }
     case "notice": {
       const text = formatText(typeof r.text === "string" && r.text ? r.text : typeof r.raw === "string" ? r.raw : "", ctx.data).trim();
-      return text ? <NoticeLine text={text} source={noticeSourceLabel(r.source)} className="px-2 py-0.5" /> : null;
+      return text ? <NoticeLine text={text} source={noticeSourceLabel(r.source)} kind={noticeRecordKind(r)} className="px-2 py-0.5" /> : null;
     }
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
     case "load": return <Line ctx={ctx}>💾 불러오기 (슬롯 {r.slot})</Line>;

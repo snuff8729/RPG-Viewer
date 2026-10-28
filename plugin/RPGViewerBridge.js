@@ -30,6 +30,8 @@
  * 위쪽에 잠깐 띄우는 문구(TickerManager.show, LiveCommentContainer의 show 등과
  * 설정에서 직접 추가한 함수)를 기록합니다. 같은 문구는 0.3초 안에 한 번,
  * 초당 30개까지만 남기고, 게임이 보여 주는 내용은 바꾸지 않습니다.
+ * 같은 설정에서 AXY_Toast 알림(획득·경험치 등), Torigoya 업적 달성, 게임 화면 위에 띄운
+ * HTML 글(자주 바뀌는 숫자·한꺼번에 생기는 패널은 빼고, 초당 10개까지)도 기록합니다.
  * 게임 전용 확장(RPGViewerBridge_<id>.js, 이 플러그인 바로 뒤)은
  * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
  * 화면 그림은 맵과 전투 화면에서만 기록합니다(메뉴 화면은 RPG Viewer에서 따로 켠 경우만).
@@ -46,7 +48,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.18.2",
+    VERSION: "1.19.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -157,12 +159,36 @@
   var noticeHooked = [];      // paths wrapped so far (reported in live.json)
   var noticeLast = { key: null, t: -Infinity, times: [] };
   var noticeWin = null;       // cached Window_Base-like object for convertEscapeCharacters
+  // 1.19.0: an entry may build the text from the call (text: before the call, after: from its result / the screen)
   var NOTICE_BUILTIN = [
     { path: "TickerManager.show", source: "ticker" },
     { path: "LiveCommentContainer.prototype.show", source: "livecomment" },
     { path: "Torigoya.NotifyMessage.Manager.notify", source: "notify" },
-    { path: "Game_System.prototype.pushInfoEvent", source: "info" }
+    { path: "Game_System.prototype.pushInfoEvent", source: "info" },
+    { path: "jQuery.toaster", source: "toast", after: toasterText },                       // AXY_Toast (HTML toast)
+    { path: "Torigoya.Achievement.Manager.notify", source: "achievement", text: achievementText },  // Torigoya_Achievement (MV)
+    { path: "Torigoya.Achievement2.manager.unlock", source: "achievement", before: achievement2Before, after: achievement2After }
   ];
+  // 1.19.0: notices shown while these run are marked with what caused them (kind: "gain" / "quest")
+  var NOTICE_CONTEXTS = [
+    { path: "Game_Party.prototype.gainGold", kind: "gain" },
+    { path: "Game_Party.prototype.gainItem", kind: "gain" },
+    { path: "Game_Actor.prototype.changeExp", kind: "gain" },
+    { path: "Game_Actor.prototype.displayLevelUp", kind: "gain" },
+    { path: "Game_Actor.prototype.levelDown", kind: "gain" },
+    { path: "Game_Interpreter.prototype.command315", kind: "gain" },
+    { path: "Game_System.prototype.questAdd", kind: "quest" },
+    { path: "Game_System.prototype.questRemove", kind: "quest" },
+    { path: "Game_System.prototype.questSetCompleted", kind: "quest" },
+    { path: "Game_System.prototype.questSetFailed", kind: "quest" },
+    { path: "Game_System.prototype.questSetAvailable", kind: "quest" },
+    { path: "Game_System.prototype.questObjectivesShow", kind: "quest" },
+    { path: "Game_System.prototype.questObjectivesComplete", kind: "quest" },
+    { path: "Game_System.prototype.questObjectivesFail", kind: "quest" },
+    { path: "Game_System.prototype.questRewardsClaim", kind: "quest" }
+  ];
+  var noticeKind = null;      // kind of the context call running now (innermost)
+  var htmlWatch = null;       // 1.19.0 watcher of HTML elements other plugins put over the game (null = off)
   var NOTICE_PATH_RE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
   var NOTICE_DUP_MS = 300, NOTICE_RATE_MAX = 30, NOTICE_RATE_MS = 1000, NOTICE_TEXT_MAX = 500;
   var NOTICE_HOOKS_MAX = 20, NOTICE_PATH_MAX = 200;
@@ -661,6 +687,7 @@
         captureMenuScenes: captureMenuScenes,
         captureNotices: captureNotices,
         notices: noticeHooked.slice(),
+        htmlNotices: htmlWatch !== null,
         extensions: bridge.extensions(),
         hotkeys: effectiveHotkeys()
       }
@@ -1009,6 +1036,8 @@
     noticeExtra = noticePaths(c.noticeHooks);
     if (captureNotices) {
       try { ensureNoticeHooks(); } catch (en) { reportError(en); }
+    } else {
+      try { stopHtmlWatch(); } catch (eh) { reportError(eh); }
     }
     // c.seenTroops is accepted and ignored: battles are never sped up automatically
     var hk = hotkeysFrom(c.hotkeys);
@@ -1301,6 +1330,7 @@
 
   function tick() {
     try { pollControl(); } catch (ec) { reportError(ec); }
+    try { if (htmlWatch) htmlWatch.check(); } catch (eh) { reportError(eh); }
     try { flush(); } catch (e) { reportError(e); }
     try { writeMeta(); } catch (em) { reportError(em); }
     try { writeLive(false); } catch (e2) { reportError(e2); }
@@ -1315,6 +1345,7 @@
   bridge._runScheduled = runScheduled;
   bridge._frame = function () { return frameStart(G.SceneManager); };
   bridge._scanVisited = function () { return lastScanVisited; };
+  bridge._createHtmlWatch = function (env) { return createHtmlWatch(env); };
 
   // ---------------------------------------------------------------- engine helpers
   function pageIndexOf(pages, list) {
@@ -2241,18 +2272,99 @@
     while (n.times.length && t - n.times[0] >= NOTICE_RATE_MS) n.times.shift();
     if (n.times.length >= NOTICE_RATE_MAX) return;
     n.times.push(t);
-    emit("notice", { source: source, text: text, raw: raw });
+    var fields = { source: source, text: text, raw: raw };
+    if (noticeKind !== null && source !== "achievement") fields.kind = noticeKind;
+    emit("notice", fields);
   }
 
-  function wrapNotice(owner, name, source) {
+  // A wrapper keeps the function's own properties ($.toaster.reset ...) and, for a constructor, its methods.
+  function copyFnProps(orig, wrapped) {
+    for (var k in orig) {
+      if (Object.prototype.hasOwnProperty.call(orig, k) && k.indexOf("__rpgv") !== 0) {
+        try { wrapped[k] = orig[k]; } catch (e) { /* read-only */ }
+      }
+    }
+    if (orig.prototype) wrapped.prototype = orig.prototype;
+  }
+
+  function wrapNotice(owner, name, entry) {
+    var orig = owner[name];
+    var source = entry.source;
+    var wrapped = function () {
+      var pre = null;
+      if (captureNotices) {
+        try {
+          if (entry.before) pre = entry.before(this, arguments);
+          if (!entry.after) recordNotice(entry.text ? entry.text(this, arguments) : arguments[0], source);
+        } catch (e) { reportError(e); }
+      }
+      var r = orig.apply(this, arguments);
+      if (captureNotices && entry.after) {
+        try { recordNotice(entry.after(this, arguments, r, pre), source); } catch (e2) { reportError(e2); }
+      }
+      return r;
+    };
+    copyFnProps(orig, wrapped);
+    wrapped.__rpgvNotice = true;
+    owner[name] = wrapped;
+  }
+
+  function wrapNoticeContext(owner, name, kind) {
     var orig = owner[name];
     var wrapped = function () {
-      try { if (captureNotices) recordNotice(arguments[0], source); } catch (e) { reportError(e); }
-      return orig.apply(this, arguments);
+      var prev = noticeKind;
+      noticeKind = kind;
+      try { return orig.apply(this, arguments); } finally { noticeKind = prev; }
     };
+    copyFnProps(orig, wrapped);
     wrapped.__rpgvNotice = true;
-    if (orig.prototype) wrapped.prototype = orig.prototype; // a wrapped constructor keeps its methods
     owner[name] = wrapped;
+  }
+
+  // "<span>포션</span> ×3<br>획득" -> "포션 ×3 획득"
+  var HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#39": "'" };
+  function htmlText(s) {
+    if (typeof s !== "string") return null;
+    var t = s.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, "");
+    t = t.replace(/&(amp|lt|gt|quot|apos|nbsp|#39);/g, function (m, e) { return HTML_ENTITIES[e]; });
+    t = t.replace(/\s+/g, " ").replace(/^ | $/g, "");
+    return t;
+  }
+
+  // AXY_Toast ($.toaster): the toast it just appended to #toaster (msg is an expression the plugin evaluates),
+  // else the message option. The toast is marked so the HTML watcher does not record it again.
+  function toasterText(self, args) {
+    var doc = G.document;
+    var box = doc && typeof doc.getElementById === "function" ? doc.getElementById("toaster") : null;
+    var el = box ? (box.lastElementChild || box.lastChild) : null;
+    if (el && el.nodeType === 1 && !el.__rpgvNotice) {
+      el.__rpgvNotice = true;
+      var t = htmlText(typeof el.innerHTML === "string" ? el.innerHTML : el.textContent);
+      if (t) return t;
+    }
+    var o = args[0];
+    return o && typeof o === "object" && typeof o.message === "string" ? htmlText(o.message) : null;
+  }
+
+  function achievementLine(d) {
+    if (!d || typeof d !== "object") return null;
+    var title = typeof d.title === "string" ? d.title : (typeof d.name === "string" ? d.name : "");
+    var desc = typeof d.description === "string" ? d.description : (typeof d.message === "string" ? d.message : "");
+    if (!/\S/.test(title)) return null;
+    return "업적: " + title + (/\S/.test(desc) ? " — " + desc : "");
+  }
+  // Torigoya_Achievement (MV): Manager.notify(id) runs once per new unlock; Manager.data(id) = { title, description }
+  function achievementText(self, args) {
+    return self && typeof self.data === "function" ? achievementLine(self.data(args[0])) : null;
+  }
+  // Torigoya_Achievement2 (MZ): manager.unlock(key) — recorded when it really unlocked something
+  function achievement2Before(self, args) {
+    return self && typeof self.isUnlocked === "function" ? !!self.isUnlocked(args[0]) : null;
+  }
+  function achievement2After(self, args, r, was) {
+    if (was !== false || typeof self.isUnlocked !== "function" || !self.isUnlocked(args[0])) return null;
+    var d = typeof self.data === "function" ? self.data(args[0]) : null;
+    return achievementLine(d && d.achievement ? d.achievement : d);
   }
 
   // Wraps every known notice API and every extra path that is a function right now (plugins may define
@@ -2267,11 +2379,168 @@
       try {
         var r = resolveNoticePath(list[k].path);
         if (!r || r.owner[r.name].__rpgvNotice) continue;
-        wrapNotice(r.owner, r.name, list[k].source);
+        wrapNotice(r.owner, r.name, list[k]);
         if (noticeHooked.indexOf(list[k].path) < 0) noticeHooked.push(list[k].path);
         if (bridge._hooks.indexOf(list[k].path) < 0) bridge._hooks.push(list[k].path);
       } catch (e) { reportError(e); }
     }
+    for (var c = 0; c < NOTICE_CONTEXTS.length; c++) {
+      try {
+        var rc = resolveNoticePath(NOTICE_CONTEXTS[c].path);
+        if (!rc || rc.owner[rc.name].__rpgvNotice) continue;
+        wrapNoticeContext(rc.owner, rc.name, NOTICE_CONTEXTS[c].kind);
+      } catch (ec) { reportError(ec); }
+    }
+    try { startHtmlWatch(); } catch (eh) { reportError(eh); }
+  }
+
+  // ---------------------------------------------------------------- HTML notices (1.19.0)
+  // Plugins that put HTML elements over the game (jQuery toasts, overlay texts) can't be read from the canvas.
+  // While notices are on, a MutationObserver on document.body queues every element that gets new content; a
+  // queued element whose text is readable and that is visible a moment later (HTML_SETTLE_MS) is recorded as a
+  // notice (source "html"). Skipped: the game canvas / video, elements a notice hook already recorded, elements
+  // that change 3+ times within a second (HUD numbers, quiet for HTML_QUIET_MS after), 4+ elements filled in one
+  // batch (a HUD or menu panel being built), text without letters, the same element text again within 5 min,
+  // the same text within 2 s, and more than 10 per second.
+  var HTML_SETTLE_MS = 150, HTML_WAIT_MS = 2000, HTML_PENDING_MAX = 50, HTML_PANEL_KEYS = 4;
+  var HTML_NOISY_CHANGES = 3, HTML_NOISY_MS = 1000, HTML_QUIET_MS = 3000;
+  var HTML_DUP_MS = 2000, HTML_RATE_MAX = 10, HTML_RATE_MS = 1000, HTML_REPEAT_MS = 300000, HTML_KEYS_MAX = 300;
+  var HTML_MARKUP_MAX = 5000, HTML_TEXT_MAX = 300, HTML_DEPTH_MAX = 40;
+  var HTML_SKIP_TAGS = { CANVAS: true, VIDEO: true, AUDIO: true, SCRIPT: true, STYLE: true, IFRAME: true, LINK: true, META: true, TEXTAREA: true, INPUT: true, SELECT: true };
+  var HTML_SKIP_ID_RE = /^(ErrorPrinter|errorPrinter|fpsCounterBox|FPSMeter|fpsmeter|loadingSpinner|modeTextBox|GameCanvas|GameVideo|UpperCanvas)/;
+  var HTML_LETTER_RE = /[A-Za-zÀ-῿぀-ヿ㐀-鿿가-힯豈-﫿]/;
+
+  // env: { body, observe(callback) -> stop function, now(), isVisible(el), record(text) } (injectable for tests)
+  function createHtmlWatch(env) {
+    var pending = [];          // keyed elements waiting for their check
+    var seen = {}, seenCount = 0;  // element id + text -> time recorded
+    var lastText = {};         // text -> time recorded
+    var times = [];
+    var stop = null;
+
+    // the element's chain up to body; null when it is not attached, skipped, or already recorded
+    function usable(el) {
+      var n = el;
+      for (var d = 0; n && d < HTML_DEPTH_MAX; d++) {
+        if (n === env.body) return true;
+        if (n.nodeType !== 1 || n.__rpgvNotice || HTML_SKIP_TAGS[String(n.tagName).toUpperCase()] === true) return false;
+        if (typeof n.id === "string" && n.id && HTML_SKIP_ID_RE.test(n.id)) return false;
+        n = n.parentNode;
+      }
+      return false;
+    }
+    // the nearest element with an id (a plugin's overlay box), else the element itself
+    function keyOf(el) {
+      var n = el;
+      for (var d = 0; n && n !== env.body && d < 6; d++) {
+        if (typeof n.id === "string" && n.id) return n;
+        n = n.parentNode;
+      }
+      return el;
+    }
+    function drop(key) {
+      var i = pending.indexOf(key);
+      if (i >= 0) pending.splice(i, 1);
+    }
+    function onMutations(list) {
+      var t = env.now(), batch = [];
+      for (var i = 0; list && i < list.length; i++) {
+        var m = list[i];
+        var nodes = m.type === "characterData" ? [m.target] : m.addedNodes;
+        for (var j = 0; nodes && j < nodes.length; j++) {
+          var node = nodes[j];
+          var el = node && node.nodeType === 1 ? node : (node ? node.parentNode : null);
+          if (!el || el.nodeType !== 1 || el === env.body || !usable(el)) continue;
+          var key = keyOf(el);
+          if (batch.indexOf(key) < 0) batch.push(key);
+        }
+      }
+      var panel = batch.length >= HTML_PANEL_KEYS;
+      for (var k = 0; k < batch.length; k++) {
+        var key2 = batch[k];
+        var st = key2.__rpgvHtml || (key2.__rpgvHtml = { times: [], quiet: 0, since: 0 });
+        st.times.push(t);
+        while (st.times.length && t - st.times[0] >= HTML_NOISY_MS) st.times.shift();
+        if (panel || st.times.length >= HTML_NOISY_CHANGES) st.quiet = t + HTML_QUIET_MS;
+        if (st.quiet > t) { drop(key2); continue; }
+        st.since = t;
+        if (pending.indexOf(key2) < 0 && pending.length < HTML_PENDING_MAX) pending.push(key2);
+      }
+    }
+    function textOf(el) {
+      var html = el.innerHTML;
+      if (typeof html === "string" && html.length > HTML_MARKUP_MAX) return null;
+      var s = typeof html === "string" ? htmlText(html) : htmlText(String(el.textContent || ""));
+      return s && s.length <= HTML_TEXT_MAX && HTML_LETTER_RE.test(s) ? s : null;
+    }
+    function check() {
+      if (!pending.length) return;
+      var t = env.now();
+      var keep = [];
+      for (var i = 0; i < pending.length; i++) {
+        var el = pending[i], st = el.__rpgvHtml;
+        if (!st || st.quiet > t) continue;
+        if (t - st.since < HTML_SETTLE_MS) { keep.push(el); continue; }
+        if (!usable(el)) continue;
+        if (!env.isVisible(el)) { if (t - st.since < HTML_WAIT_MS) keep.push(el); continue; }
+        var text = textOf(el);
+        if (!text) continue;
+        var idKey = (el.id || "") + "\u0001" + text;
+        if (el.id && seen[idKey] !== undefined && t - seen[idKey] < HTML_REPEAT_MS) continue;
+        if (lastText[text] !== undefined && t - lastText[text] < HTML_DUP_MS) continue;
+        while (times.length && t - times[0] >= HTML_RATE_MS) times.shift();
+        if (times.length >= HTML_RATE_MAX) continue;
+        times.push(t);
+        lastText[text] = t;
+        if (el.id) {
+          if (seenCount >= HTML_KEYS_MAX) { seen = {}; seenCount = 0; }
+          if (seen[idKey] === undefined) seenCount++;
+          seen[idKey] = t;
+        }
+        env.record(text);
+      }
+      pending = keep;
+      for (var k in lastText) if (t - lastText[k] >= HTML_DUP_MS) delete lastText[k];
+    }
+    return {
+      start: function () { if (!stop) stop = env.observe(onMutations); },
+      stop: function () { if (stop) { try { stop(); } catch (e) { reportError(e); } } stop = null; pending = []; },
+      check: check,
+      _onMutations: onMutations
+    };
+  }
+
+  function defaultVisible(el) {
+    if (typeof el.getClientRects === "function" && el.getClientRects().length === 0) return false;
+    var cs = typeof G.getComputedStyle === "function" ? G.getComputedStyle(el) : null;
+    return !cs || (cs.visibility !== "hidden" && cs.display !== "none");
+  }
+
+  function startHtmlWatch() {
+    if (!captureNotices || htmlWatch) return;
+    var doc = G.document, MO = G.MutationObserver;
+    if (!doc || !doc.body || typeof MO !== "function") return;
+    var body = doc.body;
+    htmlWatch = createHtmlWatch({
+      body: body,
+      now: now,
+      isVisible: defaultVisible,
+      record: function (text) { recordNotice(text, "html"); },
+      observe: function (cb) {
+        var mo = new MO(function (list) {
+          try { if (captureNotices) cb(list); } catch (e) { reportError(e); }
+        });
+        mo.observe(body, { childList: true, subtree: true, characterData: true });
+        return function () { mo.disconnect(); };
+      }
+    });
+    htmlWatch.start();
+  }
+
+  function stopHtmlWatch() {
+    if (!htmlWatch) return;
+    htmlWatch.stop();
+    htmlWatch = null;
   }
 
   // ---------------------------------------------------------------- plugin commands

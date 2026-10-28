@@ -8,7 +8,7 @@ import {
 } from "../addons/screenPictures";
 import { applyPictureOp, composedScene, pictureOp, stackPictures, type PictureVars, type StackPicture } from "./pictureStack";
 import { cutinRuns, withOldErases, type CutinStep } from "./cutins";
-import { noticeSourceLabel } from "../addons/notices";
+import { isNoticeHidden, noticeRecordKind, noticeSourceLabel, type NoticeKind } from "../addons/notices";
 import type { GameData, Location } from "../types";
 import { branchLabel, isContinuation } from "./history";
 import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginText";
@@ -43,7 +43,7 @@ export type ReaderItem =
   /** 전투 로그 한 줄(제어 문자·줄 태그 처리). action: 기술·아이템 사용 줄. screen: 이 줄에서 새로 보일 화면 그림 */
   | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot }
   /** 1.9.0 알림 문구(티커·코멘트 등). text = 제어 문자 처리한 글, source = 보일 출처 이름 */
-  | { kind: "notice"; key: string; seq: number; text: string; source: string }
+  | { kind: "notice"; key: string; seq: number; text: string; source: string; noticeKind: NoticeKind }
   /**
    * 1.10.0 기록 사이에 바뀐 화면 그림(다른 플러그인이 잠깐 띄운 컷인 등) — 새로 보일 그림이 있을 때만.
    * 화면 그림 따라 그리기가 꺼졌으면 대사 없이 바뀐 그림 명령 묶음(다시 쌓은 그림, key = 묶음 첫 기록)도.
@@ -151,7 +151,7 @@ function fromRecord(
     }
     case "notice": {
       const text = formatText(safe(r.text) || safe(r.raw), data).trim();
-      return text ? { kind: "notice", key: `r${r.seq}`, seq: r.seq, text, source: noticeSourceLabel(r.source) } : null;
+      return text ? { kind: "notice", key: `r${r.seq}`, seq: r.seq, text, source: noticeSourceLabel(r.source), noticeKind: noticeRecordKind(r) } : null;
     }
     default: return null;
   }
@@ -198,6 +198,7 @@ function battleItem(
  * model은 갈래 시작 문구(`— {n}회차 갈래 {m} 시작 —`)에 쓴다. overrides: 플러그인 명령별 보이기 설정(pluginText).
  * 플러그인 줄은 모두 넣고 tech로 표시만 한다(숨기기는 화면이 정한다).
  * opts.battles = false면 전투 묶음을, opts.notices = false면 알림 문구(1.9.0, 전투 안의 것도)를 뺀다.
+ * opts.hiddenNoticeKinds: 그 종류(업적·획득·퀘스트·알림)의 알림 문구만 뺀다.
  * scenes(화면 그림 따라 그리기, scenesBySeq): 주면 보이는 이벤트 그림·스탠딩이 앞에 보인 것과 달라진 대사에 screen을 붙인다(nextShot).
  * 그림 표시 기록(231)은 따로 항목을 만들지 않는다(글자 그림만 남는다): 그림 명령 기록으로 화면 그림을 다시 쌓아(pictureStack)
  * 그림이 없는 대사(화면 그림 따라 그리기가 꺼졌거나 그 전 기록)에 같은 방식으로 screen을 붙인다. 대사 없이 바뀐 묶음
@@ -205,7 +206,7 @@ function battleItem(
  */
 export function readerItems(
   items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
-  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean; compose?: ComposeOptions } = {},
+  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean; hiddenNoticeKinds?: ReadonlySet<NoticeKind>; compose?: ComposeOptions } = {},
 ): ReaderItem[] {
   const pctx: PictureContext = opts?.compose?.ctx ?? { screen: data?.screenSize ?? DEFAULT_SCREEN };
   const vars = opts?.compose?.vars ?? null;
@@ -335,6 +336,8 @@ export function readerItems(
   };
   const battles = opts?.battles !== false;
   const notices = opts?.notices !== false;
+  const noticeHide = notices ? (opts?.hiddenNoticeKinds instanceof Set ? opts.hiddenNoticeKinds : undefined) : true;
+  const noticeHidden = (rec: LogRecord | null | undefined) => rec?.type === "notice" && isNoticeHidden(rec, noticeHide);
   /** tail: 목록 다음 기록(전투 끝 등, 모르면 null). undefined = 아직 이어지는 끝(기록의 마지막·진행 중인 전투). */
   const convert = (list: HistoryItem[], out: ReaderItem[], tail?: LogRecord | null) => {
     for (const it of Array.isArray(list) ? list : []) {
@@ -353,7 +356,7 @@ export function readerItems(
             continue;
           }
           // 알림 문구는 다른 플러그인이 띄운 것이라 이어진 플러그인 기록(글자 그림 설명)을 끊지 않는다
-          if (rec?.type === "notice" && !notices) continue;
+          if (noticeHidden(rec)) continue;
           // 대사·전투 로그 줄·선택·장면 구분·전투 앞에서 구간을 끝낸다(그 사이에 띄웠다 지운 그림은 컷인)
           if (rec && SEGMENT_BOUNDARY.has(rec.type)) finishSegment(out, rec);
           // 그림 명령(231·232·235)은 화면 그림을 다시 쌓기만 한다(따로 보이지 않는다). 글자 그림만 항목이 된다.
@@ -427,7 +430,7 @@ export function readerItems(
           }
           const endScreen = it.repeat > 0 || !it.end ? null : shotAt(it.end.seq, false);
           // 알림 문구를 숨겼으면 줄 수에서도 뺀다
-          const hidden = notices ? 0 : it.items.filter(x => x?.kind === "record" && x.record?.type === "notice").length;
+          const hidden = it.items.filter(x => x?.kind === "record" && noticeHidden(x.record)).length;
           const logLines = Math.max(0, (typeof it.logLines === "number" ? it.logLines : 0) - hidden);
           const b = battleItem(it.start, it.end ?? null, inner, logLines, typeof it.repeat === "number" ? it.repeat : 0, data);
           if (screen) b.screen = screen;

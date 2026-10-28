@@ -80,7 +80,7 @@ function groupLog(items: ReaderItem[]): (ReaderItem | BattleLogItem[])[] {
 
 /** 전투 로그 줄 하나(펼쳤을 때) 또는 알림 문구 */
 function LogLine({ line }: { line: BattleLogItem }) {
-  if (line.kind === "notice") return <NoticeLine text={line.text} source={line.source} />;
+  if (line.kind === "notice") return <NoticeLine text={line.text} source={line.source} kind={line.noticeKind} />;
   return (
     <div>
       {line.screen && <Screen shot={line.screen} />}
@@ -111,7 +111,7 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
           return (
             <div key={g[0].key} className="space-y-0.5 text-sm leading-snug">
               {kept.map(l => l.kind === "notice"
-                ? <NoticeLine key={l.key} text={l.text} source={l.source} />
+                ? <NoticeLine key={l.key} text={l.text} source={l.source} kind={l.noticeKind} />
                 : <Screen key={l.key} shot={l.screen!} />)}
             </div>
           );
@@ -208,7 +208,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "battlelog":
       return <>{item.screen && <Screen shot={item.screen} />}{item.action ? <BattleActionLine action={item.action} /> : <p className="text-sm text-muted-foreground">{item.text}</p>}</>;
     case "notice":
-      return <NoticeLine text={item.text} source={item.source} />;
+      return <NoticeLine text={item.text} source={item.source} kind={item.noticeKind} />;
     case "screen":
       return <Screen shot={item.screen} />;
     case "cutin":
@@ -266,7 +266,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     }
     case "notice": {
       const p = b as typeof a;
-      return a.text === p.text && a.source === p.source;
+      return a.text === p.text && a.source === p.source && a.noticeKind === p.noticeKind;
     }
     case "screen": return sameShot(a.screen, (b as typeof a).screen);
     case "cutin": {

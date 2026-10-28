@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanNoticeHooks, isNoticeHookPath, NOTICE_HOOKS_MAX, noticePluginsOf, noticeSourceLabel } from "./notices";
+import { classifyNotice, cleanNoticeHooks, isMoneyOrExp, isNoticeHidden, isNoticeHookPath, NOTICE_HOOKS_MAX, noticePluginsOf, noticeRecordKind, noticeSourceLabel } from "./notices";
 import { addonControlFlags, ADDONS } from "./registry";
 import { addonsJson, parseAddonFile } from "./settings";
 
@@ -55,5 +55,37 @@ describe("notices add-on", () => {
     expect(noticeSourceLabel("livecomment")).toBe("코멘트");
     expect(noticeSourceLabel("My.fn")).toBe("My.fn");
     expect(noticeSourceLabel(undefined)).toBe("알림");
+    expect(noticeSourceLabel("toast")).toBe("토스트 알림");
+    expect(noticeSourceLabel("achievement")).toBe("업적");
+    expect(noticeSourceLabel("html")).toBe("화면 위 글(HTML)");
+  });
+
+  it("knows AXY_Toast and Torigoya_Achievement (1.19.0)", () => {
+    const text = pluginsJs([
+      { name: "AXY_Toast", status: true, description: "", parameters: {} },
+      { name: "Torigoya_Achievement", status: true, description: "", parameters: {} },
+    ]);
+    expect(noticePluginsOf(text)).toEqual(["AXY_Toast", "Torigoya_Achievement"]);
+  });
+
+  it("classifies notices: record kind, then source, then text", () => {
+    expect(classifyNotice("toast", "아무 글", "gain")).toBe("gain");
+    expect(classifyNotice("toast", "아무 글", "quest")).toBe("quest");
+    expect(classifyNotice("achievement", "아무 글")).toBe("achievement");
+    for (const t of ["업적 달성!", "実績解除", "Achievement unlocked", "成就达成"]) expect(classifyNotice("html", t)).toBe("achievement");
+    for (const t of ["퀘스트 완료", "クエスト受注", "New quest", "任务完成"]) expect(classifyNotice("toast", t)).toBe("quest");
+    for (const t of ["120 EXP", "경험치 +30", "経験値 50", "50 G", "골드 100", "ゴールド", "포션 획득", "薬草を入手", "Obtained a potion", "레벨 업!"]) {
+      expect(classifyNotice("toast", t)).toBe("gain");
+    }
+    for (const t of ["문이 열렸다", "Good morning", ""]) expect(classifyNotice("ticker", t)).toBe("info");
+    expect(classifyNotice(undefined, null, "bogus")).toBe("info");
+    expect(isMoneyOrExp("120 EXP")).toBe(true);
+    expect(isMoneyOrExp("포션 획득")).toBe(false);
+    expect(noticeRecordKind({ source: "toast", raw: "퀘스트 시작" })).toBe("quest");
+    expect(noticeRecordKind(null)).toBe("info");
+    expect(isNoticeHidden({ source: "achievement" }, new Set(["achievement" as const]))).toBe(true);
+    expect(isNoticeHidden({ source: "achievement" }, new Set(["gain" as const]))).toBe(false);
+    expect(isNoticeHidden({ source: "x" }, true)).toBe(true);
+    expect(isNoticeHidden({ source: "x" }, false)).toBe(false);
   });
 });

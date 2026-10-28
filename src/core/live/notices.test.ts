@@ -7,6 +7,7 @@ import { parseLogText } from "./log";
 import { readerItems, type ReaderItem } from "./reader";
 import type { HistoryItem, LogRecord } from "./types";
 import { ALL_KINDS, filterItems } from "../../ui/live/historyFilter";
+import type { NoticeKind } from "../addons/notices";
 
 let data: GameData;
 beforeAll(async () => {
@@ -28,7 +29,7 @@ const msg = (seq: number, text: string): LogRecord =>
   ({ ...base, seq, type: "message", src: mapSrc, cmd: 0, face: "", faceIndex: 0, speaker: "", text }) as LogRecord;
 
 const fold = (recs: LogRecord[]) => foldTimeline(recs, buildHistory(recs), {});
-const read = (recs: LogRecord[], opts: { notices?: boolean } = {}) => {
+const read = (recs: LogRecord[], opts: { notices?: boolean; hiddenNoticeKinds?: ReadonlySet<NoticeKind> } = {}) => {
   const model = buildHistory(recs);
   return readerItems(foldTimeline(recs, model, {}), data, new Map(), model, null, null, opts);
 };
@@ -44,14 +45,14 @@ describe("notice records (1.9.0)", () => {
   it("reader: a muted notice row outside battle, escape codes formatted (icons / colors stripped, names expanded)", () => {
     const items = read([bs(1), msg(2, "hi"), notice(3, "\\i[906]\\c[4]\\n[1] : 뜨거운 물", "ticker"), notice(4, "ㅋㅋ", "livecomment")]);
     expect(items.filter(i => i.kind === "notice")).toEqual([
-      { kind: "notice", key: "r3", seq: 3, text: `${data.actors[1]?.name} : 뜨거운 물`, source: "티커" },
-      { kind: "notice", key: "r4", seq: 4, text: "ㅋㅋ", source: "코멘트" },
+      { kind: "notice", key: "r3", seq: 3, text: `${data.actors[1]?.name} : 뜨거운 물`, source: "티커", noticeKind: "info" },
+      { kind: "notice", key: "r4", seq: 4, text: "ㅋㅋ", source: "코멘트", noticeKind: "info" },
     ]);
   });
 
   it("reader: empty or code-only notices are dropped; raw is used when text is missing", () => {
     const items = read([bs(1), notice(2, "\\c[3]"), { ...base, seq: 3, type: "notice", source: "My.fn", raw: "원문" } as LogRecord]);
-    expect(items.filter(i => i.kind === "notice")).toEqual([{ kind: "notice", key: "r3", seq: 3, text: "원문", source: "My.fn" }]);
+    expect(items.filter(i => i.kind === "notice")).toEqual([{ kind: "notice", key: "r3", seq: 3, text: "원문", source: "My.fn", noticeKind: "info" }]);
   });
 
   it("notices: false hides them everywhere and takes them out of the battle line count", () => {
@@ -89,5 +90,33 @@ describe("notice records (1.9.0)", () => {
     const b = hidden.find((i): i is Extract<HistoryItem, { kind: "battle" }> => i.kind === "battle")!;
     expect(b.items.some(i => i.kind === "record" && i.record.type === "notice")).toBe(false);
     expect(b.logLines).toBe(1);
+  });
+});
+
+describe("notice kinds (1.19.0)", () => {
+  const kinded = (seq: number, text: string, source: string, kind?: string): LogRecord =>
+    ({ ...base, seq, type: "notice", source, text, ...(kind ? { kind } : {}) }) as LogRecord;
+  const recs = [
+    bs(1),
+    kinded(2, "업적: 첫 승리 — 첫 전투에서 이기기", "achievement"),
+    kinded(3, "포션 *3 획득", "toast", "gain"),
+    kinded(4, "퀘스트 접수 「잃어버린 반지」", "toast", "quest"),
+    kinded(5, "문이 열렸다", "html"),
+    start(6), kinded(7, "120 EXP", "toast"), line(8, "공격!"), end(9),
+  ];
+  it("reader items carry the kind; hidden kinds drop only those (also inside battles and from the line count)", () => {
+    const items = read(recs);
+    expect(items.filter(i => i.kind === "notice").map(i => (i as Extract<ReaderItem, { kind: "notice" }>).noticeKind)).toEqual(["achievement", "gain", "quest", "info"]);
+    expect(battleOf(items).items[0]).toMatchObject({ kind: "notice", noticeKind: "gain", source: "토스트 알림" });
+    const noGain = read(recs, { hiddenNoticeKinds: new Set<NoticeKind>(["gain"]) });
+    expect(noGain.filter(i => i.kind === "notice").map(i => (i as Extract<ReaderItem, { kind: "notice" }>).text)).toEqual(["업적: 첫 승리 — 첫 전투에서 이기기", "퀘스트 접수 「잃어버린 반지」", "문이 열렸다"]);
+    expect(battleOf(noGain).items.some(i => i.kind === "notice")).toBe(false);
+    expect(battleOf(noGain).logLines).toBe(1);
+    expect(read(recs, { notices: false, hiddenNoticeKinds: new Set() }).some(i => i.kind === "notice")).toBe(false);
+  });
+  it("history filter takes a set of hidden kinds", () => {
+    const out = filterItems(fold(recs), new Set(ALL_KINDS), undefined, new Set<NoticeKind>(["achievement", "info"]));
+    const texts = out.flatMap(i => i.kind === "record" && i.record.type === "notice" ? [i.record.text] : []);
+    expect(texts).toEqual(["포션 *3 획득", "퀘스트 접수 「잃어버린 반지」"]);
   });
 });

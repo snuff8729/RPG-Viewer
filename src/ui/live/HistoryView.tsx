@@ -20,7 +20,8 @@ import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { ALL_KINDS, filterItems, loadKinds, saveKinds, type Kind } from "./historyFilter";
 import { classifyPluginRecord } from "@/core/live/pluginText";
 import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
-import { useNoticesShown } from "./noticeDisplay";
+import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
+import { NoticeKindsMenu } from "./NoticeKindsMenu";
 import { useAddons } from "@/app/AddonsProvider";
 
 const PAGE = 500;
@@ -66,9 +67,10 @@ export function HistoryView() {
   const noticesOn = useAddons().isOn("notices");
   const hasNotices = useMemo(() => noticesOn || path.some(r => r.type === "notice"), [noticesOn, path]);
   const [noticesShown, setNoticesShown] = useNoticesShown();
+  const [hiddenNoticeKinds] = useHiddenNoticeKinds();
   const filtered = useMemo(
-    () => filterItems(items, kinds, showAllPlugins ? undefined : r => classifyPluginRecord(r, overrides).kind === "tech", !noticesShown),
-    [items, kinds, showAllPlugins, overrides, noticesShown],
+    () => filterItems(items, kinds, showAllPlugins ? undefined : r => classifyPluginRecord(r, overrides).kind === "tech", noticesShown ? hiddenNoticeKinds : true),
+    [items, kinds, showAllPlugins, overrides, noticesShown, hiddenNoticeKinds],
   );
 
   const choiceTextNow = useMemo(() => {
@@ -199,6 +201,7 @@ export function HistoryView() {
             <div className="flex items-center gap-2">
               <Switch id="history-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
               <Label htmlFor="history-notices">알림 문구 보기</Label>
+              <NoticeKindsMenu disabled={!noticesShown} />
             </div>
           )}
         </div>
