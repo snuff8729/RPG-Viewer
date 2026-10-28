@@ -121,3 +121,35 @@ export function routeTo(
     return null;
   }
 }
+
+/** 피할 칸을 피한 길, 못 찾으면 보통 길. throughAvoid: 피할 칸을 피하는 길이 없어 보통 길을 썼다 */
+export interface AvoidRoute { route: Route | null; throughAvoid: boolean }
+
+/**
+ * avoid(적의 칸과 쫓아오는 적의 이웃 칸 등)도 막힌 칸으로 보고 길을 찾는다. 그런 길이 없으면 softAvoid(더 좁게, 예: 적 칸만)로,
+ * 그래도 없으면 보통 길(throughAvoid = true. 보통 길도 없으면 route null).
+ */
+export function routeAvoiding(
+  map: MapTiles,
+  tileset: TilesetInfo,
+  from: { x: number; y: number },
+  stands: EventStand[],
+  blockers: Set<string>,
+  avoid: Set<string>,
+  softAvoid?: Set<string>,
+): AvoidRoute {
+  try {
+    if (avoid.size > 0) {
+      const r = routeTo(map, tileset, from, stands, new Set([...blockers, ...avoid]));
+      if (r) return { route: r, throughAvoid: false };
+      if (softAvoid && softAvoid.size > 0) {
+        const r2 = routeTo(map, tileset, from, stands, new Set([...blockers, ...softAvoid]));
+        if (r2) return { route: r2, throughAvoid: false };
+      }
+    }
+    const plain = routeTo(map, tileset, from, stands, blockers);
+    return { route: plain, throughAvoid: !!plain && plain.steps.some(s => avoid.has(key(s.x, s.y))) };
+  } catch {
+    return { route: null, throughAvoid: false };
+  }
+}

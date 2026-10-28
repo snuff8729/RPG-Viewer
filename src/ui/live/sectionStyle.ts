@@ -1,4 +1,4 @@
-import { BookOpen, CircleCheck, DoorOpen, Gift, Hand, Lock, MessageCircle, Repeat, type LucideIcon } from "lucide-react";
+import { BookOpen, CircleCheck, DoorOpen, Gift, Hand, Lock, MessageCircle, Repeat, Swords, type LucideIcon } from "lucide-react";
 import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 
 export interface SectionStyle {
@@ -22,6 +22,7 @@ const STYLES: Record<Section, SectionStyle> = {
   item: { label: "아이템", Icon: Gift, text: "text-section-item", border: "border-section-item", bg: "bg-section-item", fill: "fill-section-item", cssVar: "--section-item" },
   repeat: { label: "반복하면 달라짐", Icon: Repeat, text: "text-section-repeat", border: "border-section-repeat", bg: "bg-section-repeat", fill: "fill-section-repeat", cssVar: "--section-repeat" },
   exit: { label: "다른 곳으로 이동", Icon: DoorOpen, text: "text-section-exit", border: "border-section-exit", bg: "bg-section-exit", fill: "fill-section-exit", cssVar: "--section-exit" },
+  enemy: { label: "적", Icon: Swords, text: "text-section-enemy", border: "border-section-enemy", bg: "bg-section-enemy", fill: "fill-section-enemy", cssVar: "--section-enemy" },
   talk: { label: "다 봄 (다시 가능)", Icon: Hand, text: "text-section-talk", border: "border-section-talk", bg: "bg-section-talk", fill: "fill-section-talk", cssVar: "--section-talk" },
   locked: { label: "잠김", Icon: Lock, text: "text-section-locked", border: "border-section-locked", bg: "bg-section-locked", fill: "fill-section-locked", cssVar: "--section-locked" },
   done: { label: "다 봄", Icon: CircleCheck, text: "text-section-done", border: "border-section-done", bg: "bg-section-done", fill: "fill-section-done", cssVar: "--section-done" },

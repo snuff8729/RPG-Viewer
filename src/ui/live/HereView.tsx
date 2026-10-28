@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { ChecklistCard } from "./ChecklistCard";
+import { EncounterCard } from "./EncounterCard";
 import { HereMapArea } from "./HereMapArea";
 import { HereNotConnected } from "./HereNotConnected";
 import { eventStyle, sectionStyle, type SectionStyle } from "./sectionStyle";
@@ -15,7 +16,7 @@ const HIGHLIGHT_MS = 1500;
 const TALK_FOLD = 8;
 type GroupKey = ChecklistEvent["section"] | "story";
 /** 목록 구역 순서. 이야기·자동 진행(story)은 구역과 상관없이 따로 모은다 */
-const GROUP_KEYS: GroupKey[] = ["now", "item", "repeat", "exit", "talk", "locked", "story", "done"];
+const GROUP_KEYS: GroupKey[] = ["now", "item", "repeat", "exit", "enemy", "talk", "locked", "story", "done"];
 const groupOf = (e: ChecklistEvent): GroupKey => (e.story ? "story" : e.section);
 const groupStyle = (k: GroupKey): SectionStyle => (k === "story" ? eventStyle({ section: "locked", story: true }) : sectionStyle(k));
 
@@ -97,6 +98,7 @@ export function HereView() {
         <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>할 것 {checklist.remaining}개 남음</Badge>
       </div>
       <HereMapArea here={here} focus={focus} onPick={onPick} />
+      <EncounterCard mapId={checklist.mapId} />
       {checklist.events.length === 0 && <p className="text-sm text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}
       {GROUP_KEYS.map((key) => {
         const evs = groups.get(key) ?? [];

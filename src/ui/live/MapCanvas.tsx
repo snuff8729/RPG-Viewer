@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Crosshair, Maximize, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
+import { mapEncounters, regionCells } from "@/core/live/enemies";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blocked } from "@/core/map/passage";
 import type { Route } from "@/core/map/route";
@@ -153,8 +154,52 @@ function arrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, dir: 2 | 4
   ctx.stroke();
 }
 
+/** lucide Swords 아이콘 선(24×24) */
+const SWORDS_PATHS = [
+  "m13 19 6-6",
+  "M14.5 17.5 3.586 6.586A2 2 0 013 5.172V3h2.172a2 2 0 011.414.586L17.5 14.5",
+  "m14.828 6.172 2.586-2.586A2 2 0 0118.828 3H21v2.172a2 2 0 01-.586 1.414l-2.586 2.586",
+  "m16 16 4 4",
+  "m19 21 2-2",
+  "m5 14 4 4",
+  "m5 21-2-2",
+  "M7.5 16.5 4 20",
+];
+let swordsPath: Path2D | null = null;
+
+/** 적 표시: 빨간 원에 칼 두 자루. 쫓아오는 적은 점선 고리를 두른다. */
+function drawEnemy(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, col: string, px: number, chase: boolean) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2 * px;
+  ctx.stroke();
+  if (chase) {
+    ctx.save();
+    ctx.setLineDash([3 * px, 2 * px]);
+    ctx.strokeStyle = col;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 3 * px, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  swordsPath ??= (() => { const p = new Path2D(); for (const d of SWORDS_PATHS) p.addPath(new Path2D(d)); return p; })();
+  const s = (r * 1.3) / 24;
+  ctx.save();
+  ctx.translate(cx - 12 * s, cy - 12 * s);
+  ctx.scale(s, s);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2.5;
+  ctx.stroke(swordsPath);
+  ctx.restore();
+}
+
 interface OverlayInput {
   tiles: LoadedTiles; walls: Path2D | null; listed: ChecklistEvent[]; numbers: Map<number, number>;
+  /** 적이 나오는 구역 칸(보이게 했을 때만) */
+  regions: Path2D | null;
   /** 움직이는 이벤트(지금 위치에 그린다)와 캐릭터 그림 */
   mobile: CurrentEvent[]; chars: Map<string, ImageBitmap | null> | null;
   player: { x: number; y: number }; route: Route | null; selected: number | null;
@@ -178,6 +223,13 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
     ctx.setTransform(cell, 0, 0, cell, 0, 0);
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.fill(o.walls);
+  }
+  if (o.regions) {
+    ctx.setTransform(cell, 0, 0, cell, 0, 0);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = cssVar("--section-enemy");
+    ctx.fill(o.regions);
+    ctx.globalAlpha = 1;
   }
   // 움직이는 이벤트 그림(지금 위치)
   if (o.chars && o.mobile.length > 0) {
@@ -226,6 +278,10 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
   for (const ev of o.listed) {
     const n = o.numbers.get(ev.eventId);
     const cx = c(ev.x), cy = ev.y * cell + Math.min(cell * 0.2, r);
+    if (ev.section === "enemy" && !ev.story) {
+      drawEnemy(ctx, cx, cy, ev.eventId === o.selected ? r * 1.25 : r, colour(ev), px, !!ev.enemy?.chase);
+      continue;
+    }
     ctx.beginPath();
     if (n == null) {
       ctx.globalAlpha = 0.7;
@@ -275,7 +331,9 @@ function useThemeTick(): number {
 }
 
 /** 실제 맵 그림(타일셋·이벤트 그림) 위에 번호·내 위치·길을 겹쳐 그린다. 표시를 누르면 onPick(eventId). */
-export function MapCanvas({ tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false }: {
+export function MapCanvas({
+  tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false, avoidEnemies, onAvoidEnemiesChange,
+}: {
   tiles: LoadedTiles;
   /** 지금 활성 페이지가 있는 이벤트(그림·길막음용, 지금 위치) */
   events: CurrentEvent[];
@@ -293,8 +351,11 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
    * 맞춤이 너무 작으면 읽을 수 있는 크기로 내 위치를 가운데 두고, 내가 화면 밖으로 나가면 따라간다.
    */
   compact?: boolean;
+  /** 적 피해서 길 찾기(없으면 스위치를 안 보인다) */
+  avoidEnemies?: boolean;
+  onAvoidEnemiesChange?: (v: boolean) => void;
 }) {
-  const { assets } = useGame();
+  const { assets, data } = useGame();
   const switchId = useId();
   const { map } = tiles;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -315,6 +376,16 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   const [showWalls, setShowWalls] = useState(true);
   const [showLocked, setShowLocked] = useState(false);
   const markers = useMemo(() => mapMarkers(listed, showLocked), [listed, showLocked]);
+  const [showRegions, setShowRegions] = useState(false);
+  /** 적이 나오는 구역(랜덤 인카운트에 구역 지정이 있을 때) 칸들 */
+  const regionPath = useMemo(() => {
+    const enc = data ? mapEncounters(data, map.mapId) : null;
+    const cells = enc ? regionCells(map, enc.regions) : [];
+    if (cells.length === 0) return null;
+    const p = new Path2D();
+    for (const cl of cells) p.rect(cl.x, cl.y, 1, 1);
+    return p;
+  }, [data, map]);
   const themeTick = useThemeTick();
 
   // 캐릭터 시트 읽기
@@ -499,10 +570,11 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     if (!canvas || drawZoom == null) return;
     renderOverlay(canvas, drawZoom, {
       tiles, walls: showWalls ? walls : null, listed: markers, numbers: stableNumbers.numbers, mobile, chars: charsReady,
+      regions: showRegions ? regionPath : null,
       player: { x: px, y: py }, route, selected,
       selectedEv: selected != null ? listed.find((e) => e.eventId === selected) : undefined,
     });
-  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick]);
+  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick, showRegions, regionPath]);
 
   const zoomBy = (f: number) => {
     const el = scrollRef.current;
@@ -650,6 +722,18 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
         <Switch id={`${switchId}-walls`} checked={showWalls} onCheckedChange={setShowWalls} />
         <Label htmlFor={`${switchId}-walls`}>벽 표시</Label>
       </div>
+      {onAvoidEnemiesChange && (
+        <div className="flex items-center gap-2">
+          <Switch id={`${switchId}-avoid`} checked={avoidEnemies ?? true} onCheckedChange={onAvoidEnemiesChange} />
+          <Label htmlFor={`${switchId}-avoid`}>적 피해서 길 찾기</Label>
+        </div>
+      )}
+      {regionPath && (
+        <div className="flex items-center gap-2">
+          <Switch id={`${switchId}-regions`} checked={showRegions} onCheckedChange={setShowRegions} />
+          <Label htmlFor={`${switchId}-regions`}>적 나오는 구역 보기</Label>
+        </div>
+      )}
     </>
   );
   return (
