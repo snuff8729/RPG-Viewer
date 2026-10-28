@@ -9,6 +9,7 @@ import { computeMissing } from "@/core/live/missing";
 import { getInstallStatus, install as installPlugin, livePaths, pluginVersionOf, uninstall as uninstallPlugin, type InstallResult, type InstallStatus } from "@/core/live/installer";
 import { LogTail, readLive } from "@/core/live/tail";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
+import { clearReadPositions, gameKeyOf } from "@/ui/live/readPosition";
 
 export type Connection = "noPlugin" | "waiting" | "connected" | "stale";
 
@@ -43,6 +44,13 @@ export interface LiveContextValue {
   latestBranch: number | null;
   /** 뷰어에 들어 있는 플러그인 버전 */
   bundledVersion: string;
+  /**
+   * 현재 게임의 기록을 끝까지(나눠 읽기 `more` 없이) 한 번 읽었고, records·model이 그 시점까지를 담고 있다.
+   * 그 전에는 기록이 앞부분만 있을 수 있어 읽은 위치·창을 정하면 안 된다.
+   */
+  caughtUp: boolean;
+  /** 기록 파일이 초기화(LogTail reset)될 때마다 1씩 오른다. records·model과 같은 파생 순간 값. */
+  logEpoch: number;
 }
 
 /**
@@ -75,11 +83,24 @@ const EMPTY_NOISY = new Set<number>();
  * 폴링이 본 최신 기록 상태(변경 즉시 갱신). 파생값은 Derived로 따로 스로틀한다.
  * gen: 누적기마다 다른 번호 — 새 누적기의 version이 이전 누적기의 version과 같아도 섞이지 않게 (gen, version)으로 구분한다.
  */
-interface TailInfo { gen: number; version: number; count: number; lastT: number | null; badLines: number; bytes: number | null }
-const EMPTY_TAIL: TailInfo = { gen: 0, version: 0, count: 0, lastT: null, badLines: 0, bytes: null };
+interface TailInfo { gen: number; version: number; count: number; lastT: number | null; badLines: number; bytes: number | null; caughtUp: boolean }
+const EMPTY_TAIL: TailInfo = { gen: 0, version: 0, count: 0, lastT: null, badLines: 0, bytes: null, caughtUp: false };
 
-/** 스로틀된 파생 순간의 누적기 스냅숏(모두 이후 append로 바뀌지 않는다). */
-interface Derived { gen: number; version: number; records: LogRecord[]; model: HistoryModel; coverage: Coverage; noisy: Set<number> }
+/** 스로틀된 파생 순간의 누적기 스냅숏(모두 이후 append로 바뀌지 않는다). caughtUp·epoch는 파생 순간의 TailEntry 값. */
+interface Derived { gen: number; version: number; records: LogRecord[]; model: HistoryModel; coverage: Coverage; noisy: Set<number>; caughtUp: boolean; epoch: number }
+
+/** 폴링 효과가 게임마다 만드는 누적기와 그 tail의 상태. */
+interface TailEntry {
+  acc: LiveAccumulator;
+  gen: number;
+  gameKey: string;
+  /** tail이 more 없이 끝까지 한 번 읽었다 */
+  caughtUp: boolean;
+  /** LogTail reset 횟수 */
+  epoch: number;
+  /** 읽은 위치를 지운 epoch(파생 순간에 지운다) */
+  clearedEpoch: number;
+}
 
 const LiveContext = createContext<LiveContextValue | null>(null);
 const LiveStatusContext = createContext<LiveStatusValue | null>(null);
@@ -148,7 +169,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refreshInstall(); }, [refreshInstall]);
 
   // 누적기: 폴링 효과가 게임(폴더·데이터)마다 새로 만든다. 파생 스로틀이 여기서 읽는다.
-  const accRef = useRef<{ acc: LiveAccumulator; gen: number } | null>(null);
+  const accRef = useRef<TailEntry | null>(null);
   const genCounter = useRef(0);
 
   // 폴링: 자기 재예약 setTimeout(setInterval 아님). 숨겨진 탭이면 건너뛴다. more면 바로 다시.
@@ -158,7 +179,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const tail = new LogTail(wfolder, paths.logFile);
     const acc = createAccumulator(data);
     const gen = ++genCounter.current;
-    const entry = { acc, gen };
+    const entry: TailEntry = { acc, gen, gameKey: gameKeyOf(data), caughtUp: false, epoch: 0, clearedEpoch: 0 };
     accRef.current = entry;
     let bad = 0;
     let liveModified: number | null = null;
@@ -175,9 +196,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
           if (res.changed) {
             // 새 기록만 누적기에 붙인다. reset이면 비우고 다시 쌓는다.
-            if (res.reset) { acc.reset(); bad = 0; }
+            // reset이면 epoch를 올린다 — 읽은 위치는 다음 파생 순간에 지운다(아래 파생 스로틀).
+            if (res.reset) { acc.reset(); bad = 0; entry.epoch++; }
             acc.append(res.records);
             bad += res.badLines;
+            if (!res.more) entry.caughtUp = true;
             // 기록 크기: 바뀐 주기에만 stat 한 번(LogTail은 고치지 않는다).
             let bytes: number | null = null;
             try { bytes = (await wfolder.stat(paths.logFile))?.size ?? null; } catch { bytes = null; }
@@ -185,8 +208,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             const recs = acc.records;
             setTailInfo({
               gen, version: acc.version, count: recs.length, lastT: recs.length > 0 ? recs[recs.length - 1].t : null,
-              badLines: bad, bytes,
+              badLines: bad, bytes, caughtUp: entry.caughtUp,
             });
+          } else if (!res.more && !entry.caughtUp) {
+            // 기록이 없거나 더 읽을 게 없음 — 끝까지 읽은 것
+            entry.caughtUp = true;
+            setTailInfo(p => (p.gen === gen ? { ...p, caughtUp: true } : { ...EMPTY_TAIL, gen, caughtUp: true }));
           }
           again = res.more;
           const lv = await readLive(wfolder, paths.liveFile, liveModified);
@@ -234,26 +261,33 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const lastDeriveAt = useRef(0);
   const tailGen = tailInfo.gen;
   const tailVersion = tailInfo.version;
+  const tailCaughtUp = tailInfo.caughtUp;
   useEffect(() => {
     const wait = Math.max(0, lastDeriveAt.current + DERIVE_MS - Date.now());
     const id = setTimeout(() => {
       lastDeriveAt.current = Date.now();
       const cur = accRef.current;
+      // 기록이 초기화됐으면 이 게임의 읽은 위치를 지운다. 새 epoch의 파생값을 내보내기 직전에 지워서,
+      // 그 사이 이전 기록 기준으로 저장된 위치도 함께 지워진다(읽기 탭은 epoch가 바뀌면 위치를 다시 읽는다).
+      if (cur && cur.epoch !== cur.clearedEpoch) { cur.clearedEpoch = cur.epoch; clearReadPositions(cur.gameKey); }
       if (!cur || cur.acc.records.length === 0) { setDerived(null); return; }
-      const { acc, gen } = cur;
+      const { acc, gen, caughtUp, epoch } = cur;
       const v = acc.version;
-      setDerived((prev) => (prev && prev.gen === gen && prev.version === v
+      setDerived((prev) => (prev && prev.gen === gen && prev.version === v && prev.caughtUp === caughtUp && prev.epoch === epoch
         ? prev
-        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: acc.coverage(), noisy: acc.noisy() }));
+        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: acc.coverage(), noisy: acc.noisy(), caughtUp, epoch }));
     }, wait);
     return () => clearTimeout(id);
-  }, [tailGen, tailVersion]);
+  }, [tailGen, tailVersion, tailCaughtUp]);
 
   const derivedRecords = derived?.records ?? EMPTY_RECORDS;
   const model = derived?.model ?? EMPTY_MODEL;
   const coverage = derived?.coverage ?? EMPTY_COVERAGE;
   const noisy = derived?.noisy ?? EMPTY_NOISY;
   const badLines = tailInfo.badLines;
+  // 파생값이 있으면 그 순간의 caughtUp, 기록이 하나도 없으면(파생값 null) tail 상태만으로 판단.
+  const caughtUp = tailInfo.caughtUp && (derived ? derived.caughtUp : tailInfo.count === 0);
+  const logEpoch = derived?.epoch ?? 0;
 
   // 연결이 끊기면 null → 조건 판정 "?"
   const live = fresh ? liveState : null;
@@ -286,7 +320,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     supported, install, refreshInstall, doInstall, doUninstall,
     connection, records: derivedRecords, badLines, model, coverage, live, missing,
     noisy, uncertainSeqs: coverage.uncertainSeqs, changedSeqs: coverage.changedSeqs, latestBranch: model.latestBranch, bundledVersion,
-  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, derivedRecords, badLines, model, coverage, live, missing, noisy]);
+    caughtUp, logEpoch,
+  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, derivedRecords, badLines, model, coverage, live, missing, noisy, caughtUp, logEpoch]);
 
   const statusValue = useMemo<LiveStatusValue>(() => ({ lastSeenT, lastLive, logStats }), [lastSeenT, lastLive, logStats]);
 

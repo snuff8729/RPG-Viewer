@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { initialReadSeq, loadReadSeq, readKey, saveReadSeq, type StoreLike } from "./readPosition";
+import { clearReadPositions, initialReadSeq, loadReadSeq, readKey, saveReadSeq, type StoreLike } from "./readPosition";
 
 function fake(): StoreLike & { map: Map<string, string> } {
   const map = new Map<string, string>();
-  return { map, getItem: k => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } };
+  return {
+    map, getItem: k => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); },
+    removeItem: k => { map.delete(k); }, get length() { return map.size; }, key: i => [...map.keys()][i] ?? null,
+  };
 }
 
 describe("readPosition", () => {
@@ -64,11 +67,31 @@ describe("initialReadSeq", () => {
   it("nothing saved → -1", () => expect(initialReadSeq("g", 2, path, fake())).toBe(-1));
 });
 
-describe("initialReadSeq stale", () => {
-  it("ignores a saved seq beyond the end of the path (log reset)", () => {
+describe("initialReadSeq beyond path end", () => {
+  it("keeps a saved seq beyond the end of the path (log still loading)", () => {
     const s = fake();
     saveReadSeq("g", 1, 500, s);
-    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 9, branch: 1 }], s)).toBe(-1);
-    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 500, branch: 1 }], s)).toBe(500);
+    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 9, branch: 1 }], s)).toBe(500);
+  });
+});
+
+describe("clearReadPositions", () => {
+  it("removes every branch of that game only", () => {
+    const s = fake();
+    saveReadSeq("g", 1, 5, s);
+    saveReadSeq("g", 2, 7, s);
+    saveReadSeq("g.x", 1, 3, s); // 이름이 접두어로 겹치는 다른 게임
+    s.map.set("rpgv.readerMode", "full");
+    clearReadPositions("g", s);
+    expect(loadReadSeq("g", 1, s)).toBe(-1);
+    expect(loadReadSeq("g", 2, s)).toBe(-1);
+    expect(loadReadSeq("g.x", 1, s)).toBe(3);
+    expect(s.map.get("rpgv.readerMode")).toBe("full");
+  });
+  it("never throws", () => {
+    const bad: StoreLike = { getItem: () => null, setItem: () => {}, removeItem: () => { throw new Error("x"); }, length: 1, key: () => "rpgv.read.g.1" };
+    expect(() => clearReadPositions("g", bad)).not.toThrow();
+    expect(() => clearReadPositions("g", null)).not.toThrow();
+    expect(() => clearReadPositions("g", { getItem: () => null, setItem: () => {} })).not.toThrow();
   });
 });

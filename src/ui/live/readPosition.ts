@@ -2,10 +2,19 @@
 export interface StoreLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  /** 아래 셋은 지우기(clearReadPositions)에만 쓴다. 없으면 지우지 않는다. */
+  removeItem?(key: string): void;
+  readonly length?: number;
+  key?(index: number): string | null;
 }
 
 function defaultStore(): StoreLike | null {
   try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
+}
+
+/** 읽은 위치 저장 키의 게임 부분(게임 제목 + 데이터 폴더). */
+export function gameKeyOf(data: { system: { gameTitle: string }; dataRoot: string }): string {
+  return `${data.system.gameTitle}|${data.dataRoot}`;
 }
 
 export function readKey(gameKey: string, branch: number): string {
@@ -35,18 +44,30 @@ export function saveReadSeq(gameKey: string, branch: number, seq: number, store:
 /**
  * 갈래의 시작 읽은 위치. 갈래 경로에는 조상 갈래 기록이 앞에 붙어 있으므로,
  * 조상 갈래에서 읽은 위치(그 갈래 몫의 마지막 seq까지)도 이어받는다.
+ * 경로 끝보다 큰 저장값도 버리지 않는다 — 기록이 초기화되면 LiveProvider가 clearReadPositions로 지운다.
  */
 export function initialReadSeq(gameKey: string, branch: number, path: { seq: number; branch: number }[], store: StoreLike | null = defaultStore()): number {
   let best = loadReadSeq(gameKey, branch, store);
   const lastOf = new Map<number, number>();
-  let maxSeq = -1;
   for (const r of Array.isArray(path) ? path : []) {
     if (!r || typeof r.seq !== "number") continue;
-    maxSeq = Math.max(maxSeq, r.seq);
     if (r.branch !== branch) lastOf.set(r.branch, Math.max(lastOf.get(r.branch) ?? -1, r.seq));
   }
-  // 경로 끝보다 큰 저장값은 기록이 지워졌거나 새로 시작된 것 — 무시한다
-  if (best > maxSeq) best = -1;
   for (const [b, last] of lastOf) best = Math.max(best, Math.min(loadReadSeq(gameKey, b, store), last));
   return best;
+}
+
+/** 게임의 모든 갈래 읽은 위치(rpgv.read.{gameKey}.{갈래})를 지운다 — 기록 파일이 초기화됐을 때. */
+export function clearReadPositions(gameKey: string, store: StoreLike | null = defaultStore()): void {
+  if (!store || typeof store.key !== "function" || typeof store.removeItem !== "function") return;
+  try {
+    const prefix = `rpgv.read.${gameKey}.`;
+    const doomed: string[] = [];
+    const n = store.length ?? 0;
+    for (let i = 0; i < n; i++) {
+      const k = store.key(i);
+      if (k !== null && k.startsWith(prefix) && /^\d+$/.test(k.slice(prefix.length))) doomed.push(k);
+    }
+    for (const k of doomed) store.removeItem(k);
+  } catch { /* 저장소 사용 불가 */ }
 }
