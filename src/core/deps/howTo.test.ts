@@ -69,22 +69,37 @@ describe("howTo", () => {
     expect(r.steps[0].availableNow).toBe(true);
   });
 
-  it("fork with none available: candidates sorted by level, capped at 5", () => {
+  it("fork ranking: level, then fewer unmet reqs, then ctx id; unreachable last", () => {
     const events = [
-      ev(1, [page([swOn(1)], sw1(4))]),          // S4: 쓰는 곳 없음 → 레벨 ∞
-      ev(2, [page([swOn(5)], sw1(1))]),          // S1 필요 → 레벨 2
-      ev(3, [page([swOn(5)], sw1(2))]),          // S2 필요 → 레벨 1
-      ev(4, [page([swOn(2)], { selfSwitchValid: true })]),  // 셀프 스위치 A 쓰는 곳 없음
-      ev(5, [page([swOn(2)])]),                  // S2는 바로 켤 수 있음 → S2 레벨 1
+      ev(6, [page([swOn(3)])]),                  // S3 레벨 1
+      ev(1, [page([swOn(1)], sw1(3))]),          // S1 레벨 2
+      ev(5, [page([swOn(2)])]),                  // S2 레벨 1
+      ev(2, [page([swOn(5)], sw1(1))]),          // 레벨 2
+      ev(4, [page([swOn(5)], sw1(4))]),          // S4 쓰는 곳 없음 → 닿을 수 없음
+      ev(10, [page([swOn(5)], sw1(2))]),         // 레벨 1, 요구 1
+      ev(7, [page([swOn(5)], { ...sw1(2), switch2Valid: true, switch2Id: 3 })]),  // 레벨 1, 요구 2
+      ev(3, [page([swOn(5)], sw1(2))]),          // 레벨 1, 요구 1
     ];
-    const data = game([[2, map(events)]]);
-    const r = howTo(swReq(5), data, live({ switches: [] }));
-    // E5가 S2를 지금 켤 수 있지만 S5 쓰는 곳(E2·E3)은 둘 다 지금은 못 함 → 갈림길
+    const r = howTo(swReq(5), game([[2, map(events)]]), live());
     expect(r.end.kind).toBe("fork");
     if (r.end.kind !== "fork") return;
-    expect(r.end.candidates.map(s => s.where)).toEqual(["숲 › E3 › p1", "숲 › E2 › p1"]);
+    expect(r.end.candidates.map(s => s.where)).toEqual(["숲 › E3 › p1", "숲 › E10 › p1", "숲 › E7 › p1", "숲 › E2 › p1", "숲 › E4 › p1"]);
     expect(r.end.more).toBe(0);
+    expect(r.end.req.atom).toEqual({ kind: "switch", id: 5 });   // 깊은 갈림길도 그 지점의 요구를 알려 준다
+  });
 
+  it("fork ranking: available now beats lower level", () => {
+    const data = game([
+      [1, map([ev(3, [page([swOn(5)]), page([c(101)])])])],   // 레벨 0이지만 활성 페이지가 p2
+      [2, map([ev(4, [page([swOn(1)])]), ev(1, [page([swOn(5)], sw1(1))]), ev(2, [page([swOn(5)], sw1(1))])])],
+    ]);
+    const r = howTo(swReq(5), data, live({ switches: [1], events: [{ eventId: 3, page: 1 }] }));
+    expect(r.end.kind === "fork" && r.end.candidates.map(s => [s.where, s.availableNow])).toEqual([
+      ["숲 › E1 › p1", true], ["숲 › E2 › p1", true], ["마을 › E3 › p1", false],
+    ]);
+  });
+
+  it("fork candidates are capped at 5", () => {
     const many = game([[2, map(Array.from({ length: 7 }, (_, i) => ev(i + 1, [page([swOn(5)], sw1(1))])))]]);
     const m = howTo(swReq(5), many, live());
     expect(m.end.kind === "fork" && [m.end.candidates.length, m.end.more]).toEqual([5, 2]);
@@ -92,7 +107,7 @@ describe("howTo", () => {
 
   it("fork candidate expands via opts.from", () => {
     const data = game([[2, map([
-      ev(1, [page([swOn(1)])]), ev(2, [page([swOn(5)], sw1(1))]), ev(3, [page([swOn(5)], sw1(2))]),
+      ev(1, [page([swOn(1)])]), ev(2, [page([swOn(5)], sw1(1))]), ev(3, [page([swOn(5)], sw1(2))]), ev(4, [page([swOn(2)])]),
     ])]]);
     const fork = howTo(swReq(5), data, live({ mapId: 1 }));
     // E2·E3 둘 다 지금은 못 함 → 갈림길
@@ -101,6 +116,62 @@ describe("howTo", () => {
     const r = howTo(swReq(5), data, live({ mapId: 1 }), { from });
     expect(r.end).toEqual({ kind: "done" });
     expect(r.steps.map(s => s.where)).toEqual(["숲 › E1 › p1", "숲 › E2 › p1"]);
+  });
+
+  it("several writers in one context: linear, prefers the one available now", () => {
+    const data = game([[2, map([
+      ev(2, [page([swOn(1)])]),
+      ev(1, [page([swOn(5), swOn(5), swOn(5)], sw1(1))], "준비"),
+    ])]]);
+    const r = howTo(swReq(5), data, live());
+    expect(r.end).toEqual({ kind: "done" });
+    expect(r.steps.map(s => s.where)).toEqual(["숲 › E2 › p1", "숲 › 준비 › p1"]);
+
+    // 같은 페이지: 분기 안(S3 필요) 쓰기가 먼저 나오지만 지금 되는 분기 밖 쓰기를 고른다
+    const branched = game([[2, map([ev(1, [page([c(111, [0, 3, 0]), swOn(5, 1), c(0, [], 1), c(412), swOn(5)])])])]]);
+    const b = howTo(swReq(5), branched, live());
+    expect(b.end).toEqual({ kind: "done" });
+    expect(b.steps).toHaveLength(1);
+    expect(b.steps[0].availableNow).toBe(true);
+    expect(b.steps[0].writer.reqs).toHaveLength(0);
+  });
+
+  it("fork lists one candidate per context with its best variable action", () => {
+    const add = (v: number) => c(122, [1, 1, 1, 0, v]);
+    const set = (v: number) => c(122, [1, 1, 0, 0, v]);
+    const data = game([[2, map([
+      ev(3, [page([swOn(1)])]),
+      ev(1, [page([add(5), add(100), add(10)], sw1(1))]),
+      ev(2, [page([add(200), set(50)], sw1(1))]),
+    ])]]);
+    const req: Req = { atom: { kind: "variable", id: 1 }, test: { kind: "variable", id: 1, op: ">=", value: 50 } };
+    const r = howTo(req, data, live());
+    expect(r.end.kind).toBe("fork");
+    if (r.end.kind !== "fork") return;
+    expect(r.end.candidates.map(s => [s.where, s.action])).toEqual([
+      ["숲 › E1 › p1", "변수 [호감도] += 100"],
+      ["숲 › E2 › p1", "변수 [호감도] = 50"],
+    ]);
+    expect(r.end.more).toBe(0);
+  });
+
+  it("unreachable contexts (e.g. uncalled debug common event) do not cause a fork", () => {
+    const debug = ce(1, [swOn(5)]);   // 호출하는 곳이 없는 호출식 공통 이벤트 → 닿을 수 없음
+    const data = game([[2, map([ev(2, [page([swOn(1)])]), ev(1, [page([swOn(5)], sw1(1))])])]], [debug]);
+    const r = howTo(swReq(5), data, live());
+    expect(r.end).toEqual({ kind: "done" });
+    expect(r.steps.map(s => s.where)).toEqual(["숲 › E2 › p1", "숲 › E1 › p1"]);
+
+    // 닿을 수 있는 문맥이 둘 이상이면 갈림길, 닿을 수 없는 문맥은 맨 뒤
+    const two = game([[2, map([ev(2, [page([swOn(1)])]), ev(1, [page([swOn(5)], sw1(1))]), ev(3, [page([swOn(5)], sw1(1))])])]], [debug]);
+    const f = howTo(swReq(5), two, live());
+    expect(f.end.kind === "fork" && f.end.candidates.map(s => s.where)).toEqual(["숲 › E1 › p1", "숲 › E3 › p1", "공통 이벤트 공통1"]);
+
+    // 닿을 수 없는 문맥뿐이면 예전처럼: 하나면 따라가고, 여럿이면 갈림길
+    expect(howTo(swReq(5), game([[2, map([])]], [debug]), live()).steps.map(s => s.where)).toEqual(["공통 이벤트 공통1"]);
+    const onlyDead = game([[2, map([])]], [debug, ce(2, [swOn(5)])]);
+    const d = howTo(swReq(5), onlyDead, live());
+    expect(d.end.kind === "fork" && d.end.candidates.map(s => s.where)).toEqual(["공통 이벤트 공통1", "공통 이벤트 공통2"]);
   });
 
   it("opaque ends: no writer, script-only, off-only", () => {
