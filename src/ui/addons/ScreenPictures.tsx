@@ -1,18 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
-  DEFAULT_SCREEN, pictureRect, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type ScreenSize, type StandGroup,
+  DEFAULT_SCREEN, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type StandGroup,
 } from "@/core/addons/screenPictures";
 import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
-import { imageAlphaStats } from "./imageStats";
 import { HidePicturesMenu } from "./HidePicturesMenu";
-
-type Status = "loading" | "ok" | "missing" | "failed";
-const NO_IMAGES = new Map<string, ImageBitmap>();
+import { standView, usePictureImages, type View } from "./pictureImages";
 
 /** 그림 블렌드 모드 → 캔버스 합성(0 보통, 1 더하기, 2 곱하기, 3 스크린) */
 const COMPOSITE: GlobalCompositeOperation[] = ["source-over", "lighter", "multiply", "screen"];
@@ -58,46 +55,6 @@ function tonedCopy(img: ImageBitmap, tone: [number, number, number, number]): Ca
   }
 }
 
-/** 그림들을 읽어 이름 → 이미지·상태. retry로 실패한 것을 다시 읽는다. */
-function usePictureImages(names: string[]) {
-  const { assets } = useGame();
-  const key = names.join("\n");
-  const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<{ key: string; images: Map<string, ImageBitmap>; status: Map<string, Status> }>(
-    () => ({ key: "", images: new Map(), status: new Map() }),
-  );
-  useEffect(() => {
-    if (!assets) return;
-    let cancelled = false;
-    const list = key ? key.split("\n") : [];
-    for (const name of list) {
-      assets.fetch("pictures", name).then(async (r) => {
-        const img = r.status === "ok" ? await assets.image("pictures", name) : null;
-        if (cancelled) return;
-        const st: Status = r.status === "ok" ? (img ? "ok" : "missing") : r.status;
-        setState((prev) => {
-          const base = prev.key === `${key}#${attempt}` ? prev : { key: `${key}#${attempt}`, images: new Map(), status: new Map() };
-          const images = new Map(base.images), status = new Map(base.status);
-          if (img) images.set(name, img);
-          status.set(name, st);
-          return { key: base.key, images, status };
-        });
-      }, () => {
-        if (!cancelled) setState((prev) => ({ ...prev, status: new Map(prev.status).set(name, "failed") }));
-      });
-    }
-    return () => { cancelled = true; };
-  }, [assets, key, attempt]);
-  const current = state.key === `${key}#${attempt}` ? state : null;
-  return {
-    images: current?.images ?? NO_IMAGES,
-    status: (name: string): Status => current?.status.get(name) ?? "loading",
-    retry: () => setAttempt((n) => n + 1),
-  };
-}
-
-/** 캔버스에 그릴 화면 부분(게임 화면 좌표) */
-interface View { left: number; top: number; width: number; height: number }
 
 /** 캔버스에 그림들을 번호 순으로 그린다(위치·기준점·크기·투명도·블렌드·색조·회전). view: 그릴 화면 부분. */
 function ScreenCanvas({ pictures, view, images, className }: {
@@ -133,28 +90,6 @@ function ScreenCanvas({ pictures, view, images, className }: {
   return <canvas ref={ref} width={view.width} height={view.height} className={className} />;
 }
 
-/**
- * 스탠딩: 그림들의 보이는 부분(투명하지 않은 부분)을 합친 곳(화면 안으로 자른 것). 화면 크기의 투명한 겹으로 그린 스탠딩도
- * 캐릭터 부분만 잘린다. 크기를 아직 모르면 화면 전체.
- */
-function standView(pictures: ScreenPicture[], size: ScreenSize, images: Map<string, ImageBitmap>): View {
-  const full = { left: 0, top: 0, width: size.width, height: size.height };
-  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-  for (const p of pictures) {
-    const img = images.get(p.name);
-    if (!img) return full;
-    const stats = imageAlphaStats(img);
-    if (stats && !stats.box) continue; // 다 투명한 겹
-    // 그리는 크기 그대로(불러온 그림의 원래 크기 — 기록에 크기가 없는 0x0 그림도)
-    const r = pictureRect({ ...p, w: img.width, h: img.height }, null, stats?.box ?? null);
-    if (!r) return full;
-    left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
-  }
-  left = Math.max(0, Math.floor(left)); top = Math.max(0, Math.floor(top));
-  right = Math.min(size.width, Math.ceil(right)); bottom = Math.min(size.height, Math.ceil(bottom));
-  if (!(right > left && bottom > top)) return full;
-  return { left, top, width: right - left, height: bottom - top };
-}
 
 /** 스탠딩 묶음 이름·설명: 그림에 붙은 어댑터의 뷰어 도움 → 기본("아마네 스탠딩") */
 function groupText(g: StandGroup): { label: string; title: string | null } {
@@ -166,7 +101,7 @@ function groupText(g: StandGroup): { label: string; title: string | null } {
 }
 
 /** 그림 한 장(누르면 크게 보기) */
-function ShotButton({ pictures, view, images, stand, title, names, caption }: {
+export function ShotButton({ pictures, view, images, stand, title, names, caption }: {
   pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; stand: boolean; title: string; names: string[]; caption?: string;
 }) {
   const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
@@ -237,15 +172,21 @@ export function ScreenPictures({ shot }: { shot: ScreenShot }) {
         <div className="min-w-0 flex-1">{body}</div>
         <HidePicturesMenu shot={shot} />
       </div>
-      {(missing.length > 0 || failed) && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {missing.map((n) => (
-            <span key={n} className="flex items-center gap-1 break-all"><ImageOff className="size-3.5 shrink-0" aria-hidden />{missingAssetText("pictures", n)}</span>
-          ))}
-          {failed && (
-            <Button type="button" variant="outline" size="xs" onClick={retry}><RotateCw data-icon="inline-start" />불러오지 못한 그림 다시 시도</Button>
-          )}
-        </div>
+      <PictureLoadNotes missing={missing} failed={failed} retry={retry} />
+    </div>
+  );
+}
+
+/** 게임 폴더에 없는 그림 이름과 `불러오지 못한 그림 다시 시도` */
+export function PictureLoadNotes({ missing, failed, retry }: { missing: string[]; failed: boolean; retry: () => void }) {
+  if (missing.length === 0 && !failed) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {missing.map((n) => (
+        <span key={n} className="flex items-center gap-1 break-all"><ImageOff className="size-3.5 shrink-0" aria-hidden />{missingAssetText("pictures", n)}</span>
+      ))}
+      {failed && (
+        <Button type="button" variant="outline" size="xs" onClick={retry}><RotateCw data-icon="inline-start" />불러오지 못한 그림 다시 시도</Button>
       )}
     </div>
   );

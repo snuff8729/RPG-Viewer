@@ -138,7 +138,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
       battles: battlesShown, notices: noticesShown, compose: { ctx: pictureCtx, vars },
     });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
-    return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || it.kind !== "screen"));
+    return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
   }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, screenShown, pictureCtx, vars]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
