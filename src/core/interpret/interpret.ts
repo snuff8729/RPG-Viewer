@@ -6,7 +6,9 @@ import { describeStateChange } from "./stateChange";
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const params = (c: EventCommand): any[] => (Array.isArray(c?.parameters) ? c.parameters : []);
-const indentOf = (c: EventCommand): number => (typeof c?.indent === "number" ? c.indent : 0);
+/** 이름 상자 코드: \n<X>, \nl<X>, \nc<X>, \nr<X> (대소문자 무시). X에는 \N[1] 같은 코드가 올 수 있다. */
+const NAME_BOX = /^\\n[lcr]?<([^<>]*)>/i;
+const indentOf =(c: EventCommand): number => (typeof c?.indent === "number" ? c.indent : 0);
 
 /**
  * Converts an RPG Maker event command list into a ScriptNode tree.
@@ -24,9 +26,14 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
     if (c && c.code === code && indentOf(c) === indent) { pos++; return c; }
     return undefined;
   };
-  const textLines = (code: number): string[] => {
+  /** 연속된 `code` 줄을 서식화한다. firstRaw가 있으면 첫 줄 원문 대신 쓴다. */
+  const textLines = (code: number, firstRaw?: string): string[] => {
     const lines: string[] = [];
-    while (pos < cmds.length && cmds[pos].code === code) lines.push(formatText(str(params(cmds[pos++])[0]), data));
+    while (pos < cmds.length && cmds[pos].code === code) {
+      const raw = lines.length === 0 && firstRaw !== undefined ? firstRaw : str(params(cmds[pos])[0]);
+      pos++;
+      lines.push(formatText(raw, data));
+    }
     return lines;
   };
 
@@ -37,12 +44,25 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
     const node: Extract<ScriptNode, { kind: "message" }> = { kind: "message", lines: [] };
     if (faceName) node.face = { name: faceName, index: faceIndex };
     let speaker = data.engine === "MZ" && str(p[4]) ? formatText(str(p[4]), data) : "";
+    // MV 이름 상자 플러그인(YEP_MessageCore 등): 첫 줄 맨 앞의 \n<X> / \nl<X> / \nc<X> / \nr<X>.
+    // \N[n](액터 이름)과는 꺾쇠로 구분된다. MZ 화자 이름이 있으면 코드만 지운다.
+    // 원본 명령은 건드리지 않고, 첫 줄을 고친 문자열로만 서식화한다.
+    let firstLine: string | undefined;
+    const first = cmds[pos];
+    if (first && first.code === 401) {
+      const raw = str(params(first)[0]);
+      const m = NAME_BOX.exec(raw);
+      if (m) {
+        if (!speaker) speaker = formatText(m[1], data);
+        firstLine = raw.slice(m[0].length);
+      }
+    }
     if (!speaker && faceName) {
       const actor = (data.actors ?? []).find(a => a && a.faceName === faceName && a.faceIndex === faceIndex);
       speaker = actor?.name ?? "";
     }
     if (speaker) node.speaker = speaker;
-    node.lines = textLines(401);
+    node.lines = textLines(401, firstLine);
     return node;
   }
 

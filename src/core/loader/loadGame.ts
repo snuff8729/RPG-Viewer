@@ -13,6 +13,8 @@ const ROOTS = [
   { data: "data", img: "img" },
 ];
 
+const MAP_CONCURRENCY = 8;
+
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -43,13 +45,13 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
     system = { gameTitle: "", currencyUnit: "", switches: [], variables: [] };
   }
 
-  async function readJson(file: string, mapId?: number): Promise<unknown | undefined> {
+  async function readJson(file: string): Promise<unknown | undefined> {
     try {
       const text = await folder.readText(file);
       if (text === null) throw new Error("파일을 찾을 수 없습니다");
       return JSON.parse(text.replace(/^\uFEFF/, ""));
     } catch (e) {
-      errors.push(mapId === undefined ? { file, message: errMessage(e) } : { file, message: errMessage(e), mapId });
+      errors.push({ file, message: errMessage(e) });
       return undefined;
     }
   }
@@ -71,18 +73,42 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const weapons = await readList<NamedEntry>("Weapons");
   const armors = await readList<NamedEntry>("Armors");
 
-  const maps = new Map<number, MapData>();
-  for (const info of mapInfos) {
-    if (!info || typeof info.id !== "number") continue;
-    const file = `${root.data}/Map${String(info.id).padStart(3, "0")}.json`;
-    const v = await readJson(file, info.id);
-    if (v === undefined) continue;
-    if (v === null || typeof v !== "object" || !Array.isArray((v as MapData).events)) {
-      errors.push({ file, message: "맵 데이터 형식이 올바르지 않습니다", mapId: info.id });
-      continue;
+  // 맵은 동시에 최대 MAP_CONCURRENCY개씩 읽는다. 결과는 MapInfos 순서로, 오류는 mapId 순으로 모은다.
+  const mapIds = mapInfos
+    .filter((info): info is MapInfo => !!info && typeof info === "object" && typeof info.id === "number")
+    .map((info) => info.id);
+  const loaded: (MapData | undefined)[] = new Array(mapIds.length);
+  const mapErrors: LoadError[] = [];
+  async function loadMap(id: number): Promise<MapData | undefined> {
+    const file = `${root!.data}/Map${String(id).padStart(3, "0")}.json`;
+    let v: unknown;
+    try {
+      const text = await folder.readText(file);
+      if (text === null) throw new Error("파일을 찾을 수 없습니다");
+      v = JSON.parse(text.replace(/^﻿/, ""));
+    } catch (e) {
+      mapErrors.push({ file, message: errMessage(e), mapId: id });
+      return undefined;
     }
-    maps.set(info.id, v as MapData);
+    if (v === null || typeof v !== "object" || !Array.isArray((v as MapData).events)) {
+      mapErrors.push({ file, message: "맵 데이터 형식이 올바르지 않습니다", mapId: id });
+      return undefined;
+    }
+    const m = v as MapData;
+    // 타일 데이터(data) 등은 버리고 필요한 필드만 보관한다.
+    return { displayName: typeof m.displayName === "string" ? m.displayName : "", events: m.events };
   }
+  let next = 0;
+  const worker = async () => {
+    while (next < mapIds.length) {
+      const i = next++;
+      loaded[i] = await loadMap(mapIds[i]).catch(() => undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAP_CONCURRENCY, mapIds.length) }, worker));
+  const maps = new Map<number, MapData>();
+  mapIds.forEach((id, i) => { const m = loaded[i]; if (m) maps.set(id, m); });
+  errors.push(...mapErrors.sort((a, b) => (a.mapId ?? 0) - (b.mapId ?? 0)));
 
   return {
     ok: true,

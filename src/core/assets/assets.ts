@@ -4,7 +4,11 @@ import { decryptImage } from "./decrypt";
 
 export type AssetKind = "faces" | "pictures";
 
-const EXTENSIONS = [".png", ".png_", ".rpgmvp"];
+/** 가능성이 높은 확장자부터: 암호화 게임이면 엔진의 암호화 확장자 → 다른 암호화 확장자 → .png. */
+function extensionsFor(data: GameData): string[] {
+  if (!data.system?.hasEncryptedImages) return [".png", ".png_", ".rpgmvp"];
+  return data.engine === "MZ" ? [".png_", ".rpgmvp", ".png"] : [".rpgmvp", ".png_", ".png"];
+}
 
 export class AssetStore {
   private cache = new Map<string, Promise<Blob | null>>();
@@ -29,7 +33,7 @@ export class AssetStore {
   }
 
   private async read(kind: AssetKind, name: string): Promise<Blob | null> {
-    for (const ext of EXTENSIONS) {
+    for (const ext of extensionsFor(this.data)) {
       const buf = await this.folder.readBinary(`${this.data.imgRoot}/${kind}/${name}${ext}`);
       if (!buf) continue;
       if (ext === ".png") return new Blob([buf], { type: "image/png" });

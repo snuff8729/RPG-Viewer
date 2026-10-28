@@ -1,6 +1,9 @@
 import { describeCommonEventConditions, describePageConditions, describeTroopPageConditions } from "../conditions/describe";
 import { hasDialogue, interpret } from "../interpret/interpret";
-import type { EventCommand, GameData, GameIndex, PageEntry, Ref, ScriptNode, SearchHit, XrefEntry } from "../types";
+import type {
+  CommonEvent, Condition, EventCommand, EventPage, GameData, GameIndex, MapEvent, MapInfo, PageEntry, Ref, ScriptNode,
+  SearchHit, Troop, TroopPage, XrefEntry,
+} from "../types";
 
 const GENERIC_NAME = /^EV\d+$/;
 const refKey = (r: Ref) => `${r.type}:${r.id}`;
@@ -37,9 +40,17 @@ function firstMessageTitle(nodes: ScriptNode[]): string | undefined {
   return found.speaker ? `${found.speaker} — "${cut}"` : `"${cut}"`;
 }
 
-function safeInterpret(list: EventCommand[], data: GameData): ScriptNode[] {
-  try { return interpret(list, data); } catch { return []; }
+function safeInterpret(list: unknown, data: GameData): ScriptNode[] {
+  try { return interpret(Array.isArray(list) ? (list as EventCommand[]) : [], data); } catch { return []; }
 }
+
+/** describe* 가 깨진 입력으로 던져도 색인은 계속한다. */
+function safeConditions(f: () => Condition[]): Condition[] {
+  try { const c = f(); return Array.isArray(c) ? c : []; } catch { return []; }
+}
+
+const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
+const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? v : []);
 
 export function buildIndex(data: GameData): GameIndex {
   const pages: PageEntry[] = [];
@@ -47,16 +58,17 @@ export function buildIndex(data: GameData): GameIndex {
     pages.push({ ...entry, nodes, hasDialogue: hasDialogue(nodes) });
   };
 
-  const infos = data.mapInfos
+  const infos = arr<MapInfo | null>(data.mapInfos)
     .map((m, i) => ({ m, i }))
-    .filter((x): x is { m: NonNullable<typeof x.m>; i: number } => !!x.m)
+    .filter((x): x is { m: MapInfo; i: number } => isObj(x.m))
     .sort((a, b) => a.m.order - b.m.order || a.i - b.i);
   for (const { m: info } of infos) {
     const map = data.maps.get(info.id);
     if (!map) continue;
-    const events = map.events.filter((e): e is NonNullable<typeof e> => !!e).sort((a, b) => a.id - b.id);
+    const events = arr<MapEvent | null>(map.events).filter((e): e is MapEvent => isObj(e)).sort((a, b) => a.id - b.id);
     for (const ev of events) {
-      const pageNodes = ev.pages.map(pg => safeInterpret(pg.list, data));
+      const evPages = arr<EventPage | null>(ev.pages);
+      const pageNodes = evPages.map(pg => (isObj(pg) ? safeInterpret(pg.list, data) : []));
       let title = ev.name;
       if (GENERIC_NAME.test(ev.name)) {
         for (const nodes of pageNodes) {
@@ -64,27 +76,35 @@ export function buildIndex(data: GameData): GameIndex {
           if (t) { title = t; break; }
         }
       }
-      ev.pages.forEach((pg, pi) => make({
-        location: { source: "map", mapId: info.id, eventId: ev.id, page: pi },
-        path: `${info.name} › ${title} › p${pi + 1}`,
-        title,
-        conditions: describePageConditions(pg.conditions, pg.trigger, data),
-      }, pageNodes[pi]));
+      evPages.forEach((pg, pi) => {
+        if (!isObj(pg)) return;
+        make({
+          location: { source: "map", mapId: info.id, eventId: ev.id, page: pi },
+          path: `${info.name} › ${title} › p${pi + 1}`,
+          title,
+          conditions: isObj(pg.conditions)
+            ? safeConditions(() => describePageConditions(pg.conditions, pg.trigger, data)) : [],
+        }, pageNodes[pi]);
+      });
     }
   }
-  for (const ce of data.commonEvents.filter((c): c is NonNullable<typeof c> => !!c).sort((a, b) => a.id - b.id)) {
+  for (const ce of arr<CommonEvent | null>(data.commonEvents).filter((c): c is CommonEvent => isObj(c)).sort((a, b) => a.id - b.id)) {
     make({
       location: { source: "common", commonEventId: ce.id },
       path: `공통 이벤트 › ${ce.name}`, title: ce.name,
-      conditions: describeCommonEventConditions(ce, data),
+      conditions: safeConditions(() => describeCommonEventConditions(ce, data)),
     }, safeInterpret(ce.list, data));
   }
-  for (const tr of data.troops.filter((t): t is NonNullable<typeof t> => !!t).sort((a, b) => a.id - b.id)) {
-    tr.pages.forEach((pg, pi) => make({
-      location: { source: "troop", troopId: tr.id, page: pi },
-      path: `전투 › ${tr.name} › p${pi + 1}`, title: tr.name,
-      conditions: describeTroopPageConditions(pg.conditions, pg.span, data),
-    }, safeInterpret(pg.list, data)));
+  for (const tr of arr<Troop | null>(data.troops).filter((t): t is Troop => isObj(t)).sort((a, b) => a.id - b.id)) {
+    arr<TroopPage | null>(tr.pages).forEach((pg, pi) => {
+      if (!isObj(pg)) return;
+      make({
+        location: { source: "troop", troopId: tr.id, page: pi },
+        path: `전투 › ${tr.name} › p${pi + 1}`, title: tr.name,
+        conditions: isObj(pg.conditions)
+          ? safeConditions(() => describeTroopPageConditions(pg.conditions, pg.span, data)) : [],
+      }, safeInterpret(pg.list, data));
+    });
   }
 
   const strings: { entry: PageEntry; text: string; lower: string; nodePath: number[] }[] = [];

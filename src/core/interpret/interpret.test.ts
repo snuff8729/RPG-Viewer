@@ -133,3 +133,42 @@ describe("hasDialogue", () => {
   it("detects nested dialogue", () => expect(hasDialogue(interpret([
     cmd(111, 0, [0, 1, 0]), cmd(101, 1, ["", 0, 0, 2]), cmd(401, 1, ["x"]), cmd(0, 1, []), cmd(412, 0, [])], data))).toBe(true));
 });
+
+describe("MV name-box speaker", () => {
+  const mv = (): GameData => ({ ...data, engine: "MV" });
+  const one = (face: string, line: string, name = "", d = mv()) =>
+    interpret([cmd(101, 0, [face, 0, 0, 2, name]), cmd(401, 0, [line])], d)[0] as Extract<ScriptNode, { kind: "message" }>;
+  it("n<X> without face sets speaker and strips the code", () =>
+    expect(one("", String.raw`\n<하롤드>안녕`)).toEqual({ kind: "message", speaker: "하롤드", lines: ["안녕"] }));
+  it("nl<N[1]> formats the name", () => {
+    const n = one("", String.raw`\nl<\N[1]>…`);
+    expect(n.speaker).toBe("레나");
+    expect(n.lines).toEqual(["…"]);
+  });
+  it("NC<X> / nr<X> are case-insensitive", () => {
+    expect(one("", String.raw`\NC<가>a`).speaker).toBe("가");
+    expect(one("", String.raw`\nr<나>b`).speaker).toBe("나");
+  });
+  it("name-box wins over face-inferred speaker", () => {
+    const n = one("People1", String.raw`\n<하롤드>안녕`);
+    expect(n.speaker).toBe("하롤드");
+  });
+  it("MZ speaker wins and the code is stripped", () => {
+    const n = one("", String.raw`\n<하롤드>안녕`, "촌장", data);
+    expect(n.speaker).toBe("촌장");
+    expect(n.lines).toEqual(["안녕"]);
+  });
+  it("only the first line is inspected", () => {
+    const out = interpret([cmd(101, 0, ["", 0, 0, 2]), cmd(401, 0, ["첫 줄"]), cmd(401, 0, [String.raw`\n<X>둘째`])], mv())[0] as any;
+    expect(out.speaker).toBeUndefined();
+    expect(out.lines).toEqual(["첫 줄", "둘째"]);
+  });
+  it("does not mutate the source commands", () => {
+    const list = [cmd(101, 0, ["", 0, 0, 2]), cmd(401, 0, [String.raw`\n<하롤드>안녕`])];
+    interpret(list, mv());
+    expect(list[1].parameters[0]).toBe(String.raw`\n<하롤드>안녕`);
+    expect((interpret(list, mv())[0] as any).speaker).toBe("하롤드");
+  });
+  it("N[1] mid-line is still the actor name", () =>
+    expect(one("", String.raw`안녕, \N[1].`)).toEqual({ kind: "message", lines: ["안녕, 레나."] }));
+});

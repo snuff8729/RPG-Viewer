@@ -40,3 +40,32 @@ describe("AssetStore", () => {
   });
   it("caches", () => expect(store.load("faces", "People1")).toBe(store.load("faces", "People1")));
 });
+
+describe("AssetStore extension order", () => {
+  async function reads(name: "sample-mz" | "sample-mv", patch: Partial<GameData["system"]> = {}) {
+    const { folder, data } = await open(name);
+    const paths: string[] = [];
+    const spy = Object.assign(Object.create(folder), {
+      readBinary: (p: string) => { paths.push(p); return folder.readBinary(p); },
+    });
+    await new AssetStore(spy, { ...data, system: { ...data.system, ...patch } }).load("faces", "People1");
+    return paths;
+  }
+  it("MZ with encrypted images tries .png_ first", async () =>
+    expect(await reads("sample-mz")).toEqual(["img/faces/People1.png_"]));
+  it("MV with encrypted images tries .rpgmvp first", async () => {
+    const p = await reads("sample-mv");
+    expect(p[0]).toBe("www/img/faces/People1.rpgmvp");
+  });
+  it("tries the other encrypted extension, then .png", async () => {
+    const { folder, data } = await open("sample-mz");
+    const paths: string[] = [];
+    const spy = Object.assign(Object.create(folder), {
+      readBinary: (p: string) => { paths.push(p); return folder.readBinary(p); },
+    });
+    await new AssetStore(spy, data).load("faces", "nope");
+    expect(paths).toEqual(["img/faces/nope.png_", "img/faces/nope.rpgmvp", "img/faces/nope.png"]);
+  });
+  it("without encrypted images tries .png first", async () =>
+    expect((await reads("sample-mz", { hasEncryptedImages: false }))[0]).toBe("img/faces/People1.png"));
+});
