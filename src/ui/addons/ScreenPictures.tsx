@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
 import { imageAlphaStats } from "./imageStats";
+import { HidePicturesMenu } from "./HidePicturesMenu";
 
 type Status = "loading" | "ok" | "missing" | "failed";
 const NO_IMAGES = new Map<string, ImageBitmap>();
@@ -209,27 +210,32 @@ export function ScreenPictures({ shot }: { shot: ScreenShot }) {
   const stand = shot.kind === "stand";
   const groups = stand ? standGroups(pictures) : [];
   const byActor = groups.some((g) => typeof g.actorId === "number");
+  const body = byActor ? (
+    <div className="flex flex-wrap items-end gap-2">
+      {groups.map((g) => {
+        const { label, title } = groupText(g);
+        const gNames = [...new Set(g.pictures.map((p) => p.name))];
+        return (
+          <figure key={g.key} className="flex min-w-0 max-w-full flex-col gap-1">
+            <ShotButton pictures={g.pictures} view={standView(g.pictures, size, images)} images={images} stand title={label} names={gNames} caption={title ?? undefined} />
+            <figcaption className="text-xs text-muted-foreground">{label}</figcaption>
+          </figure>
+        );
+      })}
+    </div>
+  ) : (
+    <ShotButton
+      pictures={pictures} images={images} stand={stand} title={stand ? "스탠딩" : "이벤트 그림"} names={names}
+      view={stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height }}
+    />
+  );
   return (
     <div className="space-y-1">
-      {byActor ? (
-        <div className="flex flex-wrap items-end gap-2">
-          {groups.map((g) => {
-            const { label, title } = groupText(g);
-            const gNames = [...new Set(g.pictures.map((p) => p.name))];
-            return (
-              <figure key={g.key} className="flex min-w-0 max-w-full flex-col gap-1">
-                <ShotButton pictures={g.pictures} view={standView(g.pictures, size, images)} images={images} stand title={label} names={gNames} caption={title ?? undefined} />
-                <figcaption className="text-xs text-muted-foreground">{label}</figcaption>
-              </figure>
-            );
-          })}
-        </div>
-      ) : (
-        <ShotButton
-          pictures={pictures} images={images} stand={stand} title={stand ? "스탠딩" : "이벤트 그림"} names={names}
-          view={stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height }}
-        />
-      )}
+      {/* 그림 옆 `그림 숨기기`: 이 항목의 겹을 읽기에서 숨긴다 */}
+      <div className="flex items-start gap-1">
+        <div className="min-w-0 flex-1">{body}</div>
+        <HidePicturesMenu shot={shot} />
+      </div>
       {(missing.length > 0 || failed) && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {missing.map((n) => (

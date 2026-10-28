@@ -11,6 +11,9 @@ import { NextStoryCard } from "./NextStoryCard";
 import { eventStyle } from "./sectionStyle";
 import { actionableItems } from "./sidebarItems";
 import { useHereMap } from "./useHereMap";
+import { useGame } from "@/app/GameProvider";
+import { useMapLegend, visibleByLegend } from "./mapLegendState";
+import { gameKeyOf } from "./readPosition";
 
 /** 한 줄 설명: 이동이면 어디로, 아니면 이게 뭔지 */
 function rowHint(ev: ChecklistEvent): string {
@@ -23,7 +26,10 @@ export function PlayMap() {
   const { live, checklist, listed, numbers, selected, select, routeText } = here;
   const [focus, setFocus] = useState<{ x: number; y: number; n: number } | null>(null);
   const [rowRefs] = useState(() => new Map<number, HTMLElement>());
-  const rows = useMemo(() => actionableItems(listed), [listed]);
+  const { data } = useGame();
+  // 범례에서 끈 항목은 목록에서도 뺀다
+  const [legendHidden] = useMapLegend(data ? gameKeyOf(data) : "");
+  const rows = useMemo(() => actionableItems(visibleByLegend(listed, legendHidden)), [listed, legendHidden]);
 
   if (!live || !checklist) return <div className="p-3"><HereNotConnected /></div>;
 

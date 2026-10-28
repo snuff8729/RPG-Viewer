@@ -1,6 +1,10 @@
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
+import { useGame } from "@/app/GameProvider";
 import { MapLegend } from "./MapLegend";
+import { mapMarkers } from "./mapEvents";
+import { useMapLegend } from "./mapLegendState";
+import { gameKeyOf } from "./readPosition";
 import { eventStyle } from "./sectionStyle";
 const GRID_MAX = 60;
 
@@ -11,13 +15,16 @@ function GridLines({ width, height }: { width: number; height: number }) {
   return <path d={d} className="fill-none stroke-border" strokeWidth={1} vectorEffect="non-scaling-stroke" />;
 }
 
-/** 맵 크기만큼의 위치 그림: 이벤트 점(구역 색)과 플레이어 고리. 점을 누르면 onPick(eventId). */
-export function MapGrid({ width, height, events, player, numbers, onPick }: {
+/** 맵 크기만큼의 위치 그림: 이벤트 점(구역 색, 범례에서 끈 것은 빼고)과 플레이어 고리. 점을 누르면 onPick(eventId). */
+export function MapGrid({ width, height, events: listed, player, numbers, onPick }: {
   width: number; height: number; events: ChecklistEvent[]; player: { x: number; y: number };
   /** eventId → 목록 번호. 번호가 있는 점에는 번호를 쓴다 */
   numbers?: Map<number, number>;
   onPick: (eventId: number) => void;
 }) {
+  const { data } = useGame();
+  const [hidden, , setVisible] = useMapLegend(data ? gameKeyOf(data) : "");
+  const events = mapMarkers(listed, hidden);
   if (!(width > 0 && height > 0)) return null;
   const r = Math.max(0.4, Math.max(width, height) / 100);
   return (
@@ -66,7 +73,7 @@ export function MapGrid({ width, height, events, player, numbers, onPick }: {
             </g>
             );
           })}
-          <circle
+          {!hidden.has("player") && <circle
             cx={player.x + 0.5}
             cy={player.y + 0.5}
             r={r * 1.6}
@@ -75,9 +82,9 @@ export function MapGrid({ width, height, events, player, numbers, onPick }: {
             vectorEffect="non-scaling-stroke"
           >
             <title>내 위치</title>
-          </circle>
+          </circle>}
         </svg>
-        <MapLegend />
+        <MapLegend hidden={hidden} onChange={setVisible} />
       </CardContent>
     </Card>
   );

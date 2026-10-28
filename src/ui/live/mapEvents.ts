@@ -1,5 +1,6 @@
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import type { EventPage, MapData } from "@/core/types";
+import { legendKeyOf, type LegendKey } from "./mapLegendState";
 
 /**
  * 지금 맵에 실제로 나와 있는 이벤트(활성 페이지가 있는 것)와 그 페이지.
@@ -63,8 +64,10 @@ export function targetOf(map: MapData | undefined, ev: ChecklistEvent): { x: num
  * 맵에 표시를 그릴 이벤트: 안 본 내용·아이템·반복·출구·다 봄 (다시 가능)·다 봄(흐리게), 그리고 showLocked일 때 잠김.
  * 이야기·자동 진행은 그리지 않는다.
  */
-export function mapMarkers(listed: readonly ChecklistEvent[], showLocked: boolean): ChecklistEvent[] {
-  return listed.filter((e) => !e.story && (e.section !== "locked" || showLocked));
+export function mapMarkers(listed: readonly ChecklistEvent[], show: boolean | ReadonlySet<LegendKey>): ChecklistEvent[] {
+  if (typeof show === "boolean") return listed.filter((e) => !e.story && (e.section !== "locked" || show));
+  // 범례에서 끈 항목(잠김은 기본 꺼짐)은 그리지 않는다
+  return listed.filter((e) => { const k = legendKeyOf(e); return k !== null && !show.has(k); });
 }
 
 /** eventId → 맵 번호(core가 맵 데이터로 정한 고정 번호, 이야기·자동 진행 제외) */

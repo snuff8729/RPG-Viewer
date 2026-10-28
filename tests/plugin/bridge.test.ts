@@ -1008,7 +1008,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.16.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.17.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1795,13 +1795,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.16\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.17\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.16.0");
+    expect(h.bridge.VERSION).toBe("1.17.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
@@ -1852,6 +1852,41 @@ describe("screen picture capture (1.6.0 / 1.7.0)", () => {
       expect(m[2].pics).toEqual([[120, "stand/body", 1, 400, 624, 100, 100, 255, 0]]);
     });
   }
+
+  it("tags records written on a menu scene and keeps the map snapshot aside (1.17.0)", () => {
+    h = newGame();
+    setCapture(h, true);
+    const s = h.g.$gameScreen;
+    s.showPicture(1, "stand_a", 0, 0, 0, 100, 100, 255, 0);
+    h.g.SceneManager._scene = new h.g.Scene_Map();
+    talk(h, "map 1");
+    // the menu opens; MenuCommonEvent runs a common event that erases the stand and shows another
+    function Scene_Menu(this: any) {}
+    h.g.SceneManager._scene = new (Scene_Menu as any)();
+    const interp = h.newInterpreter();
+    const list = [cmd(235, [1]), cmd(231, [2, "menu_stand", 0, 0, 0, 100, 100, 255, 0, 0]), cmd(0)];
+    interp.setup(list, 0);
+    h.runCommand(interp, 0);
+    h.runCommand(interp, 1);
+    talk(h, "in menu");
+    // the game puts the stand back before the menu closes
+    s.erasePicture(2);
+    s.showPicture(1, "stand_a", 0, 0, 0, 100, 100, 255, 0);
+    h.g.SceneManager._scene = new h.g.Scene_Map();
+    talk(h, "map 2");
+    const log = h.readLog();
+    const pics = log.filter((r) => r.type === "picture");
+    expect(pics).toHaveLength(2);
+    for (const p of pics) expect(p.scene).toBe("menu");
+    const m = messages(h);
+    expect(m[0]).not.toHaveProperty("scene");
+    expect(m[0].pics).toHaveLength(1);
+    expect(m[1]).toMatchObject({ scene: "menu" });
+    expect(m[1]).not.toHaveProperty("pics");
+    expect(m[1]).not.toHaveProperty("picsSame");
+    expect(m[2]).not.toHaveProperty("scene");
+    expect(m[2]).toMatchObject({ picsSame: true });
+  });
 
   it("is off by default and when turned off; turning on again writes a full snapshot", () => {
     h = newGame();

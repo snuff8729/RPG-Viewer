@@ -15,7 +15,9 @@ import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "./types";
 export type ReaderItem =
   | { kind: "chapter"; key: string; text: string }
   /** screen: 화면 그림 따라 그리기 — 이 대사에서 새로 보일 이벤트 그림·스탠딩(nextShot)이 있을 때만 */
-  | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number; screen?: ScreenShot }
+  | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number; screen?: ScreenShot;
+    /** 접힌 반복 대화(repeat)의 회차별 항목(대사·그림·알림·플러그인 글). 펼치면 `1회째`·`2회째`…로 보인다. */
+    occurrences?: ReaderItem[][] }
   | { kind: "scroll"; key: string; seq: number; lines: string[] }
   /** name이 ""이면 화면에 글자 띄우기(파일 없음) — caption: 바로 앞 D_TEXT 플러그인 기록의 글. 글도 이름도 없는 빈 자리는 항목을 만들지 않는다. */
   | { kind: "picture"; key: string; seq: number; pictureId: number; name: string; caption?: string }
@@ -69,8 +71,8 @@ function speakerOf(r: RecordOf<"message">, data: GameData): string {
   return actor?.name ?? "";
 }
 
-function messageItem(r: RecordOf<"message">, data: GameData, repeat?: number): ReaderItem {
-  const item: ReaderItem = {
+function messageItem(r: RecordOf<"message">, data: GameData, repeat?: number): Extract<ReaderItem, { kind: "message" }> {
+  const item: Extract<ReaderItem, { kind: "message" }> = {
     kind: "message", key: `r${r.seq}`, seq: r.seq, speaker: speakerOf(r, data), face: safe(r.face),
     faceIndex: typeof r.faceIndex === "number" ? r.faceIndex : 0, lines: lines(r.text, data),
     src: r.src ?? null, cmd: typeof r.cmd === "number" ? r.cmd : null,
@@ -319,8 +321,35 @@ export function readerItems(
         } else if (it.kind === "repeat") {
           plugins = [];
           flushPending(out);
-          // 접힌 반복 대화는 화면 그림을 붙이지 않는다(접혀 있어 안 보이므로 다음 대사가 보인다)
-          out.push(messageItem(it.record, data, it.count));
+          const item = messageItem(it.record, data, it.count);
+          // 회차마다 그 대화 전부(대사·그림·알림·플러그인 글). 그림 명령은 화면 그림 쌓기에도 그대로 들어간다.
+          const occurrences: ReaderItem[][] = [];
+          const saved = shown, savedCoarse = shownCoarse;
+          let last: ScreenShot | null = null;
+          for (const recs of Array.isArray(it.occurrences) ? it.occurrences : []) {
+            const inner: ReaderItem[] = [];
+            convert((Array.isArray(recs) ? recs : []).map(record => ({ kind: "record" as const, record, uncertain: false, changed: false })), inner);
+            flushPending(inner);
+            plugins = [];
+            for (const x of inner) {
+              if (x.kind === "screen") last = x.screen;
+              else if ((x.kind === "message" || x.kind === "battlelog") && x.screen) last = x.screen;
+            }
+            if (inner.length > 0) occurrences.push(inner);
+          }
+          if (occurrences.length > 0) item.occurrences = occurrences;
+          lastScreen = null;
+          composedFor = null;
+          // 접힌 대화가 새 그림을 남겼으면(앞에 보이던 것과 다르면) 접힌 부분 밖에 그 마지막 그림을 보인다.
+          // 아니면 앞의 그림 상태로 되돌린다(접혀 있어 안 보이므로 다음 대사가 그림을 보인다).
+          // (보였으면 shown·shownCoarse는 접힌 대화가 끝난 뒤의 그림 그대로 둔다)
+          if (last && coarseShotKey(last) !== (savedCoarse ?? "")) {
+            item.screen = last;
+          } else {
+            shown = saved;
+            shownCoarse = savedCoarse;
+          }
+          out.push(item);
         } else if (it.kind === "battle") {
           plugins = [];
           // `전투 기록 보기`를 끄면 전투는 통째로 빠진다(그 안의 그림도 앞뒤 대사의 그림 비교에 넣지 않는다)

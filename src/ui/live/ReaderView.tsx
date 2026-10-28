@@ -8,6 +8,7 @@ import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { hasLayeredPictures } from "@/core/live/pictureStack";
+import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { Info, X } from "lucide-react";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
@@ -106,9 +107,10 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
 
   // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
   const { menuPicturesShown } = useAddons();
+  const menuEvents = useMemo(() => menuCommonEventsOf(data?.menuCommonEvents, data?.commonEvents), [data]);
   const path = useMemo(
-    () => (branch === null ? [] : withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown)),
-    [records, model, branch, menuPicturesShown],
+    () => (branch === null ? [] : withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuEvents)),
+    [records, model, branch, menuPicturesShown, menuEvents],
   );
   const { overrides } = usePluginOverrides();
   const [showAllPlugins] = usePluginShowAll();
@@ -131,7 +133,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   }, [liveBranch, varsKey]);
   const items = useMemo(() => {
     if (!data || branch === null) return [];
-    const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
+    const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null });
     const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, {
       battles: battlesShown, notices: noticesShown, compose: { ctx: pictureCtx, vars },
     });

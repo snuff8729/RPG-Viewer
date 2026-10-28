@@ -1,5 +1,6 @@
 import { parsePluginsJs } from "../live/installer";
 import type { LogRecord } from "../live/types";
+import { withoutMenuRecords, type MenuCommonEvents } from "../live/menuScenes";
 import type { SystemData } from "../types";
 
 /**
@@ -99,16 +100,12 @@ export function parsePics(v: unknown): ScreenPicture[] | null {
 }
 
 /**
- * 메뉴 화면 그림 기록(screen, scene "menu")을 뺀 기록. keepMenu면 그대로(같은 배열).
- * 기록 플러그인 1.16.0 전에는 게임 전용 확장이 메뉴를 열 때마다 메뉴의 스탠딩을 기록했다 — 어댑터의
- * `메뉴 화면 그림도 기록`을 켰을 때만 보인다. 예외를 던지지 않는다.
+ * 메뉴 화면 그림을 뺀 기록(menu 화면 기록, MenuCommonEvent 커먼 이벤트의 그림 — core/live/menuScenes).
+ * keepMenu(어댑터의 `메뉴 화면 그림도 기록`)면 그대로(같은 배열). 예외를 던지지 않는다.
  */
-export function withoutMenuScreens(path: LogRecord[], keepMenu: boolean): LogRecord[] {
-  if (keepMenu || !Array.isArray(path)) return Array.isArray(path) ? path : [];
-  if (!path.some(isMenuScreen)) return path;
-  return path.filter(r => !isMenuScreen(r));
+export function withoutMenuScreens(path: LogRecord[], keepMenu: boolean, menu?: MenuCommonEvents | null): LogRecord[] {
+  return withoutMenuRecords(path, keepMenu, menu);
 }
-const isMenuScreen = (r: LogRecord | null | undefined): boolean => !!r && r.type === "screen" && r.scene === "menu";
 
 /**
  * 경로 기록(seq 순)을 따라가며 대사마다 그때 화면 그림 묶음을 만든다: message seq → 그림 묶음.
@@ -199,6 +196,8 @@ export interface PictureContext {
   defaultRole?: ((p: ScreenPicture) => PictureRole | null | undefined) | null;
   /** 그림 이름 → 투명도 통계(그림 파일을 읽은 뒤). 모르면 null — 그동안은 가림 판정을 하지 않는다. */
   statsOf?: ((name: string) => AlphaStats | null | undefined) | null;
+  /** 읽기에서 숨길 그림 이름인가(hiddenImageMatcher). 맞으면 다른 구분보다 먼저 숨김. 없으면 null. */
+  hidden?: ((name: string) => boolean) | null;
 }
 
 /**
@@ -358,6 +357,9 @@ export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
 
 /** 직접 고른 구분 → 어댑터 기본 구분 → 확장이 붙인 구분 → 화면 장식으로 본 그림. 없으면 null(자동 판정). */
 function chosenRole(p: ScreenPicture, ctx: PictureContext): PictureRole | null {
+  try {
+    if (ctx.hidden?.(p.name)) return "hidden";
+  } catch { /* 숨기지 않음 */ }
   const o = p.kind === "sprite" ? ctx.spriteRoles?.[spriteKeyOf(p.name)] : ctx.roles?.[p.id];
   if (isPictureRole(o)) return o;
   try {
@@ -458,8 +460,11 @@ export function scenesBySeq(pictures: Map<number, ScreenPicture[]>, ctx: Picture
   return out;
 }
 
-/** 읽기에 보일 그림: cg = 화면 크기 그대로(위에 보이는 스탠딩 포함), stand = 스탠딩 겹만 잘라서 */
-export interface ScreenShot { kind: "cg" | "stand"; pictures: ScreenPicture[] }
+/**
+ * 읽기에 보일 그림: cg = 화면 크기 그대로(위에 보이는 스탠딩 포함), stand = 스탠딩 겹만 잘라서.
+ * cg 종류의 cg = pictures 중 이벤트 그림인 것(나머지는 스탠딩). 없으면 모름.
+ */
+export interface ScreenShot { kind: "cg" | "stand"; pictures: ScreenPicture[]; cg?: ScreenPicture[] }
 
 /**
  * 앞에 보인 것(key)과 비교해 이 대사에 새로 보일 그림을 정한다.
@@ -473,7 +478,7 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
     if (scene.cg.length > 0) {
       const pictures = [...scene.cg, ...scene.stand].sort((a, b) => a.id - b.id);
       const key = "cg:" + JSON.stringify(pictures);
-      return { shot: key === prevKey ? null : { kind: "cg", pictures }, key };
+      return { shot: key === prevKey ? null : { kind: "cg", pictures, cg: [...scene.cg] }, key };
     }
     if (scene.stand.length > 0) {
       const key = "stand:" + JSON.stringify(scene.stand);

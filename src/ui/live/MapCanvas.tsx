@@ -15,8 +15,10 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
-import { clampScroll, clampZoom, fitZoom, isDrag, pinchZoom, wheelFactor } from "./mapZoom";
+import { clampScroll, clampZoom, fitZoom, followScroll, isDrag, pinchZoom, scrollChange, shouldRefit, wheelFactor } from "./mapZoom";
 import { MapLegend } from "./MapLegend";
+import { useMapLegend } from "./mapLegendState";
+import { gameKeyOf } from "./readPosition";
 import { eventStyle } from "./sectionStyle";
 import type { LoadedTiles } from "./useMapTiles";
 
@@ -169,6 +171,23 @@ function arrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, dir: 2 | 4
   ctx.stroke();
 }
 
+/**
+ * 표시 원: 범례 칩과 같은 색으로 채우고 같은 색 고리(불투명). 맵 위에서 보이게 바깥에 얇은 어두운 테두리만 더한다.
+ */
+function disc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, col: string, px: number) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 2 * px, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 2 * px;
+  ctx.stroke();
+}
+
 /** lucide Swords 아이콘 선(24×24) */
 const SWORDS_PATHS = [
   "m13 19 6-6",
@@ -184,13 +203,7 @@ let swordsPath: Path2D | null = null;
 
 /** 적 표시: 빨간 원에 칼 두 자루. 쫓아오는 적은 점선 고리를 두른다. */
 function drawEnemy(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, col: string, px: number, chase: boolean) {
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = col;
-  ctx.fill();
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2 * px;
-  ctx.stroke();
+  disc(ctx, cx, cy, r, col, px);
   if (chase) {
     ctx.save();
     ctx.setLineDash([3 * px, 2 * px]);
@@ -201,12 +214,12 @@ function drawEnemy(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: num
     ctx.restore();
   }
   swordsPath ??= (() => { const p = new Path2D(); for (const d of SWORDS_PATHS) p.addPath(new Path2D(d)); return p; })();
-  const s = (r * 1.3) / 24;
+  const s = (r * 1.05) / 24;
   ctx.save();
   ctx.translate(cx - 12 * s, cy - 12 * s);
   ctx.scale(s, s);
   ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   ctx.stroke(swordsPath);
   ctx.restore();
 }
@@ -221,6 +234,8 @@ interface OverlayInput {
   /** 고른 이벤트(표시가 안 그려지는 것이어도 길은 그린다) */
   selectedEv: ChecklistEvent | undefined;
   story: StoryOverlay | null;
+  /** 내 위치를 그릴지(범례에서 끌 수 있다) */
+  showPlayer: boolean;
 }
 
 /** 위 캔버스: 벽 그늘, 번호 표시, 내 위치, 고른 이벤트까지의 길. zoom = 화면 px/칸. */
@@ -313,23 +328,14 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
       drawEnemy(ctx, cx, cy, ev.eventId === o.selected ? r * 1.25 : r, colour(ev), px, !!ev.enemy?.chase);
       continue;
     }
-    ctx.beginPath();
+    // 다 본 것만 흐리게, 나머지는 범례 칩과 같은 색 그대로
+    ctx.globalAlpha = ev.section === "done" && ev.eventId !== o.selected ? 0.45 : 1;
     if (n == null) {
-      ctx.globalAlpha = 0.7;
-      ctx.arc(c(ev.x), c(ev.y), 4 * px, 0, Math.PI * 2);
-      ctx.fillStyle = colour(ev);
-      ctx.fill();
+      disc(ctx, c(ev.x), c(ev.y), 4 * px, colour(ev), px);
       ctx.globalAlpha = 1;
       continue;
     }
-    // 다 본 것은 흐리게
-    ctx.globalAlpha = ev.section === "done" && ev.eventId !== o.selected ? 0.45 : 1;
-    ctx.arc(cx, cy, ev.eventId === o.selected ? r * 1.25 : r, 0, Math.PI * 2);
-    ctx.fillStyle = colour(ev);
-    ctx.fill();
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2 * px;
-    ctx.stroke();
+    disc(ctx, cx, cy, ev.eventId === o.selected ? r * 1.25 : r, colour(ev), px);
     ctx.fillStyle = "#fff";
     ctx.font = `600 ${(n >= 10 ? 10 : 12) * px}px sans-serif`;
     ctx.fillText(String(n), cx, cy + 0.5 * px);
@@ -365,6 +371,7 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
   }
 
   // 내 위치
+  if (!o.showPlayer) return;
   const pr = Math.max(cell * 0.42, 11 * px);
   ctx.beginPath();
   ctx.arc(c(o.player.x), c(o.player.y), pr, 0, Math.PI * 2);
@@ -435,9 +442,12 @@ export function MapCanvas({
   const zoomRef = useRef(zoom);
   useLayoutEffect(() => { zoomRef.current = zoom; }, [zoom]);
   const [showWalls, setShowWalls] = useState(true);
-  const [showLocked, setShowLocked] = useState(false);
-  const markers = useMemo(() => mapMarkers(listed, showLocked), [listed, showLocked]);
-  const [showRegions, setShowRegions] = useState(false);
+  // 범례에서 끈 항목(게임별로 기억, 이 맵·플레이 화면 목록과 함께 쓴다)
+  const [legendHidden, , setLegendVisible] = useMapLegend(data ? gameKeyOf(data) : "");
+  const markers = useMemo(() => mapMarkers(listed, legendHidden), [listed, legendHidden]);
+  const showRegions = !legendHidden.has("regions");
+  const showPlayer = !legendHidden.has("player");
+  const shownStory = legendHidden.has("story") ? null : story;
   /** 적이 나오는 구역(랜덤 인카운트에 구역 지정이 있을 때) 칸들 */
   const regionPath = useMemo(() => {
     const enc = data ? mapEncounters(data, map.mapId) : null;
@@ -487,13 +497,19 @@ export function MapCanvas({
     return p;
   }, [map, tiles.tileset]);
 
+  /** 스크롤을 정수 px로 옮긴다. 지금과 1px 안쪽이면 그대로(같은 입력이 반복돼도 떨리지 않게) */
+  const scrollTo = (el: HTMLDivElement, left: number, top: number) => {
+    const ch = scrollChange(el.scrollLeft, el.scrollTop, left, top);
+    if (!ch) return;
+    el.scrollLeft = ch.left;
+    el.scrollTop = ch.top;
+  };
   /** 확대 크기를 바꾸고, 바뀐 크기가 화면에 반영된 뒤 (x, y)칸 좌표를 가운데로 */
   const zoomAndCenter = (z: number, x: number, y: number) => {
     const el = scrollRef.current;
     if (el && z === zoomRef.current) {
       pendingCenter.current = null;
-      el.scrollLeft = x * z - el.clientWidth / 2;
-      el.scrollTop = y * z - el.clientHeight / 2;
+      scrollTo(el, x * z - el.clientWidth / 2, y * z - el.clientHeight / 2);
       return;
     }
     pendingCenter.current = { x, y, zoom: z };
@@ -508,8 +524,7 @@ export function MapCanvas({
     const el = scrollRef.current;
     if (!el) return;
     if (z === zoomRef.current && !pendingCenter.current) {
-      el.scrollLeft = x * z - ax;
-      el.scrollTop = y * z - ay;
+      scrollTo(el, x * z - ax, y * z - ay);
       return;
     }
     pendingCenter.current = { x, y, zoom: z, ax, ay };
@@ -519,8 +534,7 @@ export function MapCanvas({
       if (!p) return;
       if (p.zoom === zoomRef.current) {
         pendingCenter.current = null;
-        el.scrollLeft = p.x * p.zoom - (p.ax ?? el.clientWidth / 2);
-        el.scrollTop = p.y * p.zoom - (p.ay ?? el.clientHeight / 2);
+        scrollTo(el, p.x * p.zoom - (p.ax ?? el.clientWidth / 2), p.y * p.zoom - (p.ay ?? el.clientHeight / 2));
       } else setZoom(p.zoom);
     });
   };
@@ -549,10 +563,13 @@ export function MapCanvas({
   };
 
   /** 맵 전체가 보이게(맞춤). 보이는 영역이 아직 0 크기면 false(크기가 잡히면 아래 ResizeObserver가 다시 부른다) */
+  /** 마지막으로 맞춘 보이는 영역 크기(작게 바뀐 것은 다시 맞추지 않는다) */
+  const fittedSize = useRef<{ w: number; h: number } | null>(null);
   const fitNow = (): boolean => {
     const el = scrollRef.current;
     const z = el && fitZoom(el.clientWidth, el.clientHeight, map.width, map.height);
     if (!z) return false;
+    fittedSize.current = { w: el.clientWidth, h: el.clientHeight };
     if (compact && z < COMPACT_MIN_ZOOM) zoomAndCenter(COMPACT_MIN_ZOOM, player.x + 0.5, player.y + 0.5);
     else zoomAndCenter(z, map.width / 2, map.height / 2);
     return true;
@@ -560,23 +577,33 @@ export function MapCanvas({
   const fitRef = useRef(fitNow);
   useLayoutEffect(() => { fitRef.current = fitNow; });
 
-  // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때는 그대로 둔다.
-  const initFor = useRef<LoadedTiles | null>(null);
+  // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때(타일 객체가 새로 와도)는 그대로 둔다.
+  const mapKey = `${map.mapId}:${map.width}x${map.height}`;
+  const initFor = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (initFor.current === tiles) return;
-    initFor.current = tiles;
+    if (initFor.current === mapKey) return;
+    initFor.current = mapKey;
     manualZoom.current = false;
     followPaused.current = false;
+    fittedSize.current = null;
     fitRef.current();
-  }, [tiles]);
+  }, [mapKey]);
 
   // 보이는 영역 크기가 바뀌면(레이아웃이 자리 잡힌 뒤·창 크기 변경) 직접 확대하지 않았으면 다시 맞춤
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (!manualZoom.current) fitRef.current(); });
+    // 크기가 RESIZE_SLACK px 넘게 바뀌었을 때만, 한 프레임에 한 번
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (manualZoom.current || !shouldRefit(fittedSize.current, el.clientWidth, el.clientHeight)) return;
+        fitRef.current();
+      });
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
   // 가운데 맞추기는 확대 크기가 반영된 뒤에
@@ -585,8 +612,7 @@ export function MapCanvas({
     const p = pendingCenter.current;
     if (!el || !p || zoom !== p.zoom) return;
     pendingCenter.current = null;
-    el.scrollLeft = p.x * zoom - (p.ax ?? el.clientWidth / 2);
-    el.scrollTop = p.y * zoom - (p.ay ?? el.clientHeight / 2);
+    scrollTo(el, p.x * zoom - (p.ax ?? el.clientWidth / 2), p.y * zoom - (p.ay ?? el.clientHeight / 2));
   });
 
   useEffect(() => {
@@ -602,16 +628,12 @@ export function MapCanvas({
     const el = scrollRef.current;
     const z = zoomRef.current;
     if (!compact || !el || z == null || pendingCenter.current || followPaused.current) return;
-    const cx = (px + 0.5) * z, cy = (py + 0.5) * z;
-    const mx = Math.min(el.clientWidth / 4, 2 * z), my = Math.min(el.clientHeight / 4, 2 * z);
-    const inside = cx >= el.scrollLeft + mx && cx <= el.scrollLeft + el.clientWidth - mx
-      && cy >= el.scrollTop + my && cy <= el.scrollTop + el.clientHeight - my;
-    // 맵 전체가 보이면(스크롤할 곳이 없으면) 움직일 필요가 없다
-    const scrollable = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
-    if (!inside && scrollable) {
-      el.scrollLeft = cx - el.clientWidth / 2;
-      el.scrollTop = cy - el.clientHeight / 2;
-    }
+    // 안쪽 여백 밖으로 나갔을 때만(맵 전체가 보이면 움직이지 않는다), 끌고 있는 중에는 안 한다
+    if (pointers.current.size > 0) return;
+    const next = followScroll((px + 0.5) * z, (py + 0.5) * z, {
+      left: el.scrollLeft, top: el.scrollTop, width: el.clientWidth, height: el.clientHeight, scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight,
+    }, z);
+    if (next) scrollTo(el, next.left, next.top);
   }, [compact, px, py]);
   // numbers는 부모가 매번 새로 만드므로 내용이 같으면 같은 값으로 본다(스냅샷마다 다시 그리지 않게)
   const numbersKey = [...numbers].join(";");
@@ -634,9 +656,9 @@ export function MapCanvas({
       regions: showRegions ? regionPath : null,
       player: { x: px, y: py }, route, selected,
       selectedEv: selected != null ? listed.find((e) => e.eventId === selected) : undefined,
-      story,
+      story: shownStory, showPlayer,
     });
-  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick, showRegions, regionPath, story]);
+  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick, showRegions, regionPath, shownStory, showPlayer]);
 
   const zoomBy = (f: number) => {
     const el = scrollRef.current;
@@ -777,10 +799,6 @@ export function MapCanvas({
   const toggles = (
     <>
       <div className="flex items-center gap-2">
-        <Switch id={`${switchId}-locked`} checked={showLocked} onCheckedChange={setShowLocked} />
-        <Label htmlFor={`${switchId}-locked`}>잠긴 것도 표시</Label>
-      </div>
-      <div className="flex items-center gap-2">
         <Switch id={`${switchId}-walls`} checked={showWalls} onCheckedChange={setShowWalls} />
         <Label htmlFor={`${switchId}-walls`}>벽 표시</Label>
       </div>
@@ -788,12 +806,6 @@ export function MapCanvas({
         <div className="flex items-center gap-2">
           <Switch id={`${switchId}-avoid`} checked={avoidEnemies ?? true} onCheckedChange={onAvoidEnemiesChange} />
           <Label htmlFor={`${switchId}-avoid`}>적 피해서 길 찾기</Label>
-        </div>
-      )}
-      {regionPath && (
-        <div className="flex items-center gap-2">
-          <Switch id={`${switchId}-regions`} checked={showRegions} onCheckedChange={setShowRegions} />
-          <Label htmlFor={`${switchId}-regions`}>적 나오는 구역 보기</Label>
         </div>
       )}
     </>
@@ -811,9 +823,9 @@ export function MapCanvas({
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="ml-auto"><SlidersHorizontal />범례</Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72">
+              <PopoverContent align="end" className="w-80 space-y-2">
                 <PopoverHeader><PopoverTitle>범례</PopoverTitle></PopoverHeader>
-                <MapLegend />
+                <MapLegend hidden={legendHidden} onChange={setLegendVisible} regions={!!regionPath} />
                 {toggles}
               </PopoverContent>
             </Popover>
@@ -830,7 +842,7 @@ export function MapCanvas({
         )}
         <div
           ref={scrollRef}
-          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
+          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none [scrollbar-gutter:stable] ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}
@@ -843,7 +855,7 @@ export function MapCanvas({
             <canvas ref={overRef} className="absolute inset-0 size-full" role="img" aria-label="맵 그림" />
           </div>
         </div>
-        {!compact && <MapLegend />}
+        {!compact && <MapLegend hidden={legendHidden} onChange={setLegendVisible} regions={!!regionPath} />}
       </CardContent>
     </Card>
   );
