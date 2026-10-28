@@ -1,4 +1,5 @@
 import { locationKey } from "../index/locations";
+import { walk } from "../interpret/interpret";
 import type { GameIndex, PageEntry } from "../types";
 import { pageNewCounts } from "./interactable";
 import type { Coverage } from "./types";
@@ -148,7 +149,11 @@ export function seenSets(coverage: Coverage, index: GameIndex): SeenSets {
         if (!isObj(p) || !isObj(p.location)) continue;
         const { unseen, unpicked, dialogue } = pageNewCounts(p, coverage, { inChoices: true });
         if (dialogue === 0) continue;
-        if (unseen === 0 && unpicked === 0) pageSet.add(locationKey(p.location));
+        if (unseen === 0 && unpicked === 0) {
+          pageSet.add(locationKey(p.location));
+          // TemplateEvent 호출로 불린 목록(원래 이벤트 페이지 등)도 그 안을 다 봤으므로 함께 넣는다(게임의 가장 안쪽 실행 위치).
+          walk(arr(p.nodes), [], n => { if (n.kind === "call" && isObj(n.location)) pageSet.add(locationKey(n.location)); });
+        }
       } catch {
         /* 이상한 페이지는 건너뛴다 */
       }

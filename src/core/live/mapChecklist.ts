@@ -2,6 +2,7 @@ import { describePageConditions } from "../conditions/describe";
 import { testToReq, type Req } from "../deps/graph";
 import { locationKey } from "../index/locations";
 import { walk } from "../interpret/interpret";
+import { flattenCalls } from "../interpret/teCall";
 import { armorName, itemName, variableName, weaponName } from "../text/names";
 import type { EventCommand, GameData, GameIndex, Location, MapEvent, PageEntry } from "../types";
 import { evaluate } from "./evaluate";
@@ -144,14 +145,16 @@ function checkEvent(
   const trigger = num(activePg?.trigger);
   const commands = isObj(activePg) ? realCommands(activePg.list) : [];
   const interactable = isObj(activePg) && trigger <= 2 && commands.length > 0;
+  // TemplateEvent 호출(원래 이벤트 페이지 등)은 불린 목록의 명령으로 펼쳐 얻는 것·플러그인 명령을 찾는다.
+  const runCommands = interactable ? realCommands(flattenCalls(activePg.list, { data, mapId, event: ev, page: activePage })) : [];
   if (!interactable && !entries.some(e => e && hasContent(e))) return null;
 
   const active = !!activeEntry && isObj(activePg);
   const auto = active && (trigger === 3 || trigger === 4);
   const { unseen, unpicked } = activeEntry ? pageNewCounts(activeEntry, coverage) : { unseen: 0, unpicked: 0 };
   const repeat = active && trigger <= 4 ? repeatInfo(ev, mapId, data, live, activePage) : [];
-  const gains = interactable ? gainsOf(commands, data) : [];
-  const pluginHint = interactable ? pluginHintOf(commands) : undefined;
+  const gains = interactable ? gainsOf(runCommands, data) : [];
+  const pluginHint = interactable ? pluginHintOf(runCommands) : undefined;
 
   const locked: LockedPage[] = [];
   entries.forEach((entry, pi) => {

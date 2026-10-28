@@ -127,40 +127,44 @@ export interface NewCounts {
 function countNew(entry: PageEntry, cov: Coverage, opts: NewCountOptions): NewCounts {
   let unseen = 0, unpicked = 0, dialogue = 0;
   const deep = opts.inChoices === true;
-  const visit = (nodes: unknown, inChoice: boolean) => {
+  /** loc: 노드 cmd가 가리키는 목록 위치(TemplateEvent 호출 안은 불린 목록) */
+  const visit = (nodes: unknown, inChoice: boolean, loc: Location) => {
     for (const n of arr<ScriptNode | null>(nodes)) {
       if (!isObj(n)) continue;
       switch (n.kind) {
         case "message": case "scroll":
           dialogue++;
-          if ((deep || !inChoice) && !cov.seen.has(seenKey(entry.location, n.cmd))) unseen++;
+          if ((deep || !inChoice) && !cov.seen.has(seenKey(loc, n.cmd))) unseen++;
           break;
         case "choices": {
           dialogue++;
-          const picked = new Set(arr<{ picked: number } | null>(cov.picks.get(pickKey(entry.location, n.cmd))).map(p => p?.picked));
+          const picked = new Set(arr<{ picked: number } | null>(cov.picks.get(pickKey(loc, n.cmd))).map(p => p?.picked));
           arr<{ body: ScriptNode[] } | null>(n.branches).forEach((b, bi) => {
             if (!isObj(b)) return;
             if (!picked.has(bi)) unpicked++;
-            visit(b.body, true);
+            visit(b.body, true, loc);
           });
           if (n.cancelBranch) {
             if (!picked.has(-2)) unpicked++;
-            visit(n.cancelBranch, true);
+            visit(n.cancelBranch, true, loc);
           }
           break;
         }
         case "conditional":
-          visit(n.then, inChoice);
-          if (n.else) visit(n.else, inChoice);
+          visit(n.then, inChoice, loc);
+          if (n.else) visit(n.else, inChoice, loc);
           break;
         case "loop":
-          visit(n.body, inChoice);
+          visit(n.body, inChoice, loc);
+          break;
+        case "call":
+          if (isObj(n.location)) visit(n.nodes, inChoice, n.location);
           break;
       }
     }
   };
   try {
-    if (isObj(entry) && isObj(cov) && cov.seen instanceof Set && cov.picks instanceof Map) visit(entry.nodes, false);
+    if (isObj(entry) && isObj(cov) && cov.seen instanceof Set && cov.picks instanceof Map) visit(entry.nodes, false, entry.location);
   } catch {
     /* 지금까지 센 것 */
   }

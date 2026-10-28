@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryFolder } from "@/core/fs/folder";
 import { loadFixtureFolder } from "../../../tests/helpers/fixtureFolder";
 import { loadGame } from "./loadGame";
-import { parseTemplateNote, templateMapIdFromPlugins } from "./templateEvent";
+import { parseTemplateNote, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 async function load(edit?: (files: Record<string, string | Uint8Array>) => void) {
   const base = loadFixtureFolder("sample-te");
@@ -30,6 +30,20 @@ describe("parseTemplateNote", () => {
   });
 });
 
+describe("templateKeepEventIdFromPlugins", () => {
+  const js = (status: boolean, keep: unknown) =>
+    `var $plugins =\n[\n${JSON.stringify({ name: "TemplateEvent", status, description: "", parameters: { TemplateMapId: "2", KeepEventId: keep } })}\n];\n`;
+  it("is true only for a true value of an enabled TemplateEvent", () => {
+    expect(templateKeepEventIdFromPlugins(js(true, "true"))).toBe(true);
+    expect(templateKeepEventIdFromPlugins(js(true, true))).toBe(true);
+    expect(templateKeepEventIdFromPlugins(js(true, "false"))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(js(false, "true"))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(js(true, undefined))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(null)).toBe(false);
+    expect(templateKeepEventIdFromPlugins("garbage")).toBe(false);
+  });
+});
+
 describe("templateMapIdFromPlugins", () => {
   it("reads TemplateMapId only when TemplateEvent is on", () => {
     const js = (status: boolean, id: string) =>
@@ -54,8 +68,10 @@ describe("loadGame + TemplateEvent", () => {
     expect(m1[1]!.pages).toHaveLength(2);
     // 번호로(공백 trim)
     expect(m1[2]!.pages).toEqual(tpl[3]!.pages);
-    // 원본 id·이름·좌표 유지
+    // 원본 id·이름·좌표 유지, 원래 페이지는 originalPages에
     expect(m1[1]).toMatchObject({ id: 1, name: "주민A", x: 1, y: 1 });
+    expect(Array.isArray(m1[1]!.originalPages)).toBe(true);
+    expect(m1[1]!.originalPages).not.toBe(m1[1]!.pages);
     expect(m1[2]).toMatchObject({ id: 2, name: "상인 자리" });
     // 일반 이벤트는 그대로
     expect(m1[4]!.pages[0].list[1].parameters[0]).toBe("마을에 오신 걸 환영합니다.");

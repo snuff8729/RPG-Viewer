@@ -25,7 +25,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.1.0",
+    VERSION: "1.2.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -71,6 +71,7 @@
   var pendingGroups = [];
   var groupByKey = {};
   var currentCtx = null;      // { src, cmd } of the command being executed
+  var childParentSrc = null;  // source of the interpreter running setupChild (while it runs)
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
   var deferredNewGame = false;
@@ -539,7 +540,9 @@
   // ---------------------------------------------------------------- game assist
   function locKey(src) {
     if (!src) return null;
-    if (src.source === "map") return "map:" + src.mapId + ":" + src.eventId + ":" + src.page;
+    if (src.source === "map") {
+      return "map:" + src.mapId + ":" + src.eventId + ":" + src.page + (typeof src.origin === "number" ? ":o" + src.origin : "");
+    }
     if (src.source === "common") return "common:" + src.commonEventId;
     if (src.source === "troop") return "troop:" + src.troopId + ":" + src.page;
     return null;
@@ -822,20 +825,59 @@
   bridge._frame = function () { return frameStart(G.SceneManager); };
 
   // ---------------------------------------------------------------- engine helpers
+  function pageIndexOf(pages, list) {
+    if (!pages) return -1;
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i] && pages[i].list === list) return i;
+    }
+    return -1;
+  }
+
+  function eventPages(ev) {
+    var data = ev && ev.event ? ev.event() : null;
+    return data && data.pages;
+  }
+
+  // TemplateEvent: index of list among the event's own (original) pages, when they differ from its pages.
+  function originIndexOf(ev, pages, list) {
+    var orig = ev && typeof ev.getOriginalPages === "function" ? ev.getOriginalPages() : null;
+    return orig && orig !== pages ? pageIndexOf(orig, list) : -1;
+  }
+
+  // Original page "origin" run as a child. page = the template page of the same event that called it
+  // (parent interpreter); called from elsewhere (another event by name) page = origin.
+  function originSource(map, eventId, origin) {
+    var parent = childParentSrc;
+    var page = parent && parent.source === "map" && parent.mapId === map.mapId() && parent.eventId === eventId
+      ? parent.page : origin;
+    return { source: "map", mapId: map.mapId(), eventId: eventId, page: page, origin: origin };
+  }
+
   function resolveSource(list, eventId) {
     if (!list) return null;
     var i;
     var map = G.$gameMap;
     if (eventId > 0 && map && map.event) {
       var ev = map.event(eventId);
-      var data = ev && ev.event ? ev.event() : null;
-      var pages = data && data.pages;
-      if (pages) {
-        for (i = 0; i < pages.length; i++) {
-          if (pages[i] && pages[i].list === list) {
-            return { source: "map", mapId: map.mapId(), eventId: eventId, page: i };
-          }
-        }
+      var pages = eventPages(ev);
+      i = pageIndexOf(pages, list);
+      if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: eventId, page: i };
+      i = originIndexOf(ev, pages, list);
+      if (i >= 0) return originSource(map, eventId, i);
+    }
+    // A page of another map event (TemplateEvent TE_CALL_MAP_EVENT with KeepEventId on): its pages,
+    // or its original pages when called by name.
+    var all = map && map.events ? map.events() : null;
+    if (all) {
+      for (var k = 0; k < all.length; k++) {
+        var other = all[k];
+        var oid = other && other.eventId ? other.eventId() : 0;
+        if (!(oid > 0) || oid === eventId) continue;
+        var opages = eventPages(other);
+        i = pageIndexOf(opages, list);
+        if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: oid, page: i };
+        i = originIndexOf(other, opages, list);
+        if (i >= 0) return originSource(map, oid, i);
       }
     }
     var ces = G.$dataCommonEvents;
@@ -905,6 +947,19 @@
           this._rpgvSrc = resolveSource(list, eventId);
         } catch (e) { reportError(e); }
         return r;
+      };
+    });
+
+    // Remember the parent's source while a child interpreter is set up (TemplateEvent origin pages report it).
+    hook(GI, "Game_Interpreter", "setupChild", function (orig) {
+      return function () {
+        var prev = childParentSrc;
+        childParentSrc = this._rpgvSrc || null;
+        try {
+          return orig.apply(this, arguments);
+        } finally {
+          childParentSrc = prev;
+        }
       };
     });
 

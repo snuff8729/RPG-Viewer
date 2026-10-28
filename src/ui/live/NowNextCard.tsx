@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
-import { locationKey } from "@/core/index/locations";
-import { findNodePathByCmd } from "@/core/interpret/interpret";
+import { locationKey, pageLocation } from "@/core/index/locations";
+import { findNodePathByCmd, nodesAt } from "@/core/interpret/interpret";
 import { pageList } from "@/core/live/mismatch";
 import { remainingNodes, untilStop } from "@/core/live/remaining";
 import type { ScriptNode } from "@/core/types";
@@ -35,16 +35,30 @@ export function NowNextCard() {
   const running = live?.running ?? null;
   const runningCmd = live?.runningCmd;
   const key = running ? locationKey(running) : null;
+  // TemplateEvent 원래 페이지 실행 중이면 그것을 부른 템플릿 페이지 항목 안의 펼친 노드를 쓴다.
+  const entryKey = running ? locationKey(pageLocation(running)) : null;
   const entry = useMemo(
-    () => (key ? index?.pages.find(p => locationKey(p.location) === key) : undefined),
-    [index, key],
+    () => (entryKey ? index?.pages.find(p => locationKey(p.location) === entryKey) : undefined),
+    [index, entryKey],
   );
-  const list = useMemo(() => (data && entry ? pageList(data, entry.location) ?? undefined : undefined), [data, entry]);
+  // running은 live마다 새 객체일 수 있어 같은 위치면 처음 객체를 계속 쓴다(아래 계산을 다시 하지 않게).
+  const [runningLoc, setRunningLoc] = useState(running);
+  if (running !== runningLoc && (running === null || runningLoc === null || locationKey(running) !== locationKey(runningLoc))) {
+    setRunningLoc(running);
+  }
+  const runNodes = useMemo(
+    () => (entry && runningLoc ? nodesAt(entry.nodes, entry.location, runningLoc) : null),
+    [entry, runningLoc],
+  );
+  const list = useMemo(
+    () => (data && runningLoc ? pageList(data, runningLoc) ?? undefined : undefined),
+    [data, runningLoc],
+  );
   const hasCmd = typeof runningCmd === "number";
   const nodes = useMemo(
     // runningCmd는 엔진의 _index(실행 중 명령의 다음 칸)라 1을 뺀다
-    () => (entry && hasCmd ? remainingNodes(entry.nodes, runningCmd - 1, list) : []),
-    [entry, hasCmd, runningCmd, list],
+    () => (runNodes && hasCmd ? remainingNodes(runNodes, runningCmd - 1, list) : []),
+    [runNodes, hasCmd, runningCmd, list],
   );
   const upto = useMemo(() => untilStop(nodes), [nodes]);
   // 멈춤 전 노드가 길면 대사(message/scroll) 5개까지만 보이고 나머지는 "더 보기"
@@ -82,7 +96,8 @@ export function NowNextCard() {
   const first = nodes[0] as { cmd?: unknown } | undefined;
   const onView = () => {
     openPage(entry.location);
-    const path = typeof first?.cmd === "number" ? findNodePathByCmd(entry.nodes, first.cmd) : null;
+    const path = typeof first?.cmd === "number" && runningLoc
+      ? findNodePathByCmd(entry.nodes, first.cmd, { base: entry.location, target: runningLoc }) : null;
     if (path) highlightNode(locationKey(entry.location), path);
   };
 
@@ -104,7 +119,7 @@ export function NowNextCard() {
           <>
             <ScrollArea className="max-h-80 overflow-auto">
               {/* pageKey를 주지 않아 탐색기 강조 대상으로 잡히지 않는다 */}
-              <ScriptView nodes={visible} basePath={NOW_BASE_PATH} location={entry.location} />
+              <ScriptView nodes={visible} basePath={NOW_BASE_PATH} location={runningLoc ?? entry.location} />
             </ScrollArea>
             {hidden > 0 && !more && (
               <Button variant="ghost" size="sm" onClick={() => setMore(true)}>더 보기 ({hidden}줄)</Button>

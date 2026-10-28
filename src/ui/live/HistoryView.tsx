@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
-import { locationKey } from "@/core/index/locations";
+import { locationKey, pageLocation } from "@/core/index/locations";
 import { findNodePathByCmd } from "@/core/interpret/interpret";
 import type { Location } from "@/core/types";
 import { Button } from "@/components/ui/button";
@@ -70,10 +70,12 @@ export function HistoryView() {
   const labelModel = useStableByKey(model, runsKey);
 
   const onJump = useCallback((src: Location, cmd: number) => {
-    const key = locationKey(src);
+    // TemplateEvent 원래 페이지 기록이면 그것을 부른 템플릿 페이지를 열고 그 안의 펼친 노드를 찾는다.
+    const page = pageLocation(src);
+    const key = locationKey(page);
     const entry = index?.pages.find(p => locationKey(p.location) === key);
-    openPage(src);
-    const path = entry ? findNodePathByCmd(entry.nodes, cmd) : null;
+    openPage(page);
+    const path = entry ? findNodePathByCmd(entry.nodes, cmd, { base: entry.location, target: src }) : null;
     if (path) highlightNode(key, path);
   }, [index]);
 

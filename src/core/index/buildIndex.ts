@@ -1,5 +1,6 @@
 import { describeCommonEventConditions, describePageConditions, describeTroopPageConditions } from "../conditions/describe";
 import { hasDialogue, interpret, subBlocks, walk } from "../interpret/interpret";
+import type { CallCtx } from "../interpret/teCall";
 import type {
   CommonEvent, Condition, EventCommand, EventPage, GameData, GameIndex, MapEvent, MapInfo, PageEntry, Ref, ScriptNode,
   SearchHit, Troop, TroopPage, XrefEntry,
@@ -21,8 +22,8 @@ function firstMessageTitle(nodes: ScriptNode[]): string | undefined {
   return found.speaker ? `${found.speaker} — "${cut}"` : `"${cut}"`;
 }
 
-function safeInterpret(list: unknown, data: GameData): ScriptNode[] {
-  try { return interpret(Array.isArray(list) ? (list as EventCommand[]) : [], data); } catch { return []; }
+function safeInterpret(list: unknown, data: GameData, ctx?: CallCtx): ScriptNode[] {
+  try { return interpret(Array.isArray(list) ? (list as EventCommand[]) : [], data, ctx); } catch { return []; }
 }
 
 /** describe* 가 깨진 입력으로 던져도 색인은 계속한다. */
@@ -49,7 +50,8 @@ export function buildIndex(data: GameData): GameIndex {
     const events = arr<MapEvent | null>(map.events).filter((e): e is MapEvent => isObj(e)).sort((a, b) => a.id - b.id);
     for (const ev of events) {
       const evPages = arr<EventPage | null>(ev.pages);
-      const pageNodes = evPages.map(pg => (isObj(pg) ? safeInterpret(pg.list, data) : []));
+      // TemplateEvent 호출(원래 이벤트·맵 이벤트 페이지)은 그 페이지 문맥으로 펼친다.
+      const pageNodes = evPages.map((pg, pi) => (isObj(pg) ? safeInterpret(pg.list, data, { data, mapId: info.id, event: ev, page: pi }) : []));
       let title = ev.name;
       if (GENERIC_NAME.test(ev.name)) {
         for (const nodes of pageNodes) {

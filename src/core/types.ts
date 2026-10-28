@@ -18,7 +18,11 @@ export interface EventPage {
   /** 페이지의 이동 경로(자율 이동 "사용자 정의"). */
   moveRoute?: { list?: EventCommand[] };
 }
-export interface MapEvent { id: number; name: string; note?: string; x: number; y: number; pages: EventPage[] }
+export interface MapEvent {
+  id: number; name: string; note?: string; x: number; y: number; pages: EventPage[];
+  /** TemplateEvent로 페이지를 템플릿 것으로 바꾼 이벤트의 원래 페이지(`TE固有イベント呼び出し`가 실행한다). */
+  originalPages?: EventPage[];
+}
 export interface MapData { displayName: string; width: number; height: number; events: (MapEvent | null)[] }
 export interface MapInfo { id: number; name: string; parentId: number; order: number }
 export interface CommonEvent { id: number; name: string; trigger: number; switchId: number; list: EventCommand[] }
@@ -54,6 +58,8 @@ export interface GameData {
   errors: LoadError[];
   /** TemplateEvent 플러그인의 템플릿 맵 id(템플릿 이벤트를 풀었을 때만). */
   templateMapId?: number;
+  /** TemplateEvent KeepEventId: 맵 이벤트 호출(TE_CALL_MAP_EVENT)이 부른 이벤트 id를 유지(셀프 스위치가 부른 이벤트에). 없으면 false. */
+  templateKeepEventId?: boolean;
 }
 
 // ---- 해석 결과 ----
@@ -81,13 +87,17 @@ export type ScriptNode =
   | { kind: "loop"; body: ScriptNode[] }
   | { kind: "picture"; cmd: number; pictureId: number; name: string }
   | { kind: "commonEvent"; commonEventId: number }
+  /** TemplateEvent 호출(원래 이벤트 페이지·다른 맵 이벤트 페이지)을 펼친 것. `cmd`: 356/357 명령 인덱스.
+   *  `location`: 펼친 `nodes`의 `cmd`가 가리키는 목록의 위치(본 대사 키도 이 위치로 만든다). */
+  | { kind: "call"; cmd: number; label: string; location: Location; nodes: ScriptNode[] }
   | { kind: "transfer"; mapId: number | null; x?: number; y?: number }
   | { kind: "stateChange"; target: "switch" | "variable" | "selfSwitch" | "item" | "weapon" | "armor" | "gold" | "party"; description: string; refs: Ref[] }
   | { kind: "other"; commands: EventCommand[] };
 
 // ---- 색인 ----
 export type Location =
-  | { source: "map"; mapId: number; eventId: number; page: number }   // page는 0부터
+  /** page는 0부터. origin: TemplateEvent 이벤트의 원래 페이지(0부터) 목록 — 템플릿 페이지 page가 불러 실행한 것 */
+  | { source: "map"; mapId: number; eventId: number; page: number; origin?: number }
   | { source: "common"; commonEventId: number }
   | { source: "troop"; troopId: number; page: number };
 export interface PageEntry {
