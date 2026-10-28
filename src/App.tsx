@@ -16,6 +16,7 @@ import { EventView } from "@/ui/EventView";
 import { SearchDialog } from "@/ui/SearchDialog";
 import { LiveProvider } from "@/app/LiveProvider";
 import { LiveTabs } from "@/ui/live/LiveTabs";
+import { AssistPanel } from "@/ui/live/AssistPanel";
 import { ConnectionBadge } from "@/ui/live/ConnectionBadge";
 import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
@@ -57,6 +58,7 @@ function Shell() {
           <LiveTabs route={route} />
           <div className="ml-auto flex items-center gap-2">
             <ConnectionBadge />
+            <AssistPanel />
             <span className="text-sm">{data.system.gameTitle}</span>
             <Badge variant="secondary">{data.engine}</Badge>
             <ErrorsBadge />
