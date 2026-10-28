@@ -10,6 +10,10 @@ export const KNOWN_NOTICE_APIS: readonly { source: string; path: string; plugins
   { source: "ticker", path: "TickerManager.show", plugins: ["Ticker", "TickerSystem"] },
   { source: "livecomment", path: "LiveCommentContainer.prototype.show", plugins: ["LiveComment"] },
   { source: "notify", path: "Torigoya.NotifyMessage.Manager.notify", plugins: ["TorigoyaMZ_NotifyMessage"] },
+  // 1.19.0
+  { source: "toast", path: "jQuery.toaster", plugins: ["AXY_Toast"] },
+  { source: "achievement", path: "Torigoya.Achievement.Manager.notify", plugins: ["Torigoya_Achievement"] },
+  { source: "achievement", path: "Torigoya.Achievement2.manager.unlock", plugins: ["TorigoyaMZ_Achievement2"] },
 ];
 
 const PATH_RE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
@@ -54,7 +58,54 @@ export function noticePluginsOf(pluginsText: string | null | undefined): string[
 /** 기록의 source → 보일 이름 */
 export function noticeSourceLabel(source: unknown): string {
   if (source === "ticker") return "티커";
+  if (source === "toast") return "토스트 알림";
+  if (source === "achievement") return "업적";
+  if (source === "html") return "화면 위 글(HTML)";
   if (source === "livecomment") return "코멘트";
   if (source === "notify" || source === "info") return "알림";
   return typeof source === "string" && source ? source : "알림";
+}
+
+/** 알림 문구 종류(읽기에서 아이콘·거르기): 업적, 획득(경험치·돈·아이템·레벨), 퀘스트, 그 밖의 알림 */
+export type NoticeKind = "achievement" | "gain" | "quest" | "info";
+export const NOTICE_KINDS: readonly NoticeKind[] = ["achievement", "gain", "quest", "info"];
+export const NOTICE_KIND_LABELS: Record<NoticeKind, string> = { achievement: "업적", gain: "획득", quest: "퀘스트", info: "알림" };
+
+const ACHIEVEMENT_RE = /업적|実績|成就|achievement|trophy|トロフィー/i;
+const QUEST_RE = /퀘스트|クエスト|任务|任務|quest|mission|미션|의뢰/i;
+const MONEY_EXP_RE = /\bexp\b|경험치|経験値|经验|\bgold\b|골드|ゴールド|金币|金钱|金幣|\d\s*G\b|\bG\s*\+?\d/i;
+const GAIN_RE = /획득|얻었|입수|入手|獲得|获得|得到|obtained|gained|\bgot\b|레벨|レベル|等级|level\s*up/i;
+
+/** 돈·경험치 이야기인가(획득 아이콘을 동전으로) */
+export function isMoneyOrExp(text: unknown): boolean {
+  return typeof text === "string" && MONEY_EXP_RE.test(text);
+}
+
+/**
+ * 알림 문구 종류. 기록의 kind(1.19.0: 획득·퀘스트 함수 안에서 뜬 것) → source(업적 등) → 글 모양 순서로 정한다. 예외를 던지지 않는다.
+ */
+export function classifyNotice(source: unknown, text: unknown, kind?: unknown): NoticeKind {
+  if (kind === "gain" || kind === "quest" || kind === "achievement") return kind;
+  if (source === "achievement") return "achievement";
+  if (source === "quest") return "quest";
+  if (source === "gain") return "gain";
+  const t = typeof text === "string" ? text : "";
+  if (ACHIEVEMENT_RE.test(t)) return "achievement";
+  if (QUEST_RE.test(t)) return "quest";
+  if (MONEY_EXP_RE.test(t) || GAIN_RE.test(t)) return "gain";
+  return "info";
+}
+
+/** notice 기록의 종류 */
+export function noticeRecordKind(r: { source?: unknown; text?: unknown; raw?: unknown; kind?: unknown } | null | undefined): NoticeKind {
+  if (!r || typeof r !== "object") return "info";
+  return classifyNotice(r.source, typeof r.text === "string" && r.text ? r.text : r.raw, r.kind);
+}
+
+/** 알림 문구 숨기기: true = 모두, 집합 = 그 종류만, false·없음 = 보인다 */
+export type NoticeHide = boolean | ReadonlySet<NoticeKind> | undefined;
+export function isNoticeHidden(r: Parameters<typeof noticeRecordKind>[0], hide: NoticeHide): boolean {
+  if (hide === true) return true;
+  if (!hide || hide.size === 0) return false;
+  return hide.has(noticeRecordKind(r));
 }

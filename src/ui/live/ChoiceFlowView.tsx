@@ -8,7 +8,7 @@ import { useAddons } from "@/app/AddonsProvider";
 import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
 import { DEFAULT_SCREEN, withoutMenuScreens } from "@/core/addons/screenPictures";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
-import { useNoticesShown } from "./noticeDisplay";
+import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
 import type { HistoryModel } from "@/core/live/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,7 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const { overrides } = usePluginOverrides();
   const [battlesShown] = useBattlesShown();
   const [noticesShown] = useNoticesShown();
+  const [hiddenNoticeKinds] = useHiddenNoticeKinds();
   const { hiddenImages, menuPicturesShown } = useAddons();
 
   const flow = useMemo(() => {
@@ -101,9 +102,9 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
     const choiceText = choiceTexts(path, data);
     // 읽기에서 숨긴 그림은 다시 쌓은 화면에서도 뺀다
     const ctx = { screen: data.screenSize ?? DEFAULT_SCREEN, hidden: hiddenImageMatcher(hiddenImages) };
-    const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown, notices: noticesShown, compose: { ctx } });
+    const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx } });
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenImages, menuPicturesShown]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenNoticeKinds, hiddenImages, menuPicturesShown]);
 
   if (!data) return null;
 

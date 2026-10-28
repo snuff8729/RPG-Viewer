@@ -85,7 +85,7 @@ describe("adapter manifest", () => {
 describe("bundled adapters", () => {
   it("bundles every adapters/ folder with valid manifests", () => {
     const ids = BUNDLED_ADAPTERS.map(a => a.manifest.id);
-    expect(ids).toEqual(["by-work-element", "character-picture-manager", "ddaggeo-mode"]);
+    expect(ids).toEqual(["by-work-element", "character-picture-manager", "ddaggeo-mode", "toast-achievement-notices"]);
     const cpm = BUNDLED_ADAPTERS.find(a => a.manifest.id === "character-picture-manager")!;
     expect(cpm.script).toContain("registerExtension");
     expect(cpm.viewer?.standGroupLabel?.({ key: "a1", actorId: 1, actorName: "아마네", pictures: [] })).toBe("아마네 스탠딩");
@@ -102,6 +102,16 @@ describe("bundled adapters", () => {
     expect(matchingAdapters(list, { plugins: ["YEP_CoreEngine", "BYWorkElement", "BY_Cosplay", "BY_Scenes", "BY_NPS"] }).map(m => m.id))
       .toEqual(["by-work-element"]);
     expect(matchingAdapters(list, { plugins: ["BYWorkElement", "BY_NPS"] })).toEqual([]);
+    // DOP-like: BY standing pictures + toasts / achievements
+    expect(matchingAdapters(list, { plugins: ["BYWorkElement", "BY_Cosplay", "BY_Scenes", "AXY_Toast", "Torigoya_Achievement"] }).map(m => m.id))
+      .toEqual(["by-work-element", "toast-achievement-notices"]);
+    expect(matchingAdapters(list, { plugins: ["Torigoya_Achievement"] }).map(m => m.id)).toEqual(["toast-achievement-notices"]);
+  });
+
+  it("toast-achievement-notices: turns the notices add-on on, nothing else", () => {
+    const t = BUNDLED_ADAPTERS.find(a => a.manifest.id === "toast-achievement-notices")!;
+    expect(t.script).toBeNull();
+    expect(t.manifest.defaults).toEqual({ addons: { notices: true } });
   });
 
   it("ddaggeo-mode roles: gauge HUD, stands, cg, small cut-in layers stay stand", () => {

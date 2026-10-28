@@ -35,7 +35,8 @@ import { ReaderItemView } from "./ReaderItemView";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
 import { useBattlesShown } from "./battleDisplay";
-import { useNoticesShown } from "./noticeDisplay";
+import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
+import { NoticeKindsMenu } from "./NoticeKindsMenu";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 
 const PAGE = 300;
@@ -116,6 +117,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const [showAllPlugins] = usePluginShowAll();
   const [battlesShown] = useBattlesShown();
   const [noticesShown] = useNoticesShown();
+  const [hiddenNoticeKinds] = useHiddenNoticeKinds();
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
@@ -135,11 +137,11 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null });
     const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, {
-      battles: battlesShown, notices: noticesShown, compose: { ctx: pictureCtx, vars },
+      battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx: pictureCtx, vars },
     });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
     return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, screenShown, pictureCtx, vars]);
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
   const layered = useMemo(() => !picturesOn && hasLayeredPictures(path), [picturesOn, path]);
@@ -570,6 +572,7 @@ export function ReaderView() {
             <div className="flex items-center gap-2">
               <Switch id="reader-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
               <Label htmlFor="reader-notices">알림 문구 보기</Label>
+              <NoticeKindsMenu disabled={!noticesShown} />
             </div>
           )}
         </div>

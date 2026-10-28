@@ -56,7 +56,7 @@ export type LogRecord = RecordBase & (
    * source = "ticker"(TickerManager.show)·"livecomment"·"notify"·"info" 또는 직접 추가한 함수 경로,
    * text = 게임이 \n[]·\v[] 등을 풀어 쓴 글(\c[]·\i[] 등은 그대로), raw = 원문
    */
-  | { type: "notice"; source: string; text: string; raw?: string }
+  | { type: "notice"; source: string; text: string; raw?: string; kind?: "gain" | "quest" }
   /**
    * 1.10.0+, 화면 그림 따라 그리기가 켜진 게임만: 기록 사이에 화면 그림이 바뀌었을 때(다른 플러그인이 잠깐 띄운 컷인 등)
    * 그때 화면 그림 전체. 이야기 기록이 아니고 반복 대화·전투 묶음·갈래 판정에 영향을 주지 않는다. scene = 맵/전투 화면.
@@ -123,6 +123,8 @@ export interface LiveAssist {
   captureNotices?: boolean;
   /** 게임이 감싼 알림 함수 경로들(플러그인 1.9.0+) */
   notices?: string[];
+  /** 게임 화면 위 HTML 글을 지켜보는가(플러그인 1.19.0+) */
+  htmlNotices?: boolean;
   /** 게임에 붙은 게임 전용 확장 id들(플러그인 1.13.0+) */
   extensions?: string[];
   /** 지금 전투에서 도망칠 수 있는가(전투 중일 때만 의미) */

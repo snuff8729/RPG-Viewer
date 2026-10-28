@@ -1,0 +1,9 @@
+{
+  "id": "toast-achievement-notices",
+  "label": "토스트·업적 알림 (AXY_Toast·Torigoya_Achievement)",
+  "description": "AXY_Toast나 Torigoya_Achievement를 쓰는 게임(DOP 등)에 맞춘 설정이에요. 알림 문구 기록을 켜서 화면 위에 잠깐 뜨는 아이템·골드 획득, 레벨 업, 퀘스트 접수·완료 같은 토스트와 업적 달성을 읽기에 업적·획득·퀘스트·알림으로 나눠 보여줘요. 게임 화면 위에 HTML로 띄운 글도 기록해요. 기록 플러그인 1.19.0 이상이 필요해요.",
+  "match": { "plugins": ["AXY_Toast", "Torigoya_Achievement"], "pluginsMode": "any" },
+  "defaults": {
+    "addons": { "notices": true }
+  }
+}
