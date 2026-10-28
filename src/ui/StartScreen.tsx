@@ -84,6 +84,11 @@ export function StartScreen() {
                     </ul>
                   </AlertDescription>
                 </>
+              ) : error.reason === "internal" ? (
+                <>
+                  <AlertTitle>게임을 여는 중 오류가 발생했어요</AlertTitle>
+                  <AlertDescription>{error.message}</AlertDescription>
+                </>
               ) : (
                 <AlertTitle>지원하지 않는 암호화 방식이에요 ({error.file})</AlertTitle>
               )}

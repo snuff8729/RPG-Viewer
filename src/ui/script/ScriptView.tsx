@@ -13,13 +13,15 @@ import { PictureNode } from "./PictureNode";
  * 노드 경로 규칙(검색 색인과 동일): 최상위 [i], 분기 안 [i, 분기, j].
  * basePath는 이 목록의 접두 경로이고 j번째 노드의 경로는 [...basePath, j].
  */
-export function ScriptView({ nodes, basePath, onRefClick }: {
+export function ScriptView({ nodes, basePath, onRefClick, pageKey }: {
   nodes: ScriptNode[];
   basePath: number[];
   onRefClick?: (ref: Ref) => void;
+  /** 최상위 ScriptView에만 준다. 검색 강조가 이 페이지 안에서만 노드를 찾도록 data-page-key로 붙는다. */
+  pageKey?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-page-key={pageKey}>
       {nodes.map((n, j) => {
         const path = [...basePath, j];
         return (

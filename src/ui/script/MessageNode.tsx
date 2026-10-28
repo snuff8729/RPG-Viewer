@@ -13,7 +13,7 @@ export function MessageNode({ node }: { node: Msg }) {
       </div>
       <div className="min-w-0 flex-1">
         {node.speaker && <div className="text-sm font-semibold">{node.speaker}</div>}
-        <div className={cn("whitespace-pre-line", !node.face && "italic text-muted-foreground")}>
+        <div className={cn("whitespace-pre-line", !node.face && !node.speaker && "italic text-muted-foreground")}>
           {node.lines.join("\n")}
         </div>
       </div>

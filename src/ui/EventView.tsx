@@ -82,7 +82,10 @@ export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }
       </div>
       <Card className="max-w-3xl">
         <CardContent>
-          <ScriptView key={locationKey(current.location)} nodes={current.nodes} basePath={[]} onRefClick={setXrefTarget} />
+          <ScriptView
+            key={locationKey(current.location)} pageKey={locationKey(current.location)}
+            nodes={current.nodes} basePath={[]} onRefClick={setXrefTarget}
+          />
         </CardContent>
       </Card>
       <XrefSheet refTarget={xrefTarget} onClose={() => setXrefTarget(null)} />

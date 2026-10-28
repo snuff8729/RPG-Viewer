@@ -16,7 +16,7 @@ import { EventView } from "@/ui/EventView";
 import { SearchDialog } from "@/ui/SearchDialog";
 
 function Shell() {
-  const { status, data, index } = useGame();
+  const { status, data, index, close } = useGame();
   const [route] = useRoute();
   const [showEmpty, setShowEmpty] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -63,6 +63,7 @@ function Shell() {
             <Badge variant="secondary">{data.engine}</Badge>
             <ErrorsBadge />
             <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)}><Search />검색</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setSearchOpen(false); close(); }}>다른 게임 열기</Button>
           </div>
         </header>
         <main className="flex-1 p-4">

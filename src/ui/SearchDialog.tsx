@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useGame } from "@/app/GameProvider";
+import { locationKey } from "@/core/index/locations";
 import type { SearchHit } from "@/core/types";
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { highlightNode } from "./highlight";
@@ -17,10 +18,12 @@ export function SearchDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const query = q.trim();
   const hits = useMemo<SearchHit[]>(() => (index && query ? index.search(query, 200) : []), [index, query]);
   const groups = useMemo(() => {
-    const m = new Map<string, SearchHit[]>();
+    // 같은 이름의 이벤트가 한 맵에 있어도 섞이지 않도록 위치 키로 묶는다. 제목은 path.
+    const m = new Map<string, { path: string; hits: SearchHit[] }>();
     for (const h of hits) {
-      const l = m.get(h.entry.path);
-      if (l) l.push(h); else m.set(h.entry.path, [h]);
+      const key = locationKey(h.entry.location);
+      const g = m.get(key);
+      if (g) g.hits.push(h); else m.set(key, { path: h.entry.path, hits: [h] });
     }
     return [...m.entries()];
   }, [hits]);
@@ -28,19 +31,19 @@ export function SearchDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const pick = (h: SearchHit) => {
     onOpenChange(false);
     openPage(h.entry.location);
-    highlightNode(h.nodePath);
+    highlightNode(locationKey(h.entry.location), h.nodePath);
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} title="검색" description="대사와 선택지를 검색해요">
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="검색" description="대사, 선택지, 화자 이름을 검색해요">
     <Command shouldFilter={false}>
-      <CommandInput placeholder="대사, 선택지 검색..." value={q} onValueChange={setQ} />
+      <CommandInput placeholder="대사, 선택지, 화자 이름 검색..." value={q} onValueChange={setQ} />
       <CommandList>
         {query && <CommandEmpty>결과가 없어요</CommandEmpty>}
-        {groups.map(([path, hs]) => (
-          <CommandGroup key={path} heading={path}>
+        {groups.map(([key, { path, hits: hs }]) => (
+          <CommandGroup key={key} heading={path}>
             {hs.map((h, i) => (
-              <CommandItem key={i} value={`${path}-${i}-${h.text}`} onSelect={() => pick(h)}>
+              <CommandItem key={i} value={`${key}-${i}-${h.text}`} onSelect={() => pick(h)}>
                 <Marked text={h.text} q={query} />
               </CommandItem>
             ))}

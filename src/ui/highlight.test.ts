@@ -4,7 +4,8 @@ import { forcedSignal, forcedOpenKeys, nodeSelector, pathKey } from "./highlight
 describe("highlight", () => {
   it("builds selectors", () => {
     expect(pathKey([2, -1, 0])).toBe("2.-1.0");
-    expect(nodeSelector([1, 0, 3])).toBe('[data-node-path="1.0.3"]');
+    expect(nodeSelector("map:2:1:0", [1, 0, 3])).toBe('[data-page-key="map:2:1:0"] [data-node-path="1.0.3"]');
+    expect(nodeSelector("common:4", [0])).toBe('[data-page-key="common:4"] [data-node-path="0"]');
   });
   it("signals per navigation via nonce", () => {
     const keys = new Set(["1.0"]);
