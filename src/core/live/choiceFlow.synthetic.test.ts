@@ -74,4 +74,49 @@ describe("choiceFlow synthetic", () => {
     expect(extra.some(i => i.kind === "choice")).toBe(true);
     expect(missing.some(i => i.kind === "choice")).toBe(true);
   });
+
+  it("falls back to the reader label when no choices record is on the path", () => {
+    const c = choiceOf(run(recs(1, ["x", "y"]).filter(r => r.type !== "choices"), 1, []));
+    expect(c.options).toHaveLength(1);
+    expect(c.options[0].picked).toBe(true);
+    expect(c.options[0].label.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the reader label when picked is out of range", () => {
+    const c = choiceOf(run(recs(5, ["x", "y"]), 1, []));
+    const picked = c.options.filter(o => o.picked);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].label.length).toBeGreaterThan(0);
+    expect(c.options.slice(0, 2).map(o => o.picked)).toEqual([false, false]);
+  });
+
+  it("counts lines, not boxes", () => {
+    const rs = recs(0, ["x"]);
+    (rs[1] as { text: string }).text = "a\nb\nc";
+    const seg = run(rs, 1, []).find(i => i.kind === "segment") as Extract<FlowItem, { kind: "segment" }>;
+    expect(seg.messages).toBe(3);
+  });
+
+  it("excludes picks whose seq belongs to this path from elsewhere", () => {
+    const c = choiceOf(run(recs(0, ["x", "y"]), 1, [
+      { picked: 1, branch: 9, seq: 2 }, { picked: 1, branch: 8, seq: 99 },
+    ]));
+    expect(c.options[1].elsewhere).toEqual(["갈래 8"]);
+  });
+
+  it("stays fast with thousands of state/save records between reader items", () => {
+    const rs: LogRecord[] = [recs(0, ["x", "y"])[0]];
+    let seq = 2;
+    for (let i = 0; i < 3000; i++) rs.push({ ...base, branch: 1, seq: seq++, type: "save", slot: 1 } as LogRecord);
+    for (let i = 0; i < 2000; i++) {
+      rs.push({ ...base, branch: 1, seq: seq++, type: "message", src, cmd: i, face: "", faceIndex: 0, speaker: "A", text: `t${i}` } as LogRecord);
+      for (let j = 0; j < 3; j++) rs.push({ ...base, branch: 1, seq: seq++, type: "save", slot: 1 } as LogRecord);
+    }
+    const t0 = performance.now();
+    const f = run(rs, 1, []);
+    const ms = performance.now() - t0;
+    console.log(`choiceFlow perf: ${ms.toFixed(1)}ms`);
+    expect(f.find(i => i.kind === "segment")).toBeDefined();
+    expect(ms).toBeLessThan(50);
+  });
 });

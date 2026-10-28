@@ -21,7 +21,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.4",
+    VERSION: "1.0.5",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -57,6 +57,7 @@
 
   // ---------------------------------------------------------------- state
   var meta = { nextRun: 1, nextBranch: 1, nextSeq: 1 };
+  var lastStory = {};         // branch -> seq of its last story record (0 = none yet); persisted in meta.json
   var run = null, branch = null;
   var buffer = [];            // serialized records not yet appended
   // State changes not yet written, grouped per src+cmd within the current flush window
@@ -80,13 +81,63 @@
         var m = JSON.parse(fs.readFileSync(META, "utf8"));
         if (m && isCount(m.nextRun) && isCount(m.nextBranch) && isCount(m.nextSeq)) {
           meta = { nextRun: m.nextRun, nextBranch: m.nextBranch, nextSeq: m.nextSeq };
-          return;
+          if (m.lastStory && typeof m.lastStory === "object") {
+            for (var b in m.lastStory) {
+              if (Object.prototype.hasOwnProperty.call(m.lastStory, b) && isCount(Number(b)) && isNonNeg(m.lastStory[b])) lastStory[b] = m.lastStory[b];
+            }
+          }
         }
       }
-    } catch (e) { /* fall through to log scan */ }
+    } catch (e) { /* the bounded log-tail scan (raiseMetaFromLog) recovers the counters */ }
+  }
+
+  function isNonNeg(n) { return typeof n === "number" && isFinite(n) && n >= 0 && Math.floor(n) === n; }
+  var STORY = { message: true, scroll: true, choices: true, choice: true, picture: true };
+  var MAX_STORY_BRANCHES = 200;
+  function noteStory(b, seq) { // seq 0 = branch seen, no story records yet
+    if (!isCount(b)) return;
+    if (!Object.prototype.hasOwnProperty.call(lastStory, b) || lastStory[b] < seq) lastStory[b] = seq;
+  }
+  function prunedStory() {
+    var keys = Object.keys(lastStory);
+    if (keys.length <= MAX_STORY_BRANCHES) return lastStory;
+    keys.sort(function (x, y) { return Number(y) - Number(x); }); // newest branches first
+    var out = {};
+    for (var i = 0; i < MAX_STORY_BRANCHES; i++) out[keys[i]] = lastStory[keys[i]];
+    lastStory = out;
+    return out;
+  }
+
+  // meta.json can lag behind the log (it is written on a timer): raise the counters above
+  // whatever the last ~64KB of the log shows so new records never reuse a seq.
+  var TAIL_BYTES = 65536;
+  // Limitation: a single line longer than 64KB cannot be recovered from the tail (the cut first
+  // line is dropped); records are far smaller than that in practice.
+  function readLogTail() {
+    var text, partial = false;
+    if (typeof fs.statSync === "function" && typeof fs.openSync === "function" && typeof fs.readSync === "function") {
+      var size = fs.statSync(LOG).size;
+      var start = Math.max(0, size - TAIL_BYTES);
+      var len = size - start;
+      var buf = typeof Buffer.alloc === "function" ? Buffer.alloc(len) : new Buffer(len);
+      var fd = fs.openSync(LOG, "r");
+      var got = 0;
+      try { got = fs.readSync(fd, buf, 0, len, start); } finally { try { fs.closeSync(fd); } catch (ec) { /* ignore */ } }
+      if (typeof got !== "number" || !(got >= 0) || got > len) got = 0;
+      text = buf.slice(0, got).toString("utf8"); // never decode bytes that were not read
+      partial = start > 0;
+    } else {
+      text = String(fs.readFileSync(LOG, "utf8")); // no fd API at all: nothing better available
+      if (text.length > TAIL_BYTES) { text = text.slice(-TAIL_BYTES); partial = true; }
+    }
+    var lines = text.split("\n");
+    if (partial) lines.shift(); // first line is cut
+    return lines;
+  }
+  function raiseMetaFromLog() {
     try {
       if (!fs.existsSync(LOG)) return;
-      var lines = String(fs.readFileSync(LOG, "utf8")).split("\n");
+      var lines = readLogTail();
       for (var i = 0; i < lines.length; i++) {
         if (!lines[i]) continue;
         try {
@@ -94,9 +145,19 @@
           if (isCount(r.seq) && r.seq >= meta.nextSeq) meta.nextSeq = r.seq + 1;
           if (isCount(r.run) && r.run >= meta.nextRun) meta.nextRun = r.run + 1;
           if (isCount(r.branch) && r.branch >= meta.nextBranch) meta.nextBranch = r.branch + 1;
+          if (r.type === "branchStart") noteStory(r.branch, 0);
+          else if (STORY[r.type] === true && isCount(r.seq)) noteStory(r.branch, r.seq);
         } catch (e2) { /* skip broken line */ }
       }
-    } catch (e3) { /* keep defaults */ }
+    } catch (e3) { reportError(e3); /* skip recovery; never read the whole log */ }
+  }
+
+  var lastMetaJson = null;
+  function writeMeta() {
+    var json = JSON.stringify({ nextRun: meta.nextRun, nextBranch: meta.nextBranch, nextSeq: meta.nextSeq, lastStory: prunedStory() });
+    if (json === lastMetaJson) return;
+    fs.writeFileSync(META, json);
+    lastMetaJson = json;
   }
 
   function ensureDir() {
@@ -132,6 +193,7 @@
     closeState();
     var rec = makeRecord(type, now());
     for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) rec[k] = fields[k];
+    if (STORY[type] === true) noteStory(rec.branch, rec.seq);
     pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
   }
@@ -279,6 +341,18 @@
     lastChoices = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
+    noteStory(branch, 0);
+  }
+
+  // Continue the stamped run/branch (no branchStart) when it has no story records after the stamp.
+  function resumeBranch(r, b) {
+    releasePending(true);
+    closeState();
+    varTimes = {}; varLastEmit = {}; varPending = {}; varPendingCount = 0;
+    run = r;
+    branch = b;
+    lastChoices = null;
+    deferredNewGame = false;
   }
 
   function flush() {
@@ -295,7 +369,6 @@
       buffer = lines.concat(buffer).slice(-MAX_BUFFER);
       throw e;
     }
-    fs.writeFileSync(META, JSON.stringify(meta));
   }
 
   // ---------------------------------------------------------------- snapshot
@@ -401,10 +474,14 @@
 
   function tick() {
     try { flush(); } catch (e) { reportError(e); }
+    try { writeMeta(); } catch (em) { reportError(em); }
     try { writeLive(false); } catch (e2) { reportError(e2); }
   }
 
-  bridge._flushNow = function () { try { flush(); } catch (e) { reportError(e); } };
+  bridge._flushNow = function () {
+    try { flush(); } catch (e) { reportError(e); }
+    try { writeMeta(); } catch (em) { reportError(em); }
+  };
   bridge._snapshotNow = function () { try { writeLive(true); } catch (e) { reportError(e); } };
   bridge._tick = tick;
   bridge._runScheduled = runScheduled;
@@ -687,7 +764,9 @@
             if (meta.nextRun <= s.run) meta.nextRun = s.run + 1;
             if (meta.nextBranch <= s.branch) meta.nextBranch = s.branch + 1;
             if (meta.nextSeq <= s.seq) meta.nextSeq = s.seq + 1; // save from a reset/copied log
-            startBranch("load", s.run, s.branch, s.seq);
+            var known = Object.prototype.hasOwnProperty.call(lastStory, s.branch);
+            if (known && lastStory[s.branch] <= s.seq) resumeBranch(s.run, s.branch);
+            else startBranch("load", s.run, s.branch, s.seq); // story after the save, or unknown: new branch
           } else {
             startBranch("unknownSave", meta.nextRun++, null, null);
           }
@@ -701,7 +780,7 @@
     function afterSuccess(type, slot, result) {
       var done = function () {
         emit(type, { slot: slot });
-        if (type === "save") flush();
+        if (type === "save") { flush(); writeMeta(); }
       };
       if (result && typeof result.then === "function") {
         result.then(function () {
@@ -732,6 +811,7 @@
   } catch (e) { /* harmless: overwritten on next snapshot */ }
   try {
     loadMeta();
+    raiseMetaFromLog();
     install();
   } catch (e) {
     reportError(e);
