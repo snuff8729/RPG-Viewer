@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { branchLabel } from "@/core/live/history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live/types";
 import { formatText } from "@/core/text/escape";
@@ -97,7 +97,35 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
   }
 }
 
-export function TimelineItem({ item, ctx }: { item: HistoryItem; ctx: TimelineCtx }) {
+/** 같은 기록인가: 같은 객체이거나, 잦은 변수를 걸러 새로 만든 state 기록이 같은 변경들을 가리킬 때. */
+function sameRecord(a: LogRecord, b: LogRecord): boolean {
+  if (a === b) return true;
+  if (a.type !== "state" || b.type !== "state" || a.seq !== b.seq || a.branch !== b.branch) return false;
+  const x = a.changes, y = b.changes;
+  return x.length === y.length && x.every((c, i) => c === y[i]);
+}
+
+/** foldTimeline은 매번 새 항목 객체를 만들므로, 내용(기록 참조) 기준으로 같은지 본다. */
+function sameItem(a: HistoryItem, b: HistoryItem): boolean {
+  if (a === b) return true;
+  switch (a.kind) {
+    case "record":
+      return b.kind === "record" && a.uncertain === b.uncertain && a.changed === b.changed && sameRecord(a.record, b.record);
+    case "repeat":
+      return b.kind === "repeat" && a.count === b.count && a.record === b.record;
+    case "stateGroup":
+      return b.kind === "stateGroup" && a.count === b.count && a.records.length === b.records.length
+        && a.records.every((r, i) => sameRecord(r, b.records[i]));
+    case "fork":
+      return b.kind === "fork" && a.atSeq === b.atSeq && a.branches.length === b.branches.length
+        && a.branches.every((id, i) => id === b.branches[i]);
+  }
+}
+
+type TimelineItemProps = { item: HistoryItem; ctx: TimelineCtx };
+
+/** 항목·ctx가 그대로면 다시 그리지 않는다(기록 탭은 최대 수백 개를 그린다). */
+export const TimelineItem = memo(function TimelineItem({ item, ctx }: TimelineItemProps) {
   switch (item.kind) {
     case "record": return <RecordLine r={item.record} ctx={ctx} uncertain={item.uncertain} changed={item.changed} />;
     case "repeat":
@@ -134,4 +162,4 @@ export function TimelineItem({ item, ctx }: { item: HistoryItem; ctx: TimelineCt
         </div>
       );
   }
-}
+}, (prev: TimelineItemProps, next: TimelineItemProps) => prev.ctx === next.ctx && sameItem(prev.item, next.item));

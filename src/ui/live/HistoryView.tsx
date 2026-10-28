@@ -22,6 +22,16 @@ const KIND_LABELS: [Kind, string][] = [
   ["battle", "전투"], ["state", "상태 변경"], ["save", "저장·불러오기"],
 ];
 
+/**
+ * 내용 키가 같으면 이전 값을 그대로 돌려준다(렌더 중 상태 갱신 패턴).
+ * 기록이 늘 때마다 새로 만들어지지만 내용은 거의 같은 값(갈래 모델·선택 문구)을 ctx에 넣기 위해 쓴다.
+ */
+function useStableByKey<T>(value: T, key: string): T {
+  const [kept, setKept] = useState({ key, value });
+  if (kept.key !== key) setKept({ key, value });
+  return kept.key === key ? kept.value : value;
+}
+
 /** 기록 탭 — 회차·갈래·종류 선택, 스크롤되는 타임라인, 하단 고정 카드. */
 export function HistoryView() {
   const { data, index } = useGame();
@@ -45,10 +55,16 @@ export function HistoryView() {
 
   const filtered = useMemo(() => filterItems(items, kinds), [items, kinds]);
 
-  const choiceText = useMemo(() => {
+  const choiceTextNow = useMemo(() => {
     if (!data || selected === null) return new Map<number, string>();
     return choiceTexts(path, data);
   }, [path, selected, data]);
+  // 항목이 다시 그려지지 않도록 ctx에 넣는 값은 내용이 바뀔 때만 참조를 바꾼다.
+  // 선택 문구: 내용 그대로면 이전 Map. 갈래 모델: 항목은 갈래 이름(branchLabel = runs 구성)만 쓴다.
+  const choiceTextKey = useMemo(() => JSON.stringify([...choiceTextNow]), [choiceTextNow]);
+  const choiceText = useStableByKey(choiceTextNow, choiceTextKey);
+  const runsKey = useMemo(() => JSON.stringify(model.runs), [model]);
+  const labelModel = useStableByKey(model, runsKey);
 
   const onJump = useCallback((src: Location, cmd: number) => {
     const key = locationKey(src);
@@ -111,7 +127,11 @@ export function HistoryView() {
     prevKey.current = key;
     prevLen.current = filtered.length;
     if (reset || nearBottom.current) scrollToBottom();
-    else if (grew > 0) setFresh(n => n + grew);
+    else if (grew > 0) {
+      setFresh(n => n + grew);
+      // 읽는 중이면 보이는 창의 시작을 그대로 두도록 새 항목 수만큼 넓힌다(창이 밀리지 않게)
+      setShown(s => s + grew);
+    }
   }, [filtered.length, selected, kinds, scrollToBottom]);
 
   const onKinds = (v: string[]) => {
@@ -121,12 +141,14 @@ export function HistoryView() {
     setShown(PAGE);
   };
 
+  const onSelect = useCallback((id: number) => { setPicked(id); setShown(PAGE); }, []);
+  const ctx = useMemo<TimelineCtx | null>(
+    () => (empty || !data || selected === null ? null : { data, model: labelModel, selected, choiceText, onJump, onSelect }),
+    [empty, data, labelModel, selected, choiceText, onJump, onSelect],
+  );
+
   if (!data) return null;
   const installed = install?.state === "installed" && connection !== "noPlugin";
-  const ctx: TimelineCtx | null = empty ? null : {
-    data, model, selected, choiceText, onJump,
-    onSelect: (id) => { setPicked(id); setShown(PAGE); },
-  };
   const visible = filtered.slice(Math.max(0, filtered.length - shown));
 
   return (
