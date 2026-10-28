@@ -31,6 +31,10 @@ describe("AssetStore", () => {
     const { folder, data } = await open("sample-mv");
     expect(await head(await new AssetStore(folder, data).load("faces", "Actor1"))).toEqual(PNG_SIG);
   });
+  it("image() is null when missing or when createImageBitmap is unavailable", async () => {
+    expect(await store.image("characters", "nope")).toBeNull();
+    expect(await store.image("tilesets", "")).toBeNull();
+  });
   it("returns null for missing", async () => expect(await store.load("pictures", "nope")).toBeNull());
   it("returns null for empty name", async () => expect(await store.load("faces", "")).toBeNull());
   it("returns null for encrypted file without key", async () => {

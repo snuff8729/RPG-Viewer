@@ -1,5 +1,5 @@
 import type { Ref } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, MapPin } from "lucide-react";
 import type { ChecklistEvent, LockedPage } from "@/core/live/mapChecklist";
 import { openPage } from "@/ui/navigation";
 import { cn } from "@/lib/utils";
@@ -54,14 +54,21 @@ function Locked({ lp }: { lp: LockedPage }) {
   );
 }
 
-export function ChecklistCard({ ev, number, highlighted, ref }: {
-  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 이벤트는 없음 */ number?: number; highlighted: boolean; ref?: Ref<HTMLDivElement>;
+export function ChecklistCard({ ev, number, highlighted, selected, route, onLocate, ref }: {
+  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 이벤트는 없음 */ number?: number; highlighted: boolean;
+  /** 맵에서 고른 이벤트 */
+  selected?: boolean;
+  /** 고른 이벤트까지 가는 길 설명. null = 길을 못 찾음, undefined = 보여주지 않음 */
+  route?: string | null;
+  /** `위치 보기`: 맵에서 이 이벤트를 고르고 가운데로 */
+  onLocate?: () => void;
+  ref?: Ref<HTMLDivElement>;
 }) {
   const st = sectionStyle(ev.section);
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
   return (
-    <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, highlighted && "ring-2 ring-ring")}>
+    <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, selected && "ring-1 ring-ring", highlighted && "ring-2 ring-ring")}>
       <CardHeader className="px-4">
         <CardTitle className="flex flex-wrap items-center gap-2">
           <st.Icon className={cn("size-4 shrink-0", st.text)} aria-hidden />
@@ -76,6 +83,11 @@ export function ChecklistCard({ ev, number, highlighted, ref }: {
         <CardDescription>
           {ev.name && ev.name !== ev.title ? `${ev.name} · ` : ""}({ev.x}, {ev.y})
         </CardDescription>
+        {route !== undefined && (
+          <p className={cn("text-sm font-medium", route === null && "text-muted-foreground")}>
+            {route === null ? "갈 수 있는 길을 못 찾았어요" : `가는 길: ${route}`}
+          </p>
+        )}
       </CardHeader>
       {(ev.repeat.length > 0 || lockedPages > 0) && (
         <CardContent className="space-y-2 px-4">
@@ -94,9 +106,12 @@ export function ChecklistCard({ ev, number, highlighted, ref }: {
           )}
         </CardContent>
       )}
-      {target && (
-        <CardFooter className="px-4">
-          <Button variant="outline" size="sm" onClick={() => openPage(target)}>탐색기에서 보기</Button>
+      {(target || onLocate) && (
+        <CardFooter className="gap-2 px-4">
+          {onLocate && (
+            <Button variant="outline" size="sm" onClick={onLocate}><MapPin />위치 보기</Button>
+          )}
+          {target && <Button variant="outline" size="sm" onClick={() => openPage(target)}>탐색기에서 보기</Button>}
         </CardFooter>
       )}
     </Card>

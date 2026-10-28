@@ -2,8 +2,8 @@
 import { isCounter, passable, type Dir } from "./passage";
 import type { MapTiles, TilesetInfo } from "./tiles";
 
-/** face: 서서 바라볼 방향. null = 이벤트 칸에 올라서기. */
-export interface EventStand { x: number; y: number; face: Dir | null }
+/** face: 서서 바라볼 방향. null = 이벤트 칸에 올라서기. touch: 그 방향으로 한 걸음 부딪혀서 실행(접촉 트리거). */
+export interface EventStand { x: number; y: number; face: Dir | null; touch?: boolean }
 /** steps: 출발 칸부터 서는 칸까지(양 끝 포함). */
 export interface Route { steps: { x: number; y: number }[]; stand: EventStand; text: string }
 
@@ -11,6 +11,7 @@ const DIRS: readonly Dir[] = [2, 4, 6, 8];
 const DELTA: Record<Dir, readonly [number, number]> = { 2: [0, 1], 4: [-1, 0], 6: [1, 0], 8: [0, -1] };
 const REVERSE: Record<Dir, Dir> = { 2: 8, 4: 6, 6: 4, 8: 2 };
 const DIR_OBJ: Record<Dir, string> = { 2: "아래를", 4: "왼쪽을", 6: "오른쪽을", 8: "위를" };
+const DIR_TO: Record<Dir, string> = { 2: "아래로", 4: "왼쪽으로", 6: "오른쪽으로", 8: "위로" };
 
 const inside = (map: MapTiles, x: number, y: number) =>
   Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < map.width && y < map.height;
@@ -18,7 +19,8 @@ const key = (x: number, y: number) => `${x},${y}`;
 
 /**
  * 캐릭터와 같은 우선순위(1) + 결정 버튼(0): 이벤트를 바라보는 네 이웃 칸(사이에 카운터 0x80 칸이 있으면 두 칸 떨어진 곳도).
- * 그 밖(우선순위 0/2, 접촉 트리거 등): 이벤트 칸 자체.
+ * 캐릭터와 같은 우선순위 + 접촉(1·2): 네 이웃 칸에서 이벤트 쪽으로 한 걸음 부딪히기(touch, 카운터 너머는 안 됨).
+ * 그 밖(우선순위 0/2 등): 이벤트 칸 자체.
  */
 export function standTiles(
   ev: { x: number; y: number; priorityType: number; trigger: number; through: boolean },
@@ -26,12 +28,14 @@ export function standTiles(
   tileset: TilesetInfo,
 ): EventStand[] {
   try {
-    if (ev.priorityType !== 1 || ev.trigger !== 0) return [{ x: ev.x, y: ev.y, face: null }];
+    const touch = ev.trigger === 1 || ev.trigger === 2;
+    if (ev.priorityType !== 1 || (ev.trigger !== 0 && !touch)) return [{ x: ev.x, y: ev.y, face: null }];
     const out: EventStand[] = [];
     for (const d of DIRS) {
       const [ddx, ddy] = DELTA[d];
       const x1 = ev.x - ddx, y1 = ev.y - ddy;
       if (!inside(map, x1, y1)) continue;
+      if (touch) { out.push({ x: x1, y: y1, face: d, touch: true }); continue; }
       out.push({ x: x1, y: y1, face: d });
       if (isCounter(map, tileset, x1, y1)) {
         const x2 = x1 - ddx, y2 = y1 - ddy;
@@ -44,6 +48,11 @@ export function standTiles(
   }
 }
 
+function action(stand: EventStand): string {
+  if (stand.face === null) return "그 칸에 서기";
+  return stand.touch ? `${DIR_TO[stand.face]} 한 걸음 (부딪히기)` : `${DIR_OBJ[stand.face]} 보고 확인`;
+}
+
 function describe(from: { x: number; y: number }, stand: EventStand): string {
   const dx = stand.x - from.x, dy = stand.y - from.y;
   const parts: string[] = [];
@@ -51,8 +60,8 @@ function describe(from: { x: number; y: number }, stand: EventStand): string {
   if (dx < 0) parts.push(`왼쪽 ${-dx}칸`);
   if (dy < 0) parts.push(`위 ${-dy}칸`);
   if (dy > 0) parts.push(`아래 ${dy}칸`);
-  if (parts.length === 0) return stand.face === null ? "지금 그 칸에 서 있음" : `지금 자리에서 ${DIR_OBJ[stand.face]} 보고 확인`;
-  return `${parts.join(", ")} 가서 ${stand.face === null ? "그 칸에 서기" : `${DIR_OBJ[stand.face]} 보고 확인`}`;
+  if (parts.length === 0) return stand.face === null ? "지금 그 칸에 서 있음" : `지금 자리에서 ${action(stand)}`;
+  return `${parts.join(", ")} 가서 ${action(stand)}`;
 }
 
 /**
