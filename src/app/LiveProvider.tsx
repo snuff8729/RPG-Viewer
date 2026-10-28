@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import pluginSource from "../../plugin/RPGViewerBridge.js?raw";
 import { useGame } from "./GameProvider";
+import { useAddons } from "./AddonsProvider";
 import { isWritableFolder, type WritableGameFolder } from "@/core/fs/folder";
 import { buildHistory } from "@/core/live/history";
 import { createAccumulator, type LiveAccumulator } from "@/core/live/accumulator";
@@ -377,11 +378,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }
   const assistSupported = connection === "connected" && wfolder !== null && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
   const controlFile = dataRoot === null ? null : livePaths(dataRoot).controlFile;
+  /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) */
+  const { controlFlags } = useAddons();
 
   /** 쓰기에 필요한 최신 값(비동기·타이머에서 읽는다) */
-  const assistLatest = useRef({ supported: false, folder: null as WritableGameFolder | null, controlFile: null as string | null, settings: assistSettings, coverage, index: index as GameIndex | null, gameKey, live: live as LiveSnapshot | null });
+  const assistLatest = useRef({ supported: false, folder: null as WritableGameFolder | null, controlFile: null as string | null, settings: assistSettings, coverage, index: index as GameIndex | null, gameKey, live: live as LiveSnapshot | null, flags: controlFlags });
   useEffect(() => {
-    assistLatest.current = { supported: assistSupported, folder: wfolder, controlFile, settings: assistSettings, coverage, index: index ?? null, gameKey, live };
+    assistLatest.current = { supported: assistSupported, folder: wfolder, controlFile, settings: assistSettings, coverage, index: index ?? null, gameKey, live, flags: controlFlags };
   });
   /** 마지막으로 성공한 쓰기: 본문(t 제외, 같으면 다시 쓰지 않는다)·t·설정 */
   const lastWritten = useRef<(WrittenControl & { body: string }) | null>(null);
@@ -428,12 +431,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const fresh = lastCommand.current && now - lastCommand.current.at < COMMAND_TTL_MS ? lastCommand.current : null;
     const cmd = fresh && !(force && commandWritten.current === fresh.id) ? fresh : null;
     const settings = cur.settings;
-    const body = controlJson(settings, cached.sets, cmd, 0);
+    const body = controlJson(settings, cached.sets, cmd, 0, cur.flags);
     const prev = lastWritten.current;
     if (!force && prev?.body === body) return;
     const t = Math.max(now, (prev?.t ?? 0) + 1);
     let ok = false;
-    try { ok = await folderNow.writeText(path, controlJson(settings, cached.sets, cmd, t)); } catch { ok = false; }
+    try { ok = await folderNow.writeText(path, controlJson(settings, cached.sets, cmd, t, cur.flags)); } catch { ok = false; }
     if (ok && writeGen.current === gen && assistLatest.current.folder === folderNow) {
       lastWritten.current = { body, t, settings };
       if (cmd) commandWritten.current = cmd.id;
@@ -484,6 +487,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (assistSupported) requestControlWrite();
   }, [assistSupported, wfolder, requestControlWrite]);
+
+  // 애드온을 켜고 끄면 바로 다시 쓴다(본문이 같으면 doWrite가 건너뛴다).
+  const flagsKey = JSON.stringify(controlFlags);
+  useEffect(() => {
+    if (assistSupported) requestControlWrite();
+  }, [assistSupported, flagsKey, requestControlWrite]);
 
   // 진행도가 바뀌면 3초 조용할 때 본 것 묶음을 다시 쓴다.
   useEffect(() => {

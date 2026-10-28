@@ -8,9 +8,14 @@ export interface StateChange {
 }
 export type LogRecord = RecordBase & (
   | { type: "branchStart"; reason: "newGame" | "load" | "unknownSave"; parentBranch: number | null; fromSeq: number | null }
-  | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string }
+  /**
+   * 1.6.0+, 화면 그림 따라 그리기가 켜진 게임만: pics = 대사가 나올 때 화면 그림 전체(앞과 다를 때),
+   * picsSame = 앞과 같음. 그림 하나는 [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode, tone?, angle?] (core/addons/screenPictures)
+   */
+  | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string; pics?: unknown[]; picsSame?: true }
   | { type: "scroll"; src: Location | null; cmd: number; text: string }
-  | { type: "choices"; src: Location | null; cmd: number; options: string[] }
+  /** pics: 1.6.0+ 그림이 바뀌었을 때만(message와 같은 모양) */
+  | { type: "choices"; src: Location | null; cmd: number; options: string[]; pics?: unknown[] }
   | { type: "choice"; src: Location | null; cmd: number; picked: number }
   | { type: "picture"; src: Location | null; cmd: number; pictureId: number; name: string }
   /** 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357, 플러그인 1.3.0+). text: 356은 명령 글, 357은 플러그인·명령 이름과 문자열 인자 */
@@ -56,6 +61,8 @@ export interface LiveAssist {
   hotkeys?: { speed: number | null; skip: number | null; win: number | null; lose: number | null };
   /** 게임이 적용한 control.json의 t(null = 아직 없음). 게임은 시작 뒤에 쓰인 파일만 적용한다. 없으면 구버전. */
   controlT?: number | null;
+  /** 게임이 화면 그림을 기록하고 있는가(플러그인 1.6.0+, 없으면 구버전) */
+  capturePictures?: boolean;
   /** 지금 전투에서 도망칠 수 있는가(전투 중일 때만 의미) */
   canEscape?: boolean;
   /** 지금 전투에서 져도 게임 오버가 아닌가(전투 중일 때만 의미) */

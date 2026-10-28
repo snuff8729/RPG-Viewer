@@ -983,7 +983,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.5.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.6.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -991,7 +991,7 @@ describe("RPGViewerBridge", () => {
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
         speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
-        lastCommand: null, controlT: null,
+        lastCommand: null, controlT: null, capturePictures: false,
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
       },
     });
@@ -1616,18 +1616,151 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.5\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.6\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.5.0");
+    expect(h.bridge.VERSION).toBe("1.6.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
     expect(src).not.toMatch(/\?\.|\?\?|=>|\bclass\b|\basync\b|\bawait\b|^\s*(import|export)\b/m);
     expect(src).not.toMatch(/`|^\s*(let|const)\s|\bfor\s*\(\s*(let|const)\b/m); // ES5 for old NW.js (MV)
+  });
+});
+
+describe("screen picture capture (1.6.0)", () => {
+  const CONTROL_PATH = "/game/www/rpg-viewer/control.json";
+  const setCapture = (hh: Harness, on: boolean) => {
+    hh.fs.dirs.add("/game/www/rpg-viewer");
+    hh.fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: hh.clock.t, capturePictures: on }));
+    hh.clock.t += 1000;
+    hh.bridge._tick();
+  };
+  const talk = (hh: Harness, text = "hi") => {
+    const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, [text]), cmd(0)];
+    if (!hh.g.$gameMap.event(3)) hh.addMapEvent(3, [list], 0);
+    const interp = hh.g.$gameMap._interpreter;
+    interp.setup(list, 3);
+    hh.g.$gameMessage.clear();
+    hh.runCommand(interp, 0);
+  };
+  const messages = (hh: Harness) => hh.readLog().filter((r) => r.type === "message");
+
+  for (const engine of ["MZ", "MV"] as const) {
+    it(`attaches the on-screen pictures to messages, then picsSame while unchanged (${engine})`, () => {
+      h = newGame(engine);
+      setCapture(h, true);
+      const s = h.g.$gameScreen;
+      s.maxPictures = () => 150; // games drawing standing pictures at ids 110~150 raise the picture count
+      s.showPicture(120, "stand/body", 1, 400, 624, 100, 100, 255, 0);
+      s.showPicture(110, "submit/2", 0, 10, 20, 50, 50, 128, 1);
+      talk(h);
+      talk(h);
+      s.erasePicture(110);
+      talk(h);
+      const m = messages(h);
+      expect(m[0].pics).toEqual([[110, "submit/2", 0, 10, 20, 50, 50, 128, 1], [120, "stand/body", 1, 400, 624, 100, 100, 255, 0]]);
+      expect(m[0]).not.toHaveProperty("picsSame");
+      expect(m[1]).toMatchObject({ picsSame: true });
+      expect(m[1]).not.toHaveProperty("pics");
+      expect(m[2].pics).toEqual([[120, "stand/body", 1, 400, 624, 100, 100, 255, 0]]);
+    });
+  }
+
+  it("is off by default and when turned off; turning on again writes a full snapshot", () => {
+    h = newGame();
+    h.g.$gameScreen.showPicture(1, "a", 0, 0, 0, 100, 100, 255, 0);
+    talk(h);
+    setCapture(h, true);
+    talk(h);
+    setCapture(h, false);
+    talk(h);
+    setCapture(h, true);
+    talk(h);
+    const m = messages(h);
+    expect(m[0]).not.toHaveProperty("pics");
+    expect(m[0]).not.toHaveProperty("picsSame");
+    expect(m[1].pics).toHaveLength(1);
+    expect(m[2]).not.toHaveProperty("pics");
+    expect(m[2]).not.toHaveProperty("picsSame");
+    expect(m[3].pics).toHaveLength(1);
+    h.bridge._snapshotNow();
+    expect(h.readLive().assist.capturePictures).toBe(true);
+  });
+
+  it("uses target values of moving pictures, tone and angle; an empty screen is []", () => {
+    h = newGame();
+    setCapture(h, true);
+    talk(h);
+    const s = h.g.$gameScreen;
+    s.showPicture(5, "x", 0, 0, 0, 100, 100, 255, 0);
+    s.movePicture(5, 1, 300.456, 200, 80, 80, 0, 2, 30);
+    s.picture(5)._tone = [10, -20, 0, 0];
+    s.picture(5)._angle = 15;
+    s.showPicture(6, "", 0, 0, 0, 100, 100, 255, 0); // no name: skipped
+    talk(h);
+    const m = messages(h);
+    expect(m[0].pics).toEqual([]);
+    expect(m[1].pics).toEqual([[5, "x", 1, 300.46, 200, 80, 80, 0, 2, [10, -20, 0, 0], 15]]);
+  });
+
+  it("bounds the snapshot: at most 60 pictures, names clipped to 200 chars", () => {
+    h = newGame();
+    setCapture(h, true);
+    for (let id = 1; id <= 80; id++) h.g.$gameScreen.showPicture(id, "p" + id + "x".repeat(300), 0, 0, 0, 100, 100, 255, 0);
+    talk(h);
+    const pics = messages(h)[0].pics;
+    expect(pics).toHaveLength(60);
+    expect(pics[0][1]).toHaveLength(200);
+  });
+
+  it("dedupes per branch: a load writes the snapshot again", () => {
+    h = newGame("MV");
+    setCapture(h, true);
+    h.g.$gameScreen.showPicture(1, "a", 0, 0, 0, 100, 100, 255, 0);
+    talk(h);
+    h.g.DataManager.saveGame(1);
+    talk(h);
+    h.g.DataManager.loadGame(1);
+    talk(h);
+    const m = messages(h);
+    expect(m[0].pics).toHaveLength(1);
+    expect(m[1].picsSame).toBe(true);
+    expect(m[2].pics).toHaveLength(1);
+    expect(m[2].branch).not.toBe(m[0].branch);
+  });
+
+  it("a choice without a message carries changed pictures; skipped in battle", () => {
+    h = newGame();
+    setCapture(h, true);
+    talk(h);
+    h.g.$gameScreen.showPicture(2, "b", 0, 0, 0, 100, 100, 255, 0);
+    const list = [cmd(102, [["yes", "no"], 1]), cmd(0)];
+    h.addMapEvent(4, [list], 0);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 4);
+    h.g.$gameMessage.clear();
+    h.runCommand(interp, 0);
+    const choices = h.readLog().filter((r) => r.type === "choices");
+    expect(choices[0].pics).toEqual([[2, "b", 0, 0, 0, 100, 100, 255, 0]]);
+    h.g.BattleManager.setup(4);
+    talk(h);
+    const last = messages(h).at(-1);
+    expect(last).not.toHaveProperty("pics");
+    expect(last).not.toHaveProperty("picsSame");
+  });
+
+  it("a broken $gameScreen never breaks the message", () => {
+    h = newGame();
+    setCapture(h, true);
+    h.g.$gameScreen = { picture() { throw new Error("boom"); }, maxPictures() { return 3; } };
+    talk(h);
+    const log = h.readLog();
+    expect(log.filter((r) => r.type === "message")).toHaveLength(1);
+    expect(log.some((r) => r.type === "error")).toBe(true);
   });
 });

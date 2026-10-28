@@ -58,6 +58,8 @@ export interface GameData {
   weapons: (NamedEntry | null)[];
   armors: (NamedEntry | null)[];
   errors: LoadError[];
+  /** 게임 화면 크기(MZ System.json advanced, MV는 plugins.js 파라미터, 없으면 816×624). 없으면 기본 크기로 본다. */
+  screenSize?: { width: number; height: number };
   /** TemplateEvent 플러그인의 템플릿 맵 id(템플릿 이벤트를 풀었을 때만). */
   templateMapId?: number;
   /** TemplateEvent KeepEventId: 맵 이벤트 호출(TE_CALL_MAP_EVENT)이 부른 이벤트 id를 유지(셀프 스위치가 부른 이벤트에). 없으면 false. */
@@ -87,7 +89,7 @@ export type ScriptNode =
   | { kind: "choices"; cmd: number; branches: { label: string; body: ScriptNode[] }[]; cancelBranch?: ScriptNode[] }
   | { kind: "conditional"; condition: Condition; then: ScriptNode[]; else?: ScriptNode[] }
   | { kind: "loop"; body: ScriptNode[] }
-  /** name이 ""이면 플러그인이 그린 그림(파일 없음). caption: 바로 앞 D_TEXT 글(있을 때) */
+  /** name이 ""이면 파일 없는 그림: caption(바로 앞 D_TEXT 글)이 있으면 화면에 글자 띄우기, 없으면 빈 그림 자리 */
   | { kind: "picture"; cmd: number; pictureId: number; name: string; caption?: string }
   | { kind: "commonEvent"; commonEventId: number }
   /** TemplateEvent 호출(원래 이벤트 페이지·다른 맵 이벤트 페이지)을 펼친 것. `cmd`: 356/357 명령 인덱스.

@@ -15,6 +15,8 @@
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  * 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357)의 이름과 문자열 인자도
  * 기록합니다. 병렬 이벤트·병렬 커먼 이벤트의 것은 기록하지 않습니다.
+ * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사가 나올 때
+ * 화면에 떠 있는 그림(스탠딩 이미지 등)의 이름·위치·크기도 기록합니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -27,7 +29,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.5.0",
+    VERSION: "1.6.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -111,7 +113,11 @@
   var effectiveSpeed = 1;
   var pendingMsgKey = null;   // seen key of the message command101 just set up
   var inFrame = false;
-  var extraUpdate = false;    // inside an extra (sped-up) scene update: input queries report nothing new
+  var extraUpdate = false;
+  // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
+  var capturePictures = false;
+  var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
+  var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;    // inside an extra (sped-up) scene update: input queries report nothing new
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -390,6 +396,7 @@
     run = newRun;
     branch = meta.nextBranch++;
     lastChoices = null;
+    lastPicsKey = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
     noteStory(branch, 0, run);
@@ -403,6 +410,7 @@
     run = r;
     branch = b;
     lastChoices = null;
+    lastPicsKey = null;
     deferredNewGame = false;
   }
 
@@ -494,6 +502,7 @@
         canLose: inBattle && !!(G.BattleManager && G.BattleManager._canLose),
         lastCommand: lastCommand,
         controlT: controlT,
+        capturePictures: capturePictures,
         hotkeys: effectiveHotkeys()
       }
     };
@@ -628,6 +637,9 @@
     if (typeof c.autoSpeed === "number" && SPEED_OK[c.autoSpeed] === true) assist.autoSpeed = c.autoSpeed;
     if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
     if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
+    var cap = c.capturePictures === true;
+    if (cap !== capturePictures) lastPicsKey = null; // turned on again: the next snapshot is written in full
+    capturePictures = cap;
     // c.seenTroops is accepted and ignored: battles are never sped up automatically
     var hk = hotkeysFrom(c.hotkeys);
     if (JSON.stringify(hk) !== JSON.stringify(hotkeys)) {
@@ -933,6 +945,53 @@
 
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
+  // ---------------------------------------------------------------- screen pictures (1.6.0)
+  // Plugins (standing pictures etc.) end up in Game_Screen pictures however they compute them, so the
+  // pictures on screen are read directly when a message starts instead of hooking showPicture & co.
+  // Entry: [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode] + optional [tone|0, angle].
+  // A moving / fading picture reports its target values (where it ends up while the message shows).
+  function picNum(v, d) { return typeof v === "number" && isFinite(v) ? Math.round(v * 100) / 100 : d; }
+  function picTone(p) {
+    var t = typeof p._toneDuration === "number" && p._toneDuration > 0 && p._toneTarget ? p._toneTarget : p._tone;
+    if (!t || typeof t.length !== "number" || t.length < 3) return null;
+    var out = [picNum(t[0], 0), picNum(t[1], 0), picNum(t[2], 0), picNum(t[3], 0)];
+    return out[0] || out[1] || out[2] || out[3] ? out : null;
+  }
+  function picturesNow() {
+    var s = G.$gameScreen;
+    if (!s || typeof s.picture !== "function") return null;
+    var max = typeof s.maxPictures === "function" ? s.maxPictures() : 100;
+    if (typeof max !== "number" || !isFinite(max) || max < 0) return null;
+    if (max > PICS_SCAN_MAX) max = PICS_SCAN_MAX;
+    var out = [];
+    for (var id = 1; id <= max && out.length < PICS_MAX; id++) {
+      var p = s.picture(id);
+      if (!p || typeof p._name !== "string" || p._name === "") continue;
+      var moving = typeof p._duration === "number" && p._duration > 0;
+      var e = [
+        id, p._name.length > PIC_NAME_MAX ? p._name.slice(0, PIC_NAME_MAX) : p._name, picNum(p._origin, 0),
+        picNum(moving ? p._targetX : p._x, 0), picNum(moving ? p._targetY : p._y, 0),
+        picNum(moving ? p._targetScaleX : p._scaleX, 100), picNum(moving ? p._targetScaleY : p._scaleY, 100),
+        picNum(moving ? p._targetOpacity : p._opacity, 255), picNum(p._blendMode, 0)
+      ];
+      var tone = picTone(p), angle = picNum(p._angle, 0);
+      if (tone || angle) { e.push(tone || 0); if (angle) e.push(angle); }
+      out.push(e);
+    }
+    return out;
+  }
+  // { pics } when the pictures differ from the last snapshot written in this branch, { picsSame } when not,
+  // null when capture is off / in battle / no screen.
+  function picsFields() {
+    if (!capturePictures || inBattleNow()) return null;
+    var pics = picturesNow();
+    if (pics === null) return null;
+    var key = JSON.stringify(pics);
+    if (key === lastPicsKey) return { picsSame: true };
+    lastPicsKey = key;
+    return { pics: pics };
+  }
+
   // ---------------------------------------------------------------- plugin commands
   // Plugin commands (356 MV / 357 MZ) run by events, recorded so the viewer can tell an examine
   // spot or plugin-shown text was reached. Parallel interpreters are skipped; the same src+cmd is
@@ -1099,13 +1158,18 @@
           }
           if (i >= 0 && run !== null && !messageBusy()) {
             var p = this._list[i].parameters || [];
-            emit("message", {
+            var mrec = {
               src: srcOf(this), cmd: i,
               face: p[0] == null ? "" : String(p[0]),
               faceIndex: typeof p[1] === "number" ? p[1] : 0,
               speaker: p[4] == null ? "" : String(p[4]),
               text: joinedText(this._list, i + 1, 401)
-            });
+            };
+            var pf = null;
+            try { pf = picsFields(); } catch (ep) { reportError(ep); }
+            if (pf && pf.pics) mrec.pics = pf.pics;
+            else if (pf) mrec.picsSame = true;
+            emit("message", mrec);
           }
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
@@ -1127,7 +1191,12 @@
             for (var k = 0; k < opts.length; k++) options.push(String(opts[k]));
             ctx = { src: srcOf(this), cmd: i };
             lastChoices = { src: ctx.src, cmd: i, options: options };
-            emit("choices", { src: ctx.src, cmd: i, options: options });
+            var crec = { src: ctx.src, cmd: i, options: options };
+            // a choice without a message (or after pictures changed under the message) carries changed pictures
+            var cf = null;
+            try { cf = picsFields(); } catch (ep) { reportError(ep); }
+            if (cf && cf.pics) crec.pics = cf.pics;
+            emit("choices", crec);
           }
         } catch (e) { reportError(e); }
         pendingChoiceCtx = ctx;

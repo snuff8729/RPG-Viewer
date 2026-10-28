@@ -3,6 +3,7 @@ import type {
   Actor, CommonEvent, GameData, LoadError, MapData, MapInfo, NamedEntry, SystemData, Troop,
 } from "@/core/types";
 import { livePaths } from "@/core/live/installer";
+import { screenSizeOf } from "@/core/addons/screenPictures";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
@@ -120,9 +121,9 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   // TemplateEvent 플러그인: <TE:값> 이벤트의 페이지를 템플릿 맵 이벤트의 페이지로 바꾼다.
   let templateMapId: number | undefined;
   let templateKeepEventId = false;
+  let pluginsText: string | null = null;
+  try { pluginsText = await folder.readText(livePaths(root.data).pluginsJs); } catch { pluginsText = null; }
   try {
-    let pluginsText: string | null = null;
-    try { pluginsText = await folder.readText(livePaths(root.data).pluginsJs); } catch { pluginsText = null; }
     const tplId = templateMapIdFromPlugins(pluginsText);
     if (tplId !== null) {
       // MapInfos에 있으면 이미 읽은 것을 쓰고(실패했으면 건너뜀), 없으면 파일을 조용히 읽어 본다.
@@ -144,6 +145,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       dataRoot: root.data,
       imgRoot: root.img,
       system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, errors,
+      screenSize: screenSizeOf(system, pluginsText),
       ...(templateMapId !== undefined ? { templateMapId } : {}),
       ...(templateKeepEventId ? { templateKeepEventId } : {}),
     },
