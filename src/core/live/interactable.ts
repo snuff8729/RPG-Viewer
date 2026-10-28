@@ -1,6 +1,6 @@
 import { describePageConditions } from "../conditions/describe";
 import { locationKey } from "../index/locations";
-import type { GameData, GameIndex, Location, MapEvent, PageEntry, ScriptNode } from "../types";
+import type { Condition, GameData, GameIndex, Location, MapEvent, PageEntry, ScriptNode } from "../types";
 import { pickKey, seenKey } from "./coverage";
 import { evaluate } from "./evaluate";
 import type { Coverage, LiveSnapshot } from "./types";
@@ -14,6 +14,51 @@ export interface Interactable {
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
 
+// ── 캐시: 색인·데이터·커버리지는 바뀔 때 새 객체가 되므로 객체 자체를 키로 쓴다 ──
+/** index → 위치 키별 페이지 */
+const entriesCache = new WeakMap<object, Map<string, PageEntry>>();
+/** data → (페이지 객체 → 출현 조건) */
+const condCache = new WeakMap<object, WeakMap<object, Condition[]>>();
+/** coverage → (페이지 항목 → 새것 수) */
+const countCache = new WeakMap<object, WeakMap<object, { unseen: number; unpicked: number }>>();
+
+function pageConditions(pg: { conditions: any; trigger: any }, data: GameData): Condition[] {
+  let byPage = isObj(data) ? condCache.get(data) : undefined;
+  if (!byPage && isObj(data)) { byPage = new WeakMap(); condCache.set(data, byPage); }
+  const hit = byPage?.get(pg);
+  if (hit) return hit;
+  const conds = describePageConditions(pg.conditions, pg.trigger, data);
+  byPage?.set(pg, conds);
+  return conds;
+}
+
+const sortedNums = (v: unknown): number[] =>
+  arr<unknown>(v).filter((x): x is number => typeof x === "number").sort((a, b) => a - b);
+const sortedStrs = (v: unknown): string[] => arr<unknown>(v).map(String).sort();
+const sortedRecord = (v: unknown): [string, unknown][] =>
+  isObj(v) ? Object.keys(v).sort().map(k => [k, v[k]] as [string, unknown]) : [];
+
+/**
+ * 출현 조건·활성 페이지에 영향을 주는 live 필드만으로 만든 키(스위치·변수·셀프 스위치·
+ * 아이템·무기·방어구·파티 + 현재 맵 id와 그 맵의 이벤트 페이지). 위치·시각·골드 등은 무시한다.
+ * 같은 키면 mapNewCounts / mapInteractables 결과가 같다(같은 data·index·coverage에서). 예외를 던지지 않는다.
+ */
+export function conditionsKey(live: LiveSnapshot | null | undefined): string {
+  try {
+    if (!isObj(live)) return "";
+    const events = arr<{ eventId: unknown; page: unknown } | null>(live.events)
+      .filter(isObj).map(e => [e!.eventId, e!.page] as [unknown, unknown])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+    return JSON.stringify([
+      live.mapId ?? null, events,
+      sortedNums(live.switches), sortedRecord(live.variables), sortedStrs(live.selfSwitches),
+      sortedRecord(live.items), sortedRecord(live.weapons), sortedRecord(live.armors), sortedNums(live.party),
+    ]);
+  } catch {
+    return "";
+  }
+}
+
 /**
  * RPG Maker 규칙: 마지막 페이지부터, 트리거를 뺀 출현 조건이 모두 met인 첫 페이지.
  * unknown은 미충족. live 없음·해당 없음 → -1. 예외를 던지지 않는다.
@@ -26,7 +71,7 @@ export function activePageIndex(ev: MapEvent, mapId: number, data: GameData, liv
     for (let i = pages.length - 1; i >= 0; i--) {
       const pg = pages[i];
       if (!isObj(pg) || !isObj(pg.conditions)) continue;
-      const conds = describePageConditions(pg.conditions, pg.trigger, data);
+      const conds = pageConditions(pg as { conditions: any; trigger: any }, data);
       if (conds.every(c => c?.test?.kind === "trigger" || evaluate(c?.test, live, ctx) === "met")) return i;
     }
   } catch {
@@ -39,6 +84,17 @@ export function activePageIndex(ev: MapEvent, mapId: number, data: GameData, liv
 function markOf(entry: PageEntry, trigger: unknown): Interactable["mark"] {
   if (!entry.hasDialogue || typeof trigger !== "number") return "none";
   return trigger <= 2 ? "talk" : trigger <= 4 ? "auto" : "none";
+}
+
+/** countNew를 coverage·페이지 항목별로 기억한다. */
+function countNewCached(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: number } {
+  let byEntry = countCache.get(cov);
+  if (!byEntry) { byEntry = new WeakMap(); countCache.set(cov, byEntry); }
+  const hit = byEntry.get(entry);
+  if (hit) return hit;
+  const counts = countNew(entry, cov);
+  byEntry.set(entry, counts);
+  return counts;
 }
 
 /** 페이지를 한 번 훑어 선택지 밖 안 본 대사 수와 안 고른 선택지 항목 수를 센다. */
@@ -78,11 +134,15 @@ function countNew(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: 
   return { unseen, unpicked };
 }
 
+/** 위치 키 → 페이지 항목. index별로 한 번만 만든다. */
 function pageEntries(index: GameIndex): Map<string, PageEntry> {
+  const cached = isObj(index) ? entriesCache.get(index) : undefined;
+  if (cached) return cached;
   const byKey = new Map<string, PageEntry>();
   for (const p of arr<PageEntry | null>(index?.pages)) {
     try { if (isObj(p) && isObj(p.location)) byKey.set(locationKey(p.location), p); } catch { /* 건너뜀 */ }
   }
+  if (isObj(index)) entriesCache.set(index, byKey);
   return byKey;
 }
 
@@ -107,7 +167,7 @@ function interactablesOn(
       const entry = byKey.get(locationKey(location));
       if (!entry) continue;
       const mark = markOf(entry, ev.pages?.[page]?.trigger);
-      const { unseen, unpicked } = countNew(entry, coverage);
+      const { unseen, unpicked } = countNewCached(entry, coverage);
       out.push({
         eventId: ev.id, page, title: entry.title, location, mark, unseen, unpicked,
         isNew: mark !== "none" && (unseen > 0 || unpicked > 0),

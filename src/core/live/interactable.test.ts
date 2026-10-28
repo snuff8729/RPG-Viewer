@@ -5,7 +5,7 @@ import { buildIndex } from "../index/buildIndex";
 import { loadGame } from "../loader/loadGame";
 import type { GameData, GameIndex, MapEvent } from "../types";
 import { computeCoverage } from "./coverage";
-import { activePageIndex, mapInteractables, mapNewCounts } from "./interactable";
+import { activePageIndex, conditionsKey, mapInteractables, mapNewCounts } from "./interactable";
 
 let data: GameData, index: GameIndex;
 beforeAll(async () => {
@@ -76,5 +76,61 @@ describe("mapNewCounts", () => {
     expect(counts.has(3)).toBe(false);
     expect(mapNewCounts(data, index, computeCoverage(fixtureRecords(), data), fixtureLive()).size).toBe(0);
     expect(mapNewCounts(data, index, partial, null).size).toBe(0);
+  });
+});
+
+describe("conditionsKey", () => {
+  it("same page-condition fields → same key, regardless of position, order or identity", () => {
+    const a = fixtureLive();
+    const b = { ...fixtureLive(), x: a.x + 3, y: a.y + 1, t: a.t + 100, seq: a.seq + 5, gold: 99999, switches: [...a.switches].reverse() };
+    expect(conditionsKey(b)).toBe(conditionsKey(a));
+  });
+  it("changes when any page-condition field changes", () => {
+    const a = fixtureLive();
+    const k = conditionsKey(a);
+    expect(conditionsKey({ ...a, switches: [...a.switches, 999] })).not.toBe(k);
+    expect(conditionsKey({ ...a, variables: { ...a.variables, 77: 1 } })).not.toBe(k);
+    expect(conditionsKey({ ...a, selfSwitches: [...a.selfSwitches, "9,9,A"] })).not.toBe(k);
+    expect(conditionsKey({ ...a, items: { ...a.items, 55: 1 } })).not.toBe(k);
+    expect(conditionsKey({ ...a, weapons: { ...a.weapons, 55: 1 } })).not.toBe(k);
+    expect(conditionsKey({ ...a, armors: { ...a.armors, 55: 1 } })).not.toBe(k);
+    expect(conditionsKey({ ...a, party: [...a.party, 42] })).not.toBe(k);
+    expect(conditionsKey({ ...a, mapId: a.mapId + 1 })).not.toBe(k);
+    expect(conditionsKey({ ...a, events: [...a.events, { eventId: 99, page: 0 }] })).not.toBe(k);
+  });
+  it("null and odd input never throw", () => {
+    expect(conditionsKey(null)).toBe("");
+    expect(() => conditionsKey({ switches: "x", variables: null } as unknown as ReturnType<typeof fixtureLive>)).not.toThrow();
+  });
+});
+
+describe("mapNewCounts cost (synthetic 400 maps × 120 events)", () => {
+  it("second call with the same index is much cheaper than the first", () => {
+    const m2 = data.maps.get(2)!;
+    const maps = new Map(data.maps);
+    const mapInfos = [...data.mapInfos];
+    for (let id = 10; id < 410; id++) {
+      const events: (MapEvent | null)[] = [null];
+      for (let i = 1; i <= 120; i++) {
+        const src = (m2.events[(i % 3) + 1] ?? m2.events[1]) as MapEvent;
+        events.push({ ...structuredClone(src), id: i });
+      }
+      maps.set(id, { ...structuredClone(m2), events });
+      mapInfos[id] = { ...data.mapInfos[2]!, id, name: `M${id}`, parentId: 0 };
+    }
+    const big = { ...data, maps, mapInfos } as GameData;
+    const bigIndex = buildIndex(big);
+    const cov = computeCoverage(fixtureRecords().filter(r => r.seq <= 11), big);
+    const live = fixtureLive();
+    let t = performance.now();
+    const first = mapNewCounts(big, bigIndex, cov, live);
+    const firstMs = performance.now() - t;
+    t = performance.now();
+    const second = mapNewCounts(big, bigIndex, cov, { ...live, x: live.x + 1 });
+    const secondMs = performance.now() - t;
+    console.log(`mapNewCounts 400×120: first ${firstMs.toFixed(1)}ms, second ${secondMs.toFixed(1)}ms (pages ${bigIndex.pages.length})`);
+    expect(second).toEqual(first);
+    expect(first.size).toBeGreaterThan(400);
+    expect(secondMs).toBeLessThan(firstMs * 0.5);
   });
 });

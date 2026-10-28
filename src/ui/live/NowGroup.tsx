@@ -7,6 +7,7 @@ import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { openPage } from "../navigation";
 import { mapInteractables } from "@/core/live/interactable";
+import { useConditionsLive } from "./useConditionsLive";
 
 const MARK = { talk: "●", auto: "⚡", none: "○" } as const;
 
@@ -17,9 +18,11 @@ export function NowGroup({ showEmpty, follow, onFollowChange }: {
   const { data, index } = useGame();
   const { live, connection, coverage } = useLive();
   const [onlyNew, setOnlyNew] = useState(false);
+  // 위치만 바뀐 스냅샷으로는 다시 계산하지 않는다(출현 조건 필드·맵·이벤트 페이지가 바뀔 때만)
+  const condLive = useConditionsLive(live);
   const events = useMemo(
-    () => (data && index && live ? mapInteractables(data, index, coverage, live, live.mapId) : []),
-    [data, index, coverage, live],
+    () => (data && index && condLive ? mapInteractables(data, index, coverage, condLive, condLive.mapId) : []),
+    [data, index, coverage, condLive],
   );
 
   if (connection !== "connected" || !live || !data) return null;

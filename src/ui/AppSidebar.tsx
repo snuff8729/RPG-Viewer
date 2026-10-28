@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { mapNewCounts } from "@/core/live/interactable";
-import { liveHintsEnabled } from "./live/annotations";
+import { useConditionsLive } from "./live/useConditionsLive";
 import { NowGroup } from "./live/NowGroup";
 import type { Route } from "@/app/route";
 import type { Location, MapInfo, PageEntry } from "@/core/types";
@@ -69,10 +69,12 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
     setOpenMaps((prev) => (chain.every((id) => prev.has(id)) ? prev : new Set([...prev, ...chain])));
   }, [activeMapId, liveMapId, data]);
 
+  // 위치만 바뀐 스냅샷으로는 다시 세지 않는다(출현 조건 필드가 바뀔 때만)
+  const condLive = useConditionsLive(live);
   const newCounts = useMemo(
-    () => (data && index && live && liveHintsEnabled(connection) && connection === "connected"
-      ? mapNewCounts(data, index, coverage, live) : new Map<number, number>()),
-    [data, index, coverage, live, connection],
+    () => (data && index && condLive && connection === "connected"
+      ? mapNewCounts(data, index, coverage, condLive) : new Map<number, number>()),
+    [data, index, coverage, condLive, connection],
   );
 
   const model = useMemo(() => {
