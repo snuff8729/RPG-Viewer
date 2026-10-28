@@ -221,7 +221,7 @@ describe("plugin-drawn images (1.10.0)", () => {
     const S = h.g.Sprite;
     for (let i = 0; i < 100; i++) {
       const c = ss.spriteset.addChild(new S());
-      for (let j = 0; j < 100; j++) c.addChild(new S());
+      for (let j = 0; j < 100; j++) c.addChild(new S()).addChild(new S());
     }
     const t0 = performance.now();
     for (let i = 0; i < 10; i++) { h.g.ImageManager.loadPicture("x" + i); h.frame(); }
@@ -229,6 +229,63 @@ describe("plugin-drawn images (1.10.0)", () => {
     expect(h.bridge._scanVisited()).toBeLessThanOrEqual(3000);
     expect(h.bridge._scanVisited()).toBeGreaterThan(2000);
     expect(ms).toBeLessThan(20);
+  });
+
+  it("finds a cut-in container added last to a crowded Spriteset_Map (1.16.0)", () => {
+    h = newGame();
+    const g = h.g;
+    const S = g.Sprite;
+    // engine classes the walk never enters
+    const sub = (name: string) => { function K(this: any) { S.call(this); } K.prototype = Object.create(S.prototype); g[name] = K; return K as any; };
+    const Tilemap = sub("Tilemap"), Sprite_Character = sub("Sprite_Character"), Weather = sub("Weather");
+    try {
+      const ss = h.mountSpriteset(10);
+      const base = ss.spriteset.addChild(new S());
+      const tilemap = base.addChild(new Tilemap());
+      for (let i = 0; i < 2000; i++) {
+        const ch = tilemap.addChild(new Sprite_Character());
+        ch.bitmap = g.ImageManager.loadPicture("x"); ch.bitmap._url = "img/characters/People1.png";
+        ch.addChild(new S()).addChild(new S());
+      }
+      for (let i = 0; i < 1500; i++) tilemap.addChild(new S()).addChild(new S());
+      // light / fog plugin layers: many nested nodes without pictures, before the cut-in
+      const light = ss.spriteset.addChild(new S());
+      for (let i = 0; i < 1500; i++) light.addChild(new S()).addChild(new S());
+      ss.spriteset.addChild(new Weather()).addChild(new S()).addChild(new S());
+      h.completeLoads();
+      h.setBitmapSize("actor01_cutin_A_0001", 300, 400);
+      h.setBitmapSize("organ/A_b", 50, 60);
+      callCutin(h, ss.spriteset, "A"); // added last, like CallCutin: SceneManager._scene._spriteset.addChild(total)
+      h.completeLoads();
+      h.frame();
+      settle(h);
+      const recs = screens(h);
+      expect(recs).toHaveLength(1);
+      expect(recs[0].scene).toBe("map");
+      expect(recs[0].pics.map((p: any[]) => p[1])).toEqual(["actor01_cutin_A_0001", "organ/A_b"]);
+      expect(h.bridge._scanVisited()).toBeLessThanOrEqual(3000);
+    } finally {
+      delete g.Tilemap; delete g.Sprite_Character; delete g.Weather;
+    }
+  });
+
+  it("a message during a map event carries the cut-in in its pics", () => {
+    h = newGame();
+    const ss = h.mountSpriteset(10);
+    h.setBitmapSize("actor01_cutin_B_0001", 300, 400);
+    h.setBitmapSize("organ/B_b", 50, 60);
+    callCutin(h, ss.spriteset, "B");
+    h.completeLoads();
+    const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["cut-in line"]), cmd(0)];
+    const ev = h.addMapEvent(1, [list]);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 1);
+    void ev;
+    h.runCommand(interp, 0);
+    h.drawMessageText();
+    h.bridge._flushNow();
+    const msg = h.readLog().find((r) => r.type === "message");
+    expect(msg.pics.map((p: any[]) => p[1])).toEqual(["actor01_cutin_B_0001", "organ/B_b"]);
   });
 
   it("records battle-scene cut-ins with scene battle", () => {

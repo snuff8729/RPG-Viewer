@@ -1487,8 +1487,15 @@
   // 1.10.0: the same walk collects every other sprite showing an img/pictures bitmap (plugins drawing cut-ins with
   // plain Sprites), its world transform and alpha accumulated down the tree. Bounded: depth 8, PICS_TREE_MAX nodes;
   // a tilemap and sprites showing other img folders (characters, battlers, system...) are not entered.
+  // 1.16.0: plugins add cut-in containers last to Spriteset_Map, behind the tilemap, every character, light / fog
+  // layers...: the picture container is read first, then the spriteset's children from the top-most (last) down,
+  // then the rest of the scene. Tilemaps, Sprite_Character / Balloon / Animation / Destination and Weather are never
+  // entered, and only nodes that show an img/pictures bitmap or have children count toward PICS_TREE_MAX (a bare
+  // leaf is skipped for free; PICS_STEP_MAX bounds the whole loop). Plain sprites keep their drawing order.
   // Returns { pictures: [Sprite_Picture], sprites: [{ s, name, m, alpha }], pending: picture bitmaps still loading }.
-  var SPRITE_ID_BASE = 1000, lastScanVisited = 0;
+  var SPRITE_ID_BASE = 1000, lastScanVisited = 0, PICS_STEP_MAX = 30000;
+  var SCAN_SKIP = ["Tilemap", "ShaderTilemap", "Sprite_Character", "Sprite_Balloon", "Sprite_Animation", "Sprite_AnimationMV",
+    "Weather", "Sprite_Destination"];
   var IDENTITY = [1, 0, 0, 1, 0, 0];
   function numOr(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
   function localMatrix(n) {
@@ -1531,43 +1538,76 @@
   }
   function scanScene(sc) {
     if (!sc || (!sc._spriteset && !extCaptures(sc))) return null;
-    var SP = G.Sprite_Picture, TM = G.Tilemap;
+    var SP = G.Sprite_Picture;
     var res = { pictures: [], sprites: [], pending: 0 };
-    var visited = 0;
-    var container = (sc._spriteset && sc._spriteset._pictureContainer) || null;
-    var walk = function (node, depth, m, alpha, skip) {
+    var visited = 0, steps = 0;
+    var skipKinds = [];
+    for (var k = 0; k < SCAN_SKIP.length; k++) if (typeof G[SCAN_SKIP[k]] === "function") skipKinds.push(G[SCAN_SKIP[k]]);
+    var skipped = function (c) {
+      for (var j = 0; j < skipKinds.length; j++) if (c instanceof skipKinds[j]) return true;
+      return false;
+    };
+    var spriteset = sc._spriteset || null;
+    var container = (spriteset && spriteset._pictureContainer) || null;
+    // children of node (seen at depth) into out; skip / skip2 are walked on their own
+    var walk = function (node, depth, m, alpha, skip, skip2, out) {
       var ch = node && node.children;
       if (!ch || typeof ch.length !== "number" || depth > 8) return;
-      for (var i = 0; i < ch.length && visited < PICS_TREE_MAX; i++) {
-        var c = ch[i];
+      for (var i = 0; i < ch.length; i++) visit(ch[i], depth, m, alpha, skip, skip2, out);
+    };
+    var visit = function (c, depth, m, alpha, skip, skip2, out) {
+      if (!c || typeof c !== "object" || c === skip || c === skip2) return;
+      if (++steps > PICS_STEP_MAX || visited >= PICS_TREE_MAX) return;
+      if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
         visited++;
-        if (!c || typeof c !== "object" || c === skip) continue;
-        if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
-          res.pictures.push(c);
-          continue;
-        }
-        if (typeof TM === "function" && c instanceof TM) continue;
-        var cm = mulMatrix(m, localMatrix(c));
-        var ca = alpha * ownAlpha(c);
-        var url = bitmapUrl(c.bitmap);
-        if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
-          var name = pictureNameOfUrl(url);
-          if (name === null) continue; // another img folder: what it carries is effects / icons
-          var b = c.bitmap;
-          if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
-            var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
-            if (ready) res.sprites.push({ s: c, name: name, m: cm, alpha: ca });
-            else res.pending++;
-          }
-        }
-        walk(c, depth + 1, cm, ca, skip);
+        res.pictures.push(c);
+        return;
       }
+      if (skipped(c)) return;
+      var url = bitmapUrl(c.bitmap);
+      var name = null;
+      if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
+        name = pictureNameOfUrl(url);
+        if (name === null) return; // another img folder: what it carries is effects / icons
+      }
+      var ch = c.children;
+      var kids = !!ch && typeof ch.length === "number" && ch.length > 0;
+      if (name === null && !kids) return; // a bare leaf: nothing to read
+      visited++;
+      var cm = mulMatrix(m, localMatrix(c));
+      var ca = alpha * ownAlpha(c);
+      if (name !== null) {
+        var b = c.bitmap;
+        if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
+          var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
+          if (ready) out.push({ s: c, name: name, m: cm, alpha: ca });
+          else res.pending++;
+        }
+      }
+      if (kids) walk(c, depth + 1, cm, ca, skip, skip2, out);
     };
     if (container) {
       var w = worldOf(container, sc);
-      walk(container, 0, w.m, w.alpha, null);
+      walk(container, 0, w.m, w.alpha, null, null, res.sprites);
     }
-    walk(sc, 0, IDENTITY, 1, container);
+    // the spriteset (when it is on the scene) from its top-most child down, kept in drawing order
+    var setBuckets = null;
+    if (spriteset && spriteset.parent === sc && spriteset.children && typeof spriteset.children.length === "number") {
+      var sw = worldOf(spriteset, sc);
+      var sch = spriteset.children;
+      setBuckets = [];
+      if (++steps <= PICS_STEP_MAX && visited < PICS_TREE_MAX) visited++;
+      for (var si = sch.length - 1; si >= 0; si--) {
+        var bucket = [];
+        visit(sch[si], 1, sw.m, sw.alpha, container, null, bucket);
+        setBuckets[si] = bucket;
+      }
+    }
+    var rest = [];
+    walk(sc, 0, IDENTITY, 1, container, setBuckets ? spriteset : null, rest);
+    // drawing order: the spriteset is the scene's bottom layer, then the rest (windows, other layers)
+    if (setBuckets) for (var bi = 0; bi < setBuckets.length; bi++) if (setBuckets[bi]) for (var bj = 0; bj < setBuckets[bi].length; bj++) res.sprites.push(setBuckets[bi][bj]);
+    for (var ri = 0; ri < rest.length; ri++) res.sprites.push(rest[ri]);
     lastScanVisited = visited;
     return res;
   }
