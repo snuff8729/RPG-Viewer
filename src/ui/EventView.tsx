@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useLive } from "@/app/LiveProvider";
+import type { LiveSnapshot } from "@/core/live/types";
+import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import type { Route } from "@/app/route";
@@ -28,6 +31,11 @@ function withPage(l: Location, page: number): Location {
   return l.source === "common" ? l : { ...l, page };
 }
 
+function isNowPage(l: Location, live: LiveSnapshot | null): boolean {
+  if (!live || l.source !== "map" || l.mapId !== live.mapId) return false;
+  return live.events.some((e) => e.eventId === l.eventId && e.page === l.page);
+}
+
 function Callers({ id }: { id: number }) {
   const { index } = useGame();
   const callers = index?.callers(id) ?? [];
@@ -51,6 +59,7 @@ function Callers({ id }: { id: number }) {
 
 export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }) {
   const { index } = useGame();
+  const { live } = useLive();
   const [xrefTarget, setXrefTarget] = useState<Ref | null>(null);
   const loc = route.location;
   const pages: PageEntry[] = (index?.pages ?? [])
@@ -69,6 +78,7 @@ export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }
             {pages.map((p) => (
               <TabsTrigger key={pageOf(p.location)} value={String(pageOf(p.location))}>
                 페이지 {pageOf(p.location) + 1}
+                {isNowPage(p.location, live) && <Badge variant="outline" className="ml-1">지금</Badge>}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -78,13 +88,13 @@ export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }
         <span className="text-sm text-muted-foreground">나타나는 조건</span>
         {current.conditions.length === 0
           ? <span className="text-sm">항상</span>
-          : current.conditions.map((c, i) => <RefBadge key={i} condition={c} onRefClick={setXrefTarget} />)}
+          : current.conditions.map((c, i) => <RefBadge key={i} condition={c} location={current.location} onRefClick={setXrefTarget} />)}
       </div>
       <Card className="max-w-3xl">
         <CardContent>
           <ScriptView
             key={locationKey(current.location)} pageKey={locationKey(current.location)}
-            nodes={current.nodes} basePath={[]} onRefClick={setXrefTarget}
+            nodes={current.nodes} basePath={[]} location={current.location} onRefClick={setXrefTarget}
           />
         </CardContent>
       </Card>

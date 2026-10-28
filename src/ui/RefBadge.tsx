@@ -1,5 +1,10 @@
-import type { Condition, Ref } from "@/core/types";
+import { useContext } from "react";
+import type { Condition, Location, Ref } from "@/core/types";
 import { Badge } from "@/components/ui/badge";
+import { useLive } from "@/app/LiveProvider";
+import { evaluate } from "@/core/live/evaluate";
+import { conditionIcon, liveHintsEnabled } from "@/ui/live/annotations";
+import { ScriptLocation } from "@/ui/script/ScriptLocation";
 
 const CLICKABLE = new Set(["switch", "variable", "item", "weapon", "armor"]);
 
@@ -8,16 +13,24 @@ export function firstClickableRef(refs: Ref[]): Ref | undefined {
   return refs.find((r) => CLICKABLE.has(r.type));
 }
 
-export function RefBadge({ condition, onRefClick }: { condition: Condition; onRefClick?: (ref: Ref) => void }) {
+export function RefBadge({ condition, onRefClick, location }: {
+  condition: Condition; onRefClick?: (ref: Ref) => void; location?: Location;
+}) {
+  const { live, connection } = useLive();
+  const ctxLoc = useContext(ScriptLocation);
+  const loc = location ?? ctxLoc;
+  const ctx = loc?.source === "map" ? { mapId: loc.mapId, eventId: loc.eventId } : {};
+  const icon = liveHintsEnabled(connection) && condition.test ? conditionIcon(evaluate(condition.test, live, ctx)) : null;
+  const text = icon ? `${icon} ${condition.text}` : condition.text;
   const ref = firstClickableRef(condition.refs);
   if (ref && onRefClick) {
     return (
       <Badge asChild variant="secondary">
         <button type="button" className="cursor-pointer hover:bg-secondary/80" onClick={() => onRefClick(ref)}>
-          {condition.text}
+          {text}
         </button>
       </Badge>
     );
   }
-  return <Badge variant="secondary">{condition.text}</Badge>;
+  return <Badge variant="secondary">{text}</Badge>;
 }
