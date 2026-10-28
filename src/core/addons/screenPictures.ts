@@ -226,6 +226,34 @@ export interface PictureContext {
  */
 export interface AlphaStats { opaque: number; box: [number, number, number, number] | null }
 
+/** 한 가지 색 그림 판정: 읽는 크기(긴 변 px 이상), 덮는 비율, 같은 색 비율, 같은 색으로 보는 채널 차이 */
+export const FLAT_SAMPLE = 64;
+const FLAT_COVER = 0.95, FLAT_SAME = 0.99, FLAT_DIST = 8, FLAT_ALPHA = 250;
+
+/**
+ * 화면을 한 가지 색으로 덮는 그림인가(Darkness 같은 전환용 칠): 불투명한(알파 250 이상) 픽셀이 95% 이상이고, 그중 99% 이상이
+ * 대표 색(채널별 중앙값)과 채널마다 8 이내. 투명한 부분이 있는 실루엣(투명 바탕 위 그림자 모양)은 절대 한 가지 색이 아니다.
+ * px: RGBA(FLAT_SAMPLE 이상으로 줄여 읽은 것). 읽을 수 없으면 false. 예외를 던지지 않는다.
+ */
+export function isFlatPixels(px: ArrayLike<number> | null | undefined, w: number, h: number): boolean {
+  try {
+    const n = w * h;
+    if (!px || !(n > 0) || px.length < n * 4) return false;
+    const opaque: number[] = [];
+    for (let i = 0; i < n; i++) if (px[i * 4 + 3] >= FLAT_ALPHA) opaque.push(i * 4);
+    if (opaque.length < n * FLAT_COVER) return false;
+    const ref = [0, 1, 2].map(k => {
+      const v = opaque.map(o => px[o + k]).sort((a, b) => a - b);
+      return v[v.length >> 1];
+    });
+    let same = 0;
+    for (const o of opaque) if (ref.every((r, k) => Math.abs(px[o + k] - r) <= FLAT_DIST)) same++;
+    return same >= opaque.length * FLAT_SAME;
+  } catch {
+    return false;
+  }
+}
+
 /** RGBA 픽셀(줄여 읽은 것이어도 된다) → 투명도 통계. 예외를 던지지 않는다. */
 export function alphaStatsOf(px: ArrayLike<number> | null | undefined, w: number, h: number): AlphaStats | null {
   try {
