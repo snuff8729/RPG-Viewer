@@ -16,7 +16,9 @@ beforeAll(async () => {
 });
 
 /** 삽입 순서까지 비교하도록 Map/Set을 배열로 펼친다. */
-const normModel = (m: HistoryModel) => ({ branches: [...m.branches.entries()], runs: m.runs, latestBranch: m.latestBranch });
+const normModel = (m: HistoryModel) => ({
+  branches: [...m.branches.entries()], runs: m.runs, alias: [...m.alias.entries()], latestBranch: m.latestBranch,
+});
 const normCov = (c: Coverage) => ({
   seen: [...c.seen], picks: [...c.picks.entries()], uncertainSeqs: [...c.uncertainSeqs], changedSeqs: [...c.changedSeqs],
 });
@@ -71,6 +73,31 @@ function bigLog(copies: number, seed = 1): LogRecord[] {
     }
     if (k % 3 === 0) out.push(null as unknown as LogRecord, { v: 1, t: 0 } as unknown as LogRecord);
   }
+  return out;
+}
+
+/** 저장 → 종료 → 이어하기로 생긴 이어진 갈래들과 진짜 갈래가 섞인 기록 */
+function continuationLog(): LogRecord[] {
+  let seq = 0;
+  const at = (branch: number, run = 1) => ({ v: 1 as const, seq: ++seq, t: seq * 1000, run, branch });
+  const start = (branch: number, reason: "newGame" | "load", parentBranch: number | null, fromSeq: number | null, run = 1) =>
+    ({ ...at(branch, run), type: "branchStart", reason, parentBranch, fromSeq }) as LogRecord;
+  const msg = (branch: number, run = 1) => {
+    const base = at(branch, run);
+    return { ...base, type: "message", src: { source: "map", mapId: 1, eventId: branch, page: 0 }, cmd: base.seq,
+      face: "", faceIndex: 0, speaker: "", text: `m${base.seq}` } as LogRecord;
+  };
+  const state = (branch: number) =>
+    ({ ...at(branch), type: "state", src: null, cmd: null, changes: [{ kind: "switch", id: seq, value: true }] }) as LogRecord;
+  const save = (branch: number, run = 1) => ({ ...at(branch, run), type: "save", slot: 1 }) as LogRecord;
+  const out: LogRecord[] = [start(1, "newGame", null, null), msg(1), msg(1)];
+  out.push(save(1)); const s1 = seq;
+  out.push(state(1), state(1), start(2, "load", 1, s1), msg(2), state(2));
+  out.push(save(2)); const s2 = seq;
+  out.push(state(2), start(3, "load", 2, s2), msg(3), msg(3));
+  out.push(start(4, "load", 1, s1), msg(4));
+  out.push(save(4)); const s4 = seq;
+  out.push(start(5, "load", 4, s4), msg(5), start(6, "newGame", null, null, 2), msg(6, 2));
   return out;
 }
 
@@ -143,6 +170,29 @@ describe("createAccumulator", () => {
     const acc2 = createAccumulator(data);
     acc2.append(fixtureRecords().slice().reverse());
     expectSameAsBatch(acc2);
+  });
+
+  it("save-load continuations equal batch in order, in chunks and out of order", () => {
+    const log = continuationLog();
+    const model = buildHistory(log);
+    // 1←2←3 이어짐, 4는 진짜 갈래(1에서 이야기가 이미 진행됨), 5는 4의 이어짐, 6은 2회차 새 게임
+    expect(model.alias).toEqual(new Map([[2, 1], [3, 1], [5, 4]]));
+    expect(model.runs).toEqual([{ run: 1, branches: [1, 4] }, { run: 2, branches: [6] }]);
+    const one = createAccumulator(data);
+    for (const r of log) {
+      one.append([r]);
+      expectSameAsBatch(one);
+    }
+    for (const seed of [1, 2, 3]) {
+      const rand = rng(seed);
+      const chunks = chunksOf(log, rand, 4);
+      if (seed === 3) for (let i = 0; i + 1 < chunks.length; i += 3) [chunks[i], chunks[i + 1]] = [chunks[i + 1], chunks[i]];
+      const acc = createAccumulator(data);
+      for (const c of chunks) {
+        acc.append(c);
+        expectSameAsBatch(acc);
+      }
+    }
   });
 
   it("aftermath of a pick in branch 2 fills as later records arrive", () => {

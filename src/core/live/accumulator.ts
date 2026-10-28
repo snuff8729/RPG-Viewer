@@ -1,7 +1,7 @@
 import type { GameData } from "../types";
 import { aftermathStep, coverRecord, newAftermath, seenKey, type AftermathState } from "./coverage";
 import {
-  applyHistoryRecord, buildHistory, historyModelOf, isValidRecord, newHistoryState, NOISY_MAX_CHANGES, NOISY_WINDOW_MS,
+  applyHistoryRecord, buildHistory, buildHistoryState, historyModelOf, isValidRecord, newHistoryState, NOISY_MAX_CHANGES, NOISY_WINDOW_MS,
   variableChanges, type HistoryState,
 } from "./history";
 import type { Coverage, HistoryModel, LogRecord, PickInfo, RecordOf } from "./types";
@@ -124,8 +124,7 @@ export function createAccumulator(data: GameData): LiveAccumulator {
 
   function ensureHistory() {
     if (!histDirty) return;
-    const m = buildHistory(records);
-    hist = { branches: m.branches, runBranches: new Map(m.runs.map(x => [x.run, x.branches])), latestBranch: m.latestBranch };
+    hist = buildHistoryState(records);
     histDirty = false;
   }
 
@@ -166,7 +165,10 @@ export function createAccumulator(data: GameData): LiveAccumulator {
           ensureHistory();
           const m = historyModelOf(hist);
           const branches = new Map([...m.branches].map(([id, b]) => [id, { ...b, children: b.children.slice() }]));
-          c.model = { branches, runs: m.runs.map(x => ({ run: x.run, branches: x.branches.slice() })), latestBranch: m.latestBranch };
+          c.model = {
+            branches, runs: m.runs.map(x => ({ run: x.run, branches: x.branches.slice() })), alias: new Map(m.alias),
+            latestBranch: m.latestBranch,
+          };
         } catch {
           c.model = buildHistory(records);
         }

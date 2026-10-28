@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureRecords } from "../../../tests/helpers/fixtureLog";
-import { branchLabel, branchPath, buildHistory, foldTimeline, noisyVariables } from "./history";
+import { branchLabel, branchPath, buildHistory, foldTimeline, noisyVariables, representative } from "./history";
 import type { HistoryItem, LogRecord } from "./types";
 
 const base = { v: 1, run: 1, branch: 1 } as const;
@@ -166,5 +166,117 @@ describe("seq order", () => {
     const recs = [...fixtureRecords()].reverse();
     const model = buildHistory(recs);
     expect(branchPath(recs, model, 2).map(r => r.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 28, 29, 30, 31]);
+  });
+});
+
+describe("save-load continuations", () => {
+  type Opts = { run?: number; branch: number };
+  const at = (o: Opts, seq: number) => ({ v: 1, seq, t: seq * 1000, run: o.run ?? 1, branch: o.branch }) as const;
+  const bs = (o: Opts, seq: number, reason: "newGame" | "load", parentBranch: number | null, fromSeq: number | null) =>
+    ({ ...at(o, seq), type: "branchStart", reason, parentBranch, fromSeq }) as LogRecord;
+  const m = (o: Opts, seq: number, eventId = 1) =>
+    ({ ...at(o, seq), type: "message", src: src(eventId), cmd: seq, face: "", faceIndex: 0, speaker: "", text: `m${seq}` }) as LogRecord;
+  const st = (o: Opts, seq: number) =>
+    ({ ...at(o, seq), type: "state", src: null, cmd: null, changes: [{ kind: "switch", id: seq, value: true }] }) as LogRecord;
+  const save = (o: Opts, seq: number) => ({ ...at(o, seq), type: "save", slot: 1 }) as LogRecord;
+  const b1 = { branch: 1 }, b2 = { branch: 2 }, b3 = { branch: 3 };
+
+  // 새 게임 b1, seq 10에 저장, 상태 기록 몇 개, 불러오기 → b2(부모 1, 10부터)
+  const contLog = (): LogRecord[] => [
+    bs(b1, 1, "newGame", null, null), m(b1, 2), m(b1, 3), save(b1, 10), st(b1, 11), st(b1, 12),
+    bs(b2, 13, "load", 1, 10), m(b2, 14, 2), m(b2, 15, 2), st(b2, 16),
+  ];
+
+  it("a load with no story after the save point continues the parent branch", () => {
+    const recs = contLog(); const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1] }]);
+    expect(model.alias).toEqual(new Map([[2, 1]]));
+    expect(representative(model, 2)).toBe(1);
+    expect(representative(model, 1)).toBe(1);
+    expect(representative(model, 99)).toBe(99);
+    expect(branchLabel(model, 2)).toBe("1회차 갈래 1");
+    expect(branchLabel(model, 1)).toBe("1회차 갈래 1");
+    expect(model.latestBranch).toBe(1);
+    const all = [1, 2, 3, 10, 11, 12, 13, 14, 15, 16];
+    expect(branchPath(recs, model, 1).map(r => r.seq)).toEqual(all);
+    expect(branchPath(recs, model, 2).map(r => r.seq)).toEqual(all);
+    expect(foldTimeline(branchPath(recs, model, 1), model, {}).some(i => i.kind === "fork")).toBe(false);
+    // 원본 갈래 정보는 그대로 남는다
+    expect(model.branches.get(2)).toMatchObject({ parent: 1, fromSeq: 10, reason: "load" });
+  });
+
+  it("a load after story in the parent past the save point is a real branch", () => {
+    const recs = [
+      bs(b1, 1, "newGame", null, null), m(b1, 2), save(b1, 10), m(b1, 11), st(b1, 12),
+      bs(b2, 13, "load", 1, 10), m(b2, 14, 2),
+    ];
+    const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1, 2] }]);
+    expect(model.alias.size).toBe(0);
+    expect(branchLabel(model, 2)).toBe("1회차 갈래 2");
+    expect(model.latestBranch).toBe(2);
+    expect(branchPath(recs, model, 1).map(r => r.seq)).toEqual([1, 2, 10, 11, 12]);
+    expect(branchPath(recs, model, 2).map(r => r.seq)).toEqual([1, 2, 10, 13, 14]);
+    expect(foldTimeline(branchPath(recs, model, 2), model, {}).find(i => i.kind === "fork"))
+      .toMatchObject({ atSeq: 10, branches: [2, 1] });
+  });
+
+  it("chains of continuations collapse into one branch", () => {
+    const recs = [...contLog(), save(b2, 20), st(b2, 21), bs(b3, 22, "load", 2, 20), m(b3, 23, 3)];
+    const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1] }]);
+    expect(model.alias).toEqual(new Map([[2, 1], [3, 1]]));
+    expect(branchLabel(model, 3)).toBe("1회차 갈래 1");
+    expect(model.latestBranch).toBe(1);
+    const all = recs.map(r => r.seq);
+    for (const id of [1, 2, 3]) expect(branchPath(recs, model, id).map(r => r.seq)).toEqual(all);
+    expect(foldTimeline(branchPath(recs, model, 3), model, {}).some(i => i.kind === "fork")).toBe(false);
+  });
+
+  it("story in an earlier continuation makes a second load of the same save a real fork", () => {
+    // b1 저장(10) → b2 이어짐(이야기 진행) → 같은 저장을 다시 불러옴 → b3는 진짜 갈래
+    const recs = [...contLog(), bs(b3, 17, "load", 1, 10), m(b3, 18, 3)];
+    const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1, 3] }]);
+    expect(model.alias).toEqual(new Map([[2, 1]]));
+    expect(branchLabel(model, 3)).toBe("1회차 갈래 2");
+    expect(branchPath(recs, model, 1).map(r => r.seq)).toEqual([1, 2, 3, 10, 11, 12, 13, 14, 15, 16]);
+    expect(branchPath(recs, model, 3).map(r => r.seq)).toEqual([1, 2, 3, 10, 17, 18]);
+    expect(foldTimeline(branchPath(recs, model, 1), model, {}).find(i => i.kind === "fork"))
+      .toMatchObject({ atSeq: 10, branches: [1, 3] });
+    expect(foldTimeline(branchPath(recs, model, 3), model, {}).find(i => i.kind === "fork"))
+      .toMatchObject({ atSeq: 10, branches: [3, 1] });
+  });
+
+  it("a real fork from a continuation is reported against the representative", () => {
+    // b1 → b2 이어짐, b2에서 저장(20) 뒤 이야기 → 불러오기 b3(부모 2, 20부터)는 진짜 갈래
+    const recs = [...contLog(), save(b2, 20), m(b2, 21, 2), bs(b3, 22, "load", 2, 20), m(b3, 23, 3)];
+    const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1, 3] }]);
+    expect(branchLabel(model, 3)).toBe("1회차 갈래 2");
+    expect(branchPath(recs, model, 3).map(r => r.seq)).toEqual([1, 2, 3, 10, 11, 12, 13, 14, 15, 16, 20, 22, 23]);
+    expect(foldTimeline(branchPath(recs, model, 1), model, {}).find(i => i.kind === "fork"))
+      .toMatchObject({ atSeq: 20, branches: [1, 3] });
+    expect(foldTimeline(branchPath(recs, model, 3), model, {}).find(i => i.kind === "fork"))
+      .toMatchObject({ atSeq: 20, branches: [3, 1] });
+  });
+
+  it("only load starts in the same run can continue", () => {
+    const recs = [
+      bs(b1, 1, "newGame", null, null), save(b1, 2),
+      bs({ branch: 2, run: 2 }, 3, "newGame", null, null),
+      bs({ branch: 3, run: 2 }, 4, "load", 1, 2),   // 다른 회차의 부모
+    ];
+    const model = buildHistory(recs);
+    expect(model.runs).toEqual([{ run: 1, branches: [1] }, { run: 2, branches: [2, 3] }]);
+    expect(model.alias.size).toBe(0);
+  });
+
+  it("the decision is made when the branch starts; later parent records do not flip it", () => {
+    // 비정상 기록: 이어진 뒤에 부모 갈래에 이야기가 붙는다
+    const recs = [...contLog(), m(b1, 30)];
+    const model = buildHistory(recs);
+    expect(model.alias).toEqual(new Map([[2, 1]]));
+    expect(model.runs).toEqual([{ run: 1, branches: [1] }]);
   });
 });
