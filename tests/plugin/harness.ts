@@ -66,6 +66,11 @@ export interface Harness {
   readLog(): any[];
   readLive(): any;
   addMapEvent(eventId: number, pages: Cmd[][], pageIndex?: number): any;
+  /** Puts a Scene_Map-like scene with a spriteset (one Sprite_Picture per id in _pictureContainer) on SceneManager. */
+  mountSpriteset(maxPictures?: number): { scene: any; spriteset: any; container: any; sprites: any[]; update(): void };
+  setBitmapSize(name: string, w: number, h: number): void;
+  /** The message window opens and starts drawing text (Window_Message.updateMessage with a text state). */
+  drawMessageText(): void;
 }
 
 export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: number } = {}): Harness {
@@ -331,6 +336,43 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Window_Message.prototype.newPage = function () { this.clearFlags(); };
   Window_Message.prototype.startMessage = function () { this.newPage(); };
   Window_Message.prototype.isTriggered = function () { return this._okPressed; };
+  // called every update once the window is open; draws text while _textState is set
+  Window_Message.prototype.updateMessage = function () { return !!this._textState; };
+
+  // ---- Sprite / Sprite_Picture / spriteset: only what the picture capture reads (visible, alpha/opacity,
+  // parent chain, position, scale, anchor, blend, rotation, color tone, bitmap). update() follows rpg_sprites.js.
+  function Sprite(this: any) {
+    this.children = []; this.parent = null; this.visible = true; this.alpha = 1; this.x = 0; this.y = 0;
+    this.scale = { x: 1, y: 1 }; this.anchor = { x: 0, y: 0 }; this.blendMode = 0; this.rotation = 0; this.bitmap = null;
+    this._colorTone = [0, 0, 0, 0];
+  }
+  Object.defineProperty(Sprite.prototype, "opacity", {
+    get(this: any) { return this.alpha * 255; },
+    set(this: any, v: number) { this.alpha = Math.max(0, Math.min(255, v)) / 255; },
+  });
+  Sprite.prototype.addChild = function (c: any) { if (c.parent) c.parent.removeChild(c); c.parent = this; this.children.push(c); return c; };
+  Sprite.prototype.removeChild = function (c: any) { this.children = this.children.filter((x: any) => x !== c); c.parent = null; return c; };
+  const bitmapSizes: Record<string, [number, number]> = {};
+  function Sprite_Picture(this: any, id: number) { Sprite.call(this); this._pictureId = id; this._pictureName = ""; }
+  Sprite_Picture.prototype = Object.create(Sprite.prototype);
+  Sprite_Picture.prototype.constructor = Sprite_Picture;
+  Sprite_Picture.prototype.update = function () {
+    const p = g.$gameScreen.picture(this._pictureId);
+    if (!p || !p._name) { this.visible = false; this._pictureName = ""; this.bitmap = null; return; }
+    this.visible = true;
+    if (this._pictureName !== p._name) {
+      this._pictureName = p._name;
+      const [w, h] = bitmapSizes[p._name] ?? [100, 100];
+      this.bitmap = { width: w, height: h, isError: () => false };
+    }
+    const o = p._origin === 1 ? 0.5 : 0;
+    this.anchor = { x: o, y: o };
+    this.x = Math.round(p._x); this.y = Math.round(p._y);
+    this.scale = { x: p._scaleX / 100, y: p._scaleY / 100 };
+    this.opacity = p._opacity; this.blendMode = p._blendMode;
+    this.rotation = (p._angle * Math.PI) / 180;
+    this._colorTone = p._tone ? p._tone.slice() : [0, 0, 0, 0];
+  };
   Window_Message.prototype.updateInput = function () {
     if (this.pause) {
       if (this.isTriggered()) { this.pause = false; this.advanced++; }
@@ -407,7 +449,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
-    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message,
+    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message, Sprite, Sprite_Picture,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
@@ -437,6 +479,24 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       const ev = new (Game_Event as any)(eventId, pages, pageIndex);
       g.$gameMap._events[eventId] = ev;
       return ev;
+    },
+    mountSpriteset(maxPictures = 100) {
+      const scene = new (Sprite as any)();
+      const spriteset = scene.addChild(new (Sprite as any)());
+      const container = spriteset.addChild(new (Sprite as any)());
+      scene._spriteset = spriteset;
+      spriteset._pictureContainer = container;
+      const sprites: any[] = [];
+      for (let id = 1; id <= maxPictures; id++) sprites.push(container.addChild(new (Sprite_Picture as any)(id)));
+      SceneManager._scene = scene;
+      return { scene, spriteset, container, sprites, update: () => sprites.forEach((s) => s.update()) };
+    },
+    setBitmapSize(name, w, h) { bitmapSizes[name] = [w, h]; },
+    drawMessageText() {
+      const wm = new (Window_Message as any)();
+      wm.startMessage();
+      wm._textState = { index: 0 };
+      wm.updateMessage();
     },
   };
 }

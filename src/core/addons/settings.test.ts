@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { controlJson, DEFAULT_ASSIST } from "../live/assist";
 import { addonControlFlags, ADDONS } from "./registry";
-import { addonsJson, parseAddons } from "./settings";
+import { addonsJson, parseAddonFile, parseAddons } from "./settings";
 
 describe("add-on registry", () => {
   it("lists the screen picture add-on, off unless enabled", () => {
@@ -27,5 +27,13 @@ describe("addons.json", () => {
     expect(parseAddons("{bad")).toBeNull();
     expect(parseAddons(null)).toBeNull();
     expect(parseAddons("[]")).toBeNull();
+  });
+  it("keeps per-game picture groups; bad ids or groups are dropped", () => {
+    const body = addonsJson({ screenPictures: true }, { 60: "cg", 102: "hud" });
+    expect(JSON.parse(body).pictureRoles).toEqual({ 60: "cg", 102: "hud" });
+    expect(parseAddonFile(body)).toEqual({ state: { screenPictures: true }, pictureRoles: { 60: "cg", 102: "hud" } });
+    const bad = JSON.stringify({ v: 1, enabled: {}, pictureRoles: { 0: "cg", x: "cg", 5: "auto", 6: "stand" } });
+    expect(parseAddonFile(bad)!.pictureRoles).toEqual({ 6: "stand" });
+    expect(parseAddonFile(JSON.stringify({ v: 1, enabled: {} }))!.pictureRoles).toEqual({});
   });
 });

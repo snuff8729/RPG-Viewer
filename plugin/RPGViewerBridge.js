@@ -15,8 +15,9 @@
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  * 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357)의 이름과 문자열 인자도
  * 기록합니다. 병렬 이벤트·병렬 커먼 이벤트의 것은 기록하지 않습니다.
- * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사가 나올 때
- * 화면에 떠 있는 그림(스탠딩 이미지 등)의 이름·위치·크기도 기록합니다.
+ * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사 글자가 그려지기
+ * 시작할 때 화면에 실제로 보이는 그림(스탠딩 이미지 등)의 이름·위치·크기도
+ * 기록합니다(숨겨졌거나 투명한 그림은 빼고).
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -29,7 +30,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.6.0",
+    VERSION: "1.7.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -117,7 +118,11 @@
   // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
   var capturePictures = false;
   var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
-  var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;    // inside an extra (sped-up) scene update: input queries report nothing new
+  var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
+  // 1.7.0: a message record waits in the buffer (unserialized) until its text starts drawing, then takes the
+  // snapshot of what is actually on screen; flushes write only up to it (at most PICS_HOLD_MS, then snapshot now).
+  var heldMsg = null;         // { rec, t } — also the buffer entry itself
+  var PICS_HOLD_MS = 1000, PICS_TREE_MAX = 3000;    // inside an extra (sped-up) scene update: input queries report nothing new
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -245,14 +250,37 @@
     }
   }
 
-  function emit(type, fields) {
+  // hold: keep the record unserialized until finishHeld() attaches its picture snapshot
+  function emit(type, fields, hold) {
     if (run === null && type !== "error") return;
     closeState();
     var rec = makeRecord(type, now());
     for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) rec[k] = fields[k];
     if (STORY[type] === true) noteStory(rec.branch, rec.seq, rec.run);
-    pushLine(rec);
+    if (hold) pushHeld(rec);
+    else pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
+  }
+
+  function pushHeld(rec) {
+    finishHeld();
+    if (buffer.length >= MAX_BUFFER) buffer.shift();
+    heldMsg = { rec: rec, t: now() };
+    buffer.push(heldMsg);
+  }
+
+  // Attach the picture snapshot (taken now) to the held message and serialize it in place.
+  function finishHeld() {
+    var h = heldMsg;
+    if (!h) return;
+    heldMsg = null;
+    var pf = null;
+    try { pf = picsFields(); } catch (e) { reportError(e); }
+    if (pf && pf.pics) h.rec.pics = pf.pics;
+    else if (pf) h.rec.picsSame = true;
+    for (var i = 0; i < buffer.length; i++) {
+      if (buffer[i] === h) { buffer[i] = JSON.stringify(h.rec); return; }
+    }
   }
 
   // Dialogue-flow records reach disk at the end of the current frame instead of the next 250ms tick.
@@ -392,6 +420,7 @@
   function startBranch(reason, newRun, parentBranch, fromSeq) {
     releasePending(true); // belongs to the branch that is ending
     closeState();
+    finishHeld();
     varTimes = {}; varLastEmit = {}; varPending = {}; varPendingCount = 0;
     run = newRun;
     branch = meta.nextBranch++;
@@ -406,6 +435,7 @@
   function resumeBranch(r, b) {
     releasePending(true);
     closeState();
+    finishHeld();
     varTimes = {}; varLastEmit = {}; varPending = {}; varPendingCount = 0;
     run = r;
     branch = b;
@@ -414,13 +444,19 @@
     deferredNewGame = false;
   }
 
-  function flush() {
+  // force: also finish a held message now (saves, unload, tests)
+  function flush(force) {
     releasePending(false);
     closeState();
-    if (!buffer.length) return;
+    if (heldMsg && (force === true || now() - heldMsg.t >= PICS_HOLD_MS)) finishHeld();
+    var n = buffer.length;
+    for (var i = 0; i < buffer.length; i++) {
+      if (typeof buffer[i] !== "string") { n = i; break; } // a held message: keep it and what follows
+    }
+    if (!n) return;
     lastFlushT = now();
-    var lines = buffer;
-    buffer = [];
+    var lines = buffer.slice(0, n);
+    buffer = buffer.slice(n);
     try {
       ensureDir();
       fs.appendFileSync(LOG, lines.join("\n") + "\n");
@@ -834,7 +870,7 @@
   }
 
   bridge._flushNow = function () {
-    try { flush(); } catch (e) { reportError(e); }
+    try { flush(true); } catch (e) { reportError(e); }
     try { writeMeta(); } catch (em) { reportError(em); }
   };
   bridge._snapshotNow = function () { try { writeLive(true); } catch (e) { reportError(e); } };
@@ -945,19 +981,120 @@
 
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
-  // ---------------------------------------------------------------- screen pictures (1.6.0)
-  // Plugins (standing pictures etc.) end up in Game_Screen pictures however they compute them, so the
-  // pictures on screen are read directly when a message starts instead of hooking showPicture & co.
-  // Entry: [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode] + optional [tone|0, angle].
-  // A moving / fading picture reports its target values (where it ends up while the message shows).
+  // ---------------------------------------------------------------- screen pictures (1.6.0 / 1.7.0)
+  // The pictures on screen are read directly when a message's text starts drawing instead of hooking
+  // showPicture & co (plugins computing standing pictures end up there however they do it).
+  // Entry: [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode] + optional [tone|0, angle, w, h].
+  // 1.7.0 reads what is actually drawn: the scene's Sprite_Picture sprites (plugins hiding stands through sprite
+  // visibility / opacity or moving picture sprites to other layers are seen as drawn). Only sprites that are
+  // visible with all parents, with opacity > 0 (times the parents' alpha) and a bitmap are recorded; origin is
+  // 0 / 1 or [anchorX, anchorY]; w, h = bitmap size. Without picture sprites it falls back to Game_Screen
+  // pictures (opacity 0 skipped). A moving / fading picture reports its target values (where it ends up while
+  // the message shows) as long as the sprite still follows the picture.
   function picNum(v, d) { return typeof v === "number" && isFinite(v) ? Math.round(v * 100) / 100 : d; }
-  function picTone(p) {
-    var t = typeof p._toneDuration === "number" && p._toneDuration > 0 && p._toneTarget ? p._toneTarget : p._tone;
+  function picName(n) { return n.length > PIC_NAME_MAX ? n.slice(0, PIC_NAME_MAX) : n; }
+  function picEntry(id, name, origin, x, y, sx, sy, op, blend, tone, angle, w, h) {
+    var e = [id, picName(name), origin, x, y, sx, sy, op, blend];
+    if (tone || angle || w) {
+      e.push(tone || 0);
+      if (angle || w) e.push(angle || 0);
+      if (w) { e.push(w); e.push(h); }
+    }
+    return e;
+  }
+  function toneOf(t) {
     if (!t || typeof t.length !== "number" || t.length < 3) return null;
     var out = [picNum(t[0], 0), picNum(t[1], 0), picNum(t[2], 0), picNum(t[3], 0)];
     return out[0] || out[1] || out[2] || out[3] ? out : null;
   }
+
+  // Picture sprites of the current scene: the spriteset's _pictureContainer first, then any moved elsewhere.
+  function pictureSprites(sc) {
+    if (!sc || !sc._spriteset) return null;
+    var SP = G.Sprite_Picture;
+    var out = [], visited = 0;
+    var walk = function (node, depth) {
+      var ch = node && node.children;
+      if (!ch || typeof ch.length !== "number" || depth > 8) return;
+      for (var i = 0; i < ch.length && visited < PICS_TREE_MAX; i++) {
+        var c = ch[i];
+        visited++;
+        if (!c || typeof c !== "object") continue;
+        if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
+          if (out.indexOf(c) < 0) out.push(c);
+        } else {
+          walk(c, depth + 1);
+        }
+      }
+    };
+    if (sc._spriteset._pictureContainer) walk(sc._spriteset._pictureContainer, 0);
+    walk(sc, 0);
+    return out.length ? out : null;
+  }
+
+  // The opacity a sprite is drawn with (own opacity times every parent's alpha); 0 when it or a parent is
+  // hidden or it is not attached to the scene.
+  function drawnOpacity(s, own, sc) {
+    if (s.visible === false || !(own > 0)) return 0;
+    var op = own, n = s.parent, depth = 0;
+    while (n && n !== sc && depth++ < 50) {
+      if (n.visible === false) return 0;
+      if (typeof n.alpha === "number") op *= n.alpha;
+      n = n.parent;
+    }
+    return n === sc ? op : 0;
+  }
+
+  function spriteEntry(s, sc) {
+    var id = s._pictureId;
+    if (!isCount(id)) return null;
+    var screen = G.$gameScreen, p = null;
+    if (screen && typeof screen.picture === "function") p = screen.picture(id) || null;
+    var name = typeof s._pictureName === "string" && s._pictureName !== "" ? s._pictureName : (p && typeof p._name === "string" ? p._name : "");
+    var b = s.bitmap;
+    if (!name || !b) return null;
+    if (typeof b.isError === "function" && b.isError()) return null;
+    var moving = !!(p && typeof p._duration === "number" && p._duration > 0);
+    // a value the sprite took from the moving picture: report where the picture ends up
+    var follow = function (cur, now, target) {
+      return moving && typeof now === "number" && typeof target === "number" && Math.abs(cur - now) <= 1 ? target : cur;
+    };
+    var own = typeof s.opacity === "number" ? s.opacity : (typeof s.alpha === "number" ? s.alpha * 255 : 255);
+    own = follow(own, p && p._opacity, p && p._targetOpacity);
+    var op = picNum(drawnOpacity(s, own, sc), 0);
+    if (!(op > 0)) return null;
+    var sc0 = s.scale || {}, an = s.anchor || {};
+    var sx = typeof sc0.x === "number" ? sc0.x * 100 : 100, sy = typeof sc0.y === "number" ? sc0.y * 100 : 100;
+    var ax = picNum(an.x, 0), ay = picNum(an.y, 0);
+    var origin = ax === 0 && ay === 0 ? 0 : (ax === 0.5 && ay === 0.5 ? 1 : [ax, ay]);
+    var blend = typeof s.blendMode === "number" ? s.blendMode : (p ? picNum(p._blendMode, 0) : 0);
+    var tone = toneOf(s._colorTone) || (p ? picTone(p) : null);
+    var angle = picNum(typeof s.rotation === "number" ? s.rotation * 180 / Math.PI : 0, 0);
+    var w = picNum(b.width, 0), h = picNum(b.height, 0);
+    if (!(w > 0 && h > 0)) { w = 0; h = 0; }
+    return picEntry(id, name, origin,
+      picNum(follow(s.x, p && p._x, p && p._targetX), 0), picNum(follow(s.y, p && p._y, p && p._targetY), 0),
+      picNum(follow(sx, p && p._scaleX, p && p._targetScaleX), 100), picNum(follow(sy, p && p._scaleY, p && p._targetScaleY), 100),
+      op, blend, tone, angle, w, h);
+  }
+  function picTone(p) {
+    return toneOf(typeof p._toneDuration === "number" && p._toneDuration > 0 && p._toneTarget ? p._toneTarget : p._tone);
+  }
   function picturesNow() {
+    var sc = G.SceneManager && G.SceneManager._scene;
+    var sprites = pictureSprites(sc);
+    if (sprites) {
+      var out = [], ids = {};
+      for (var i = 0; i < sprites.length; i++) {
+        var e = spriteEntry(sprites[i], sc);
+        if (e && ids[e[0]] !== true) { ids[e[0]] = true; out.push(e); }
+      }
+      out.sort(function (a, b) { return a[0] - b[0]; });
+      return out.length > PICS_MAX ? out.slice(0, PICS_MAX) : out;
+    }
+    return gamePictures();
+  }
+  function gamePictures() {
     var s = G.$gameScreen;
     if (!s || typeof s.picture !== "function") return null;
     var max = typeof s.maxPictures === "function" ? s.maxPictures() : 100;
@@ -968,15 +1105,12 @@
       var p = s.picture(id);
       if (!p || typeof p._name !== "string" || p._name === "") continue;
       var moving = typeof p._duration === "number" && p._duration > 0;
-      var e = [
-        id, p._name.length > PIC_NAME_MAX ? p._name.slice(0, PIC_NAME_MAX) : p._name, picNum(p._origin, 0),
+      var op = picNum(moving ? p._targetOpacity : p._opacity, 255);
+      if (!(op > 0)) continue; // not visible
+      out.push(picEntry(id, p._name, picNum(p._origin, 0),
         picNum(moving ? p._targetX : p._x, 0), picNum(moving ? p._targetY : p._y, 0),
         picNum(moving ? p._targetScaleX : p._scaleX, 100), picNum(moving ? p._targetScaleY : p._scaleY, 100),
-        picNum(moving ? p._targetOpacity : p._opacity, 255), picNum(p._blendMode, 0)
-      ];
-      var tone = picTone(p), angle = picNum(p._angle, 0);
-      if (tone || angle) { e.push(tone || 0); if (angle) e.push(angle); }
-      out.push(e);
+        op, picNum(p._blendMode, 0), picTone(p), picNum(p._angle, 0), 0, 0));
     }
     return out;
   }
@@ -1165,11 +1299,9 @@
               speaker: p[4] == null ? "" : String(p[4]),
               text: joinedText(this._list, i + 1, 401)
             };
-            var pf = null;
-            try { pf = picsFields(); } catch (ep) { reportError(ep); }
-            if (pf && pf.pics) mrec.pics = pf.pics;
-            else if (pf) mrec.picsSame = true;
-            emit("message", mrec);
+            // capturing: the pictures are read once the text starts drawing (Window_Message.updateMessage),
+            // after same-frame erases and sprite-level hides have applied
+            emit("message", mrec, capturePictures && !inBattleNow());
           }
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
@@ -1192,9 +1324,12 @@
             ctx = { src: srcOf(this), cmd: i };
             lastChoices = { src: ctx.src, cmd: i, options: options };
             var crec = { src: ctx.src, cmd: i, options: options };
-            // a choice without a message (or after pictures changed under the message) carries changed pictures
+            // a choice without a message (or after pictures changed under the message) carries changed pictures;
+            // a choice shown with a held message leaves them to the message
             var cf = null;
-            try { cf = picsFields(); } catch (ep) { reportError(ep); }
+            if (!heldMsg) {
+              try { cf = picsFields(); } catch (ep) { reportError(ep); }
+            }
             if (cf && cf.pics) crec.pics = cf.pics;
             emit("choices", crec);
           }
@@ -1380,7 +1515,7 @@
     function afterSuccess(type, slot, result) {
       var done = function () {
         emit(type, { slot: slot });
-        if (type === "save") { flush(); writeMeta(); }
+        if (type === "save") { flush(true); writeMeta(); }
       };
       if (result && typeof result.then === "function") {
         result.then(function () {
@@ -1490,6 +1625,15 @@
         var r = orig.apply(this, arguments);
         try { if (this._rpgvSkip) setFast(this); } catch (e2) { reportError(e2); }
         return r;
+      };
+    });
+    // The first text update of a message (window open, text about to draw): take its picture snapshot.
+    hook(WM, "Window_Message", "updateMessage", function (orig) {
+      return function () {
+        try {
+          if (heldMsg && this._textState) { finishHeld(); scheduleFlush(); }
+        } catch (e) { reportError(e); }
+        return orig.apply(this, arguments);
       };
     });
     // newPage() clears the fast flags on every page of a long message: keep them for a seen one.

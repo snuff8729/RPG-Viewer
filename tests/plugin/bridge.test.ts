@@ -983,7 +983,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.6.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.7.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1616,13 +1616,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.6\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.7\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.6.0");
+    expect(h.bridge.VERSION).toBe("1.7.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
@@ -1632,7 +1632,7 @@ describe("RPGViewerBridge", () => {
   });
 });
 
-describe("screen picture capture (1.6.0)", () => {
+describe("screen picture capture (1.6.0 / 1.7.0)", () => {
   const CONTROL_PATH = "/game/www/rpg-viewer/control.json";
   const setCapture = (hh: Harness, on: boolean) => {
     hh.fs.dirs.add("/game/www/rpg-viewer");
@@ -1640,15 +1640,18 @@ describe("screen picture capture (1.6.0)", () => {
     hh.clock.t += 1000;
     hh.bridge._tick();
   };
-  const talk = (hh: Harness, text = "hi") => {
+  const talk = (hh: Harness, text = "hi", draw = true) => {
     const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, [text]), cmd(0)];
     if (!hh.g.$gameMap.event(3)) hh.addMapEvent(3, [list], 0);
     const interp = hh.g.$gameMap._interpreter;
     interp.setup(list, 3);
     hh.g.$gameMessage.clear();
     hh.runCommand(interp, 0);
+    if (draw) hh.drawMessageText();
   };
   const messages = (hh: Harness) => hh.readLog().filter((r) => r.type === "message");
+  /** log lines on disk without forcing a flush */
+  const onDisk = (hh: Harness) => (hh.fs.files.get(LOG_PATH) ?? "").split("\n").filter((l) => l).map((l) => JSON.parse(l));
 
   for (const engine of ["MZ", "MV"] as const) {
     it(`attaches the on-screen pictures to messages, then picsSame while unchanged (${engine})`, () => {
@@ -1698,14 +1701,17 @@ describe("screen picture capture (1.6.0)", () => {
     talk(h);
     const s = h.g.$gameScreen;
     s.showPicture(5, "x", 0, 0, 0, 100, 100, 255, 0);
-    s.movePicture(5, 1, 300.456, 200, 80, 80, 0, 2, 30);
+    s.movePicture(5, 1, 300.456, 200, 80, 80, 40, 2, 30);
     s.picture(5)._tone = [10, -20, 0, 0];
     s.picture(5)._angle = 15;
     s.showPicture(6, "", 0, 0, 0, 100, 100, 255, 0); // no name: skipped
+    s.showPicture(7, "fading", 0, 0, 0, 100, 100, 255, 0);
+    s.movePicture(7, 0, 0, 0, 100, 100, 0, 0, 30); // fading out: gone while the message shows
+    s.showPicture(8, "clear", 0, 0, 0, 100, 100, 0, 0); // opacity 0: not recorded
     talk(h);
     const m = messages(h);
     expect(m[0].pics).toEqual([]);
-    expect(m[1].pics).toEqual([[5, "x", 1, 300.46, 200, 80, 80, 0, 2, [10, -20, 0, 0], 15]]);
+    expect(m[1].pics).toEqual([[5, "x", 1, 300.46, 200, 80, 80, 40, 2, [10, -20, 0, 0], 15]]);
   });
 
   it("bounds the snapshot: at most 60 pictures, names clipped to 200 chars", () => {
@@ -1752,6 +1758,127 @@ describe("screen picture capture (1.6.0)", () => {
     const last = messages(h).at(-1);
     expect(last).not.toHaveProperty("pics");
     expect(last).not.toHaveProperty("picsSame");
+  });
+
+  for (const engine of ["MZ", "MV"] as const) {
+    it(`1.7.0 records what the picture sprites draw: hidden / transparent sprites left out (${engine})`, () => {
+      h = newGame(engine);
+      setCapture(h, true);
+      const s = h.g.$gameScreen;
+      s.maxPictures = () => 200;
+      const ss = h.mountSpriteset(200);
+      h.setBitmapSize("Cut_bath", 1024, 768);
+      h.setBitmapSize("actor01_pose01_body_0003", 922, 922);
+      h.setBitmapSize("Guage", 278, 60);
+      s.showPicture(60, "Cut_bath", 0, 0, 0, 100, 100, 255, 0);
+      s.showPicture(102, "Guage", 0, 746, 2, 100, 100, 255, 0);
+      s.showPicture(111, "actor01_pose01_body_0003", 0, 380, 0, 100, 100, 255, 0);
+      s.showPicture(112, "hair/01_1", 0, 380, 0, 100, 100, 255, 0);
+      s.showPicture(113, "organ/01v", 0, 380, 0, 100, 100, 4, 0);
+      s.showPicture(114, "under/01_1", 1, 380.4, 0, 50, 50, 240, 1);
+      ss.update();
+      // a plugin hides the stand at the sprite level while the event picture shows
+      ss.sprites[110].visible = false;   // 111
+      ss.sprites[111].opacity = 0;       // 112
+      // a layer plugin moves 114 above the windows; its parent layer is visible, rotated and tinted
+      const layer = ss.scene.addChild(new h.g.Sprite());
+      layer.alpha = 0.5;
+      layer.addChild(ss.sprites[113]);
+      ss.sprites[113].rotation = Math.PI / 2;
+      ss.sprites[113]._colorTone = [0, 0, 0, 68];
+      // a hidden layer hides 102 with its parent
+      const hiddenLayer = ss.scene.addChild(new h.g.Sprite());
+      hiddenLayer.visible = false;
+      hiddenLayer.addChild(ss.sprites[101]);
+      talk(h);
+      expect(messages(h)[0].pics).toEqual([
+        [60, "Cut_bath", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768],
+        [113, "organ/01v", 0, 380, 0, 100, 100, 4, 0, 0, 0, 100, 100],
+        [114, "under/01_1", 1, 380, 0, 50, 50, 120, 1, [0, 0, 0, 68], 90, 100, 100],
+      ]);
+    });
+  }
+
+  it("1.7.0 keeps target values of a moving picture while its sprite follows it, other anchors as [x, y]", () => {
+    h = newGame();
+    setCapture(h, true);
+    const ss = h.mountSpriteset(10);
+    const s = h.g.$gameScreen;
+    s.showPicture(1, "a", 0, 0, 0, 100, 100, 0, 0);
+    s.movePicture(1, 0, 300, 50, 100, 100, 255, 0, 20); // fading in from 0
+    s.showPicture(2, "b", 0, 10, 10, 100, 100, 255, 0);
+    ss.update();
+    ss.sprites[1].anchor = { x: 0.5, y: 1 };
+    talk(h);
+    expect(messages(h)[0].pics).toEqual([
+      [1, "a", 0, 300, 50, 100, 100, 255, 0, 0, 0, 100, 100],
+      [2, "b", [0.5, 1], 10, 10, 100, 100, 255, 0, 0, 0, 100, 100],
+    ]);
+  });
+
+  it("falls back to Game_Screen pictures when the scene has no picture sprites", () => {
+    h = newGame();
+    setCapture(h, true);
+    h.g.SceneManager._scene = { _spriteset: { children: [] }, children: [] };
+    h.g.$gameScreen.showPicture(3, "c", 0, 1, 2, 100, 100, 255, 0);
+    talk(h);
+    expect(messages(h)[0].pics).toEqual([[3, "c", 0, 1, 2, 100, 100, 255, 0]]);
+  });
+
+  it("1.7.0 takes the snapshot when the text starts drawing; flushes wait for it at most 1 s", () => {
+    h = newGame();
+    setCapture(h, true);
+    const ss = h.mountSpriteset(10);
+    const s = h.g.$gameScreen;
+    s.showPicture(1, "stand", 0, 0, 0, 100, 100, 255, 0);
+    s.showPicture(2, "cg", 0, 0, 0, 100, 100, 255, 0);
+    ss.update();
+    talk(h, "a", false);
+    h.bridge._runScheduled();
+    h.bridge._tick();
+    expect(onDisk(h).filter((r) => r.type === "message")).toHaveLength(0); // waiting for the window
+    // the same frame's event commands erase the stand before the window draws
+    s.erasePicture(1);
+    ss.update();
+    h.drawMessageText();
+    h.clock.t += 100;
+    h.bridge._runScheduled();
+    const m = onDisk(h).filter((r) => r.type === "message");
+    expect(m).toHaveLength(1);
+    expect(m[0].pics.map((p: any[]) => p[1])).toEqual(["cg"]);
+    // a message whose window never draws is written after 1 s with the pictures of that moment
+    talk(h, "b", false);
+    h.clock.t += 500;
+    h.bridge._tick();
+    expect(onDisk(h).filter((r) => r.type === "message")).toHaveLength(1);
+    h.clock.t += 600;
+    h.bridge._tick();
+    const m2 = onDisk(h).filter((r) => r.type === "message");
+    expect(m2).toHaveLength(2);
+    expect(m2[1].picsSame).toBe(true);
+    // records keep their order behind a held message
+    const seqs = onDisk(h).map((r) => r.seq);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+  });
+
+  it("a choice shown with a held message leaves the pictures to the message", () => {
+    h = newGame();
+    setCapture(h, true);
+    h.g.$gameScreen.showPicture(1, "a", 0, 0, 0, 100, 100, 255, 0);
+    const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["pick"]), cmd(102, [["yes", "no"], 1]), cmd(0)];
+    h.addMapEvent(5, [list], 0);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 5);
+    h.g.$gameMessage.clear();
+    h.runCommand(interp, 0);
+    h.drawMessageText();
+    const log = h.readLog();
+    const msg = log.find((r) => r.type === "message");
+    const ch = log.find((r) => r.type === "choices");
+    expect(msg.pics).toHaveLength(1);
+    expect(ch).not.toHaveProperty("pics");
+    expect(msg.seq).toBeLessThan(ch.seq);
+    expect(log.indexOf(msg)).toBeLessThan(log.indexOf(ch));
   });
 
   it("a broken $gameScreen never breaks the message", () => {

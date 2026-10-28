@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
-import { DEFAULT_SCREEN, type ScreenPicture, type ScreenSize } from "@/core/addons/screenPictures";
+import { DEFAULT_SCREEN, pictureRect, type ScreenPicture, type ScreenShot, type ScreenSize } from "@/core/addons/screenPictures";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
@@ -91,9 +91,12 @@ function usePictureImages(names: string[]) {
   };
 }
 
-/** 화면 크기의 캔버스에 그림들을 번호 순으로 그린다(위치·원점·크기·투명도·블렌드·색조·회전). */
-function ScreenCanvas({ pictures, size, images, className }: {
-  pictures: ScreenPicture[]; size: ScreenSize; images: Map<string, ImageBitmap>; className?: string;
+/** 캔버스에 그릴 화면 부분(게임 화면 좌표) */
+interface View { left: number; top: number; width: number; height: number }
+
+/** 캔버스에 그림들을 번호 순으로 그린다(위치·기준점·크기·투명도·블렌드·색조·회전). view: 그릴 화면 부분. */
+function ScreenCanvas({ pictures, view, images, className }: {
+  pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; className?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -111,45 +114,72 @@ function ScreenCanvas({ pictures, size, images, className }: {
         ctx.save();
         ctx.globalAlpha = p.opacity / 255;
         ctx.globalCompositeOperation = COMPOSITE[p.blendMode] ?? "source-over";
-        ctx.translate(p.x, p.y);
+        ctx.translate(p.x - view.left, p.y - view.top);
         if (p.angle) ctx.rotate((p.angle * Math.PI) / 180);
         ctx.scale(p.scaleX / 100, p.scaleY / 100);
+        const [ax, ay] = p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
         const src = p.tone ? toned(img, p.tone) : img;
-        ctx.drawImage(src, p.origin === 1 ? -img.width / 2 : 0, p.origin === 1 ? -img.height / 2 : 0);
+        ctx.drawImage(src, -ax * img.width, -ay * img.height);
       } catch { /* 그 그림만 건너뛴다 */ } finally {
         ctx.restore();
       }
     }
-  }, [pictures, images, size.width, size.height]);
-  return <canvas ref={ref} width={size.width} height={size.height} className={className} />;
+  }, [pictures, images, view.left, view.top, view.width, view.height]);
+  return <canvas ref={ref} width={view.width} height={view.height} className={className} />;
+}
+
+/** 스탠딩: 그림들이 차지하는 부분(화면 안으로 자른 것). 크기를 아직 모르면 화면 전체. */
+function standView(pictures: ScreenPicture[], size: ScreenSize, images: Map<string, ImageBitmap>): View {
+  const full = { left: 0, top: 0, width: size.width, height: size.height };
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const p of pictures) {
+    const img = images.get(p.name);
+    const r = pictureRect(p, () => (img ? { w: img.width, h: img.height } : null));
+    if (!r) return full;
+    left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+  }
+  left = Math.max(0, Math.floor(left)); top = Math.max(0, Math.floor(top));
+  right = Math.min(size.width, Math.ceil(right)); bottom = Math.min(size.height, Math.ceil(bottom));
+  if (!(right > left && bottom > top)) return full;
+  return { left, top, width: right - left, height: bottom - top };
 }
 
 /**
- * 화면 그림 따라 그리기: 대사가 나올 때 게임 화면에 떠 있던 그림(스탠딩 이미지 등)을 게임 화면 비율의 상자에 그린다.
+ * 화면 그림 따라 그리기: 대사가 나올 때 게임 화면에 보이던 그림을 그린다.
+ * - 이벤트 그림(cg): 게임 화면 비율 그대로(그 위에 보이던 스탠딩 포함).
+ * - 스탠딩(stand): 스탠딩 겹만, 차지하는 부분으로 잘라 작게.
  * 누르면 크게 본다. 게임 폴더에 없는 그림은 아래에 이름을 적는다.
  */
-export function ScreenPictures({ pictures }: { pictures: ScreenPicture[] }) {
+export function ScreenPictures({ shot }: { shot: ScreenShot }) {
   const { data } = useGame();
   const size = data?.screenSize ?? DEFAULT_SCREEN;
+  const { pictures } = shot;
   const names = [...new Set(pictures.map((p) => p.name))];
   const { images, status, retry } = usePictureImages(names);
   const missing = names.filter((n) => status(n) === "missing");
   const failed = names.some((n) => status(n) === "failed");
-  const label = `화면 그림 ${pictures.length}개: ${names.join(", ")}`;
+  const stand = shot.kind === "stand";
+  const view = stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height };
+  const title = stand ? "스탠딩" : "이벤트 그림";
+  const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
   return (
     <div className="space-y-1">
       <Dialog>
         <DialogTrigger asChild>
-          <button type="button" className="block w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted" aria-label={`${label} — 크게 보기`} title={names.join(", ")}>
-            <ScreenCanvas pictures={pictures} size={size} images={images} className="block h-auto w-full" />
+          <button
+            type="button"
+            className={stand ? "block w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted" : "block w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted"}
+            aria-label={`${label} — 크게 보기`} title={names.join(", ")}
+          >
+            <ScreenCanvas pictures={pictures} view={view} images={images} className={stand ? "block h-auto max-h-64 w-auto max-w-full" : "block h-auto w-full"} />
           </button>
         </DialogTrigger>
         <DialogContent className="sm:max-w-[min(90vw,1200px)]">
           <DialogHeader>
-            <DialogTitle>화면 그림</DialogTitle>
+            <DialogTitle>{title}</DialogTitle>
             <DialogDescription className="break-all">{names.join(", ")}</DialogDescription>
           </DialogHeader>
-          <ScreenCanvas pictures={pictures} size={size} images={images} className="mx-auto block h-auto max-h-[75vh] w-auto max-w-full rounded-md border bg-muted" />
+          <ScreenCanvas pictures={pictures} view={view} images={images} className="mx-auto block h-auto max-h-[75vh] w-auto max-w-full rounded-md border bg-muted" />
         </DialogContent>
       </Dialog>
       {(missing.length > 0 || failed) && (
@@ -165,3 +195,4 @@ export function ScreenPictures({ pictures }: { pictures: ScreenPicture[] }) {
     </div>
   );
 }
+

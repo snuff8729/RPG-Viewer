@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
-import { picturesBySeq } from "@/core/addons/screenPictures";
+import { picturesBySeq, scenesBySeq } from "@/core/addons/screenPictures";
+import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
@@ -102,7 +103,9 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
-  const pictures = useMemo(() => (picturesOn ? picturesBySeq(path) : null), [picturesOn, path]);
+  const pictureCtx = usePictureContext(records, picturesOn);
+  // 대사마다 보이는 이벤트 그림·스탠딩(화면 장식·숨김·가려진 그림 제외)
+  const pictures = useMemo(() => (pictureCtx ? scenesBySeq(picturesBySeq(path), pictureCtx) : null), [pictureCtx, path]);
   const items = useMemo(() => {
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });

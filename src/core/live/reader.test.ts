@@ -6,7 +6,7 @@ import { loadGame } from "../loader/loadGame";
 import type { GameData } from "../types";
 import { branchPath, buildHistory, foldTimeline } from "./history";
 import { lastSeqOf, readerItems } from "./reader";
-import { picturesBySeq } from "../addons/screenPictures";
+import { picturesBySeq, scenesBySeq, type PictureContext } from "../addons/screenPictures";
 import type { HistoryItem, LogRecord } from "./types";
 
 let data: GameData;
@@ -140,9 +140,40 @@ describe("readerItems screen pictures", () => {
     ({ ...rec, seq, type: "message", src, cmd: seq * 10, face: "", faceIndex: 0, speaker: "", text: `line ${seq}`, ...extra }) as LogRecord;
   const A = [110, "stand/a", 0, 0, 0, 100, 100, 255, 0];
   const B = [120, "stand/b", 0, 0, 0, 100, 100, 255, 0];
-  const run = (recs: LogRecord[], on = true) => readerItems(recs.map(item), data, new Map(), model, null, on ? picturesBySeq(recs) : null);
+  const ctx: PictureContext = { screen: { width: 1024, height: 768 } };
+  const run = (recs: LogRecord[], on = true, c: PictureContext = ctx) =>
+    readerItems(recs.map(item), data, new Map(), model, null, on ? scenesBySeq(picturesBySeq(recs), c) : null);
   const screens = (out: ReturnType<typeof readerItems>) =>
-    out.filter(i => i.kind === "message").map(i => (i.kind === "message" && i.screen ? i.screen.map(p => p.id).join("+") : "-"));
+    out.filter(i => i.kind === "message").map(i => (i.kind === "message" && i.screen ? i.screen.pictures.map(p => p.id).join("+") : "-"));
+  const kinds = (out: ReturnType<typeof readerItems>) =>
+    out.filter(i => i.kind === "message").map(i => (i.kind === "message" && i.screen ? i.screen.kind : "-"));
+
+  // the user's game (1024×768): 60 = event CG, 102 = HUD gauge, 111+ = standing layers (1.7.0 entries with sizes)
+  const CG = (name: string) => [60, name, 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768];
+  const GAUGE = [102, "Guage", 0, 746, 2, 100, 100, 255, 0, 0, 0, 278, 60];
+  const BODY = [111, "actor01_pose01_body_0003", 0, 380, 0, 100, 100, 255, 0, 0, 0, 922, 922];
+  const HAIR = (name: string) => [112, name, 0, 380, 0, 100, 100, 255, 0, 0, 0, 922, 922];
+
+  it("stand unchanged + CG changed → only the CG item; stand changed → a stand item; unrelated pictures ignored", () => {
+    const out = run([
+      msg(1, { pics: [GAUGE, BODY, HAIR("hair/01_1")] }),
+      msg(2, { pics: [[90, "smallFx", 0, 0, 0, 100, 100, 255, 0, 0, 0, 50, 50], GAUGE, BODY, HAIR("hair/01_1")] }), // unrelated: no item
+      msg(3, { pics: [GAUGE, BODY, HAIR("hair/01_2")] }),           // stand changed
+      msg(4, { pics: [CG("Cut_bath")] }),                            // CG appears
+      msg(5, { pics: [CG("eve_10_0001")] }),                         // CG changed
+      msg(6, { picsSame: true }),
+      msg(7, { pics: [GAUGE, BODY, HAIR("hair/01_2")] }),           // CG gone: stand shows again
+    ], true, { ...ctx, roles: { 90: "hidden" }, hud: new Set(["102|Guage|746|2"]) });
+    expect(screens(out)).toEqual(["111+112", "-", "111+112", "60", "60", "-", "111+112"]);
+    expect(kinds(out)).toEqual(["stand", "-", "stand", "cg", "cg", "-", "stand"]);
+  });
+
+  it("a CG under the stand keeps the stand composited; a CG on top hides the stand under it", () => {
+    const under = run([msg(1, { pics: [CG("Cut_bath"), BODY] })]);
+    expect(screens(under)).toEqual(["60+111"]);
+    const onTop = run([msg(1, { pics: [BODY, [150, "cover", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768]] })]);
+    expect(screens(onTop)).toEqual(["150"]);
+  });
 
   it("attaches the stack only where it changes, again after an empty screen", () => {
     const out = run([msg(1, { pics: [A] }), msg(2, { picsSame: true }), msg(3, { pics: [A, B] }), msg(4, { pics: [] }), msg(5, { pics: [A] })]);

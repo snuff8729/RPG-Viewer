@@ -9,6 +9,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { PictureRolesSection } from "./PictureRolesSection";
 
 /** 켜진 애드온의 지금 상태 안내(게임이 실행 중인지, 플러그인 버전이 맞는지). */
 function AddonStatus({ addon }: { addon: AddonDef }) {
@@ -61,7 +62,12 @@ export function GameSettingsSheet() {
                     <Switch id={id} checked={on} onCheckedChange={(v) => setOn(a.id, v)} />
                   </CardAction>
                 </CardHeader>
-                {on && <CardContent><AddonStatus addon={a} /></CardContent>}
+                {on && (
+                  <CardContent className="flex flex-col gap-4">
+                    <AddonStatus addon={a} />
+                    {a.id === "screenPictures" && <PictureRolesSection />}
+                  </CardContent>
+                )}
               </Card>
             );
           })}
