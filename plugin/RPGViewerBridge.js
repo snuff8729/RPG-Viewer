@@ -57,7 +57,7 @@
 
   // ---------------------------------------------------------------- state
   var meta = { nextRun: 1, nextBranch: 1, nextSeq: 1 };
-  var lastStory = {};         // branch -> seq of its last story record (0 = none yet); persisted in meta.json
+  var lastStory = {};         // branch -> { run, seq } of its last story record (seq 0 = none yet); a legacy plain number = seq with unknown run; persisted in meta.json
   var run = null, branch = null;
   var buffer = [];            // serialized records not yet appended
   // State changes not yet written, grouped per src+cmd within the current flush window
@@ -83,7 +83,7 @@
           meta = { nextRun: m.nextRun, nextBranch: m.nextBranch, nextSeq: m.nextSeq };
           if (m.lastStory && typeof m.lastStory === "object") {
             for (var b in m.lastStory) {
-              if (Object.prototype.hasOwnProperty.call(m.lastStory, b) && isCount(Number(b)) && isNonNeg(m.lastStory[b])) lastStory[b] = m.lastStory[b];
+              if (Object.prototype.hasOwnProperty.call(m.lastStory, b) && isCount(Number(b)) && validStoryEntry(m.lastStory[b])) lastStory[b] = m.lastStory[b];
             }
           }
         }
@@ -94,9 +94,20 @@
   function isNonNeg(n) { return typeof n === "number" && isFinite(n) && n >= 0 && Math.floor(n) === n; }
   var STORY = { message: true, scroll: true, choices: true, choice: true, picture: true };
   var MAX_STORY_BRANCHES = 200;
-  function noteStory(b, seq) { // seq 0 = branch seen, no story records yet
+  function validStoryEntry(e) {
+    return isNonNeg(e) || (e !== null && typeof e === "object" && isCount(e.run) && isNonNeg(e.seq));
+  }
+  function entrySeq(e) { return typeof e === "number" ? e : e.seq; }
+  function noteStory(b, seq, r) { // seq 0 = branch seen, no story records yet; r = run (omit if unknown)
     if (!isCount(b)) return;
-    if (!Object.prototype.hasOwnProperty.call(lastStory, b) || lastStory[b] < seq) lastStory[b] = seq;
+    var has = Object.prototype.hasOwnProperty.call(lastStory, b);
+    var cur = has ? lastStory[b] : null;
+    if (!isCount(r)) { // run unknown: legacy numeric behaviour, never downgrade a known run
+      if (!has || (typeof cur === "number" && cur < seq)) lastStory[b] = seq;
+      return;
+    }
+    if (!has || typeof cur === "number" || cur.run !== r) lastStory[b] = { run: r, seq: has && typeof cur === "number" && cur > seq ? cur : seq };
+    else if (cur.seq < seq) cur.seq = seq;
   }
   function prunedStory() {
     var keys = Object.keys(lastStory);
@@ -145,8 +156,8 @@
           if (isCount(r.seq) && r.seq >= meta.nextSeq) meta.nextSeq = r.seq + 1;
           if (isCount(r.run) && r.run >= meta.nextRun) meta.nextRun = r.run + 1;
           if (isCount(r.branch) && r.branch >= meta.nextBranch) meta.nextBranch = r.branch + 1;
-          if (r.type === "branchStart") noteStory(r.branch, 0);
-          else if (STORY[r.type] === true && isCount(r.seq)) noteStory(r.branch, r.seq);
+          if (r.type === "branchStart") noteStory(r.branch, 0, r.run);
+          else if (STORY[r.type] === true && isCount(r.seq)) noteStory(r.branch, r.seq, r.run);
         } catch (e2) { /* skip broken line */ }
       }
     } catch (e3) { reportError(e3); /* skip recovery; never read the whole log */ }
@@ -193,7 +204,7 @@
     closeState();
     var rec = makeRecord(type, now());
     for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) rec[k] = fields[k];
-    if (STORY[type] === true) noteStory(rec.branch, rec.seq);
+    if (STORY[type] === true) noteStory(rec.branch, rec.seq, rec.run);
     pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
   }
@@ -341,7 +352,7 @@
     lastChoices = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
-    noteStory(branch, 0);
+    noteStory(branch, 0, run);
   }
 
   // Continue the stamped run/branch (no branchStart) when it has no story records after the stamp.
@@ -765,7 +776,9 @@
             if (meta.nextBranch <= s.branch) meta.nextBranch = s.branch + 1;
             if (meta.nextSeq <= s.seq) meta.nextSeq = s.seq + 1; // save from a reset/copied log
             var known = Object.prototype.hasOwnProperty.call(lastStory, s.branch);
-            if (known && lastStory[s.branch] <= s.seq) resumeBranch(s.run, s.branch);
+            var ent = known ? lastStory[s.branch] : null;
+            var runOk = known && (typeof ent === "number" || ent.run === s.run); // legacy numeric: run unknown, seq rule only
+            if (runOk && entrySeq(ent) <= s.seq) resumeBranch(s.run, s.branch);
             else startBranch("load", s.run, s.branch, s.seq); // story after the save, or unknown: new branch
           } else {
             startBranch("unknownSave", meta.nextRun++, null, null);
