@@ -12,6 +12,8 @@ describe("viewOf", () => {
     expect(viewOf(parseRoute("#/here"))).toBe("here");
     expect(viewOf(parseRoute("#/history"))).toBe("history");
     expect(viewOf(parseRoute("#/missing"))).toBe("missing");
+    expect(viewOf(parseRoute("#/diagnose"))).toBe("diagnose");
+    expect(VIEW_NAMES.diagnose).toBe("게임 진단");
     expect(VIEW_NAMES[viewOf(parseRoute("#/"))]).toBe("찾아보기");
   });
 });

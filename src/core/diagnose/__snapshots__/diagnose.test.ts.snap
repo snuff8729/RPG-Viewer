@@ -1,0 +1,100 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`diagnoseGame on a DOP-like synthetic game > orders findings by area and renders a stable markdown report 1`] = `
+"# 게임 진단: 합성 게임 (MV)
+
+- 확인할 것: 10개 (켜면 돼요 6, 아직 안 돼요 0, 확인 필요 4)
+- 본 것: 게임 데이터, 플러그인 본문 있음, 그림 목록 있음, 플레이 기록 없음
+
+## 그림
+
+- [자동 처리] \`picture-folders\` 그림을 하위 폴더에 나눠 둬요 — 그림 이름에 든 글자로 하위 폴더를 고르는 플러그인(BY_PictureClassify)을 따라 그림을 찾아요.
+  - cg_09 → pictures/cg_09/
+- [확인 필요] \`missing-pictures\` 이벤트 그림 1개를 찾지 못했어요 — 이벤트가 띄우는 그림이 img/pictures에 없어요. 게임에서 빠진 파일이거나, 플러그인이 다른 폴더에서 읽는 것일 수 있어요.
+  - missing_one (맵 1 이벤트 3(적2) p1)
+
+## 스탠딩
+
+- [켜면 돼요] \`adapter:character-picture-manager\` 이 게임 전용 설정이 있어요: CPM 스탠딩 — 배우별 스탠딩
+  - 추천 설정: \`{"kind":"enable-adapter","adapter":"character-picture-manager"}\`
+  - 플러그인 CharacterPictureManager
+- [켜면 돼요] \`layered-stands\` 그림 여러 장을 겹쳐 캐릭터를 그려요 — 대사 하나 사이에 그림을 여러 장(몸·표정·옷) 띄워 캐릭터를 만들어요. 화면 그림 따라 그리기를 켜면 읽기에서 그 모습 그대로 보여줘요.
+  - 추천 설정: \`{"kind":"enable-addon","addon":"screenPictures"}\`
+  - 맵 1 이벤트 1(소녀) p1
+  - 화면 전체 크기로 겹치는 그림 표시 10번
+- [켜면 돼요] \`plugin-sprites\` 플러그인이 그림을 직접 그려요 — 이벤트 명령이 아니라 플러그인이 그림을 읽어 화면에 그려요. 화면 그림 따라 그리기를 켜면 기록 플러그인(1.10.0 이상)이 그 그림도 기록해요.
+  - 추천 설정: \`{"kind":"enable-addon","addon":"screenPictures"}\`
+  - MysteryHud
+
+## 컷인
+
+- [켜면 돼요] \`cutins\` 컷인이 있어요 — 대사 사이에 잠깐 띄웠다 지우는 그림(컷인)이 있어요. 화면 그림 따라 그리기를 켜면 읽기에 그 장면이 남아요.
+  - 추천 설정: \`{"kind":"enable-addon","addon":"screenPictures"}\`
+  - 그림 Actor1_CutIn
+  - 대사 없이 띄웠다 지우는 곳 1곳 (예: 맵 1 이벤트 4(컷인) p1)
+
+## 전투
+
+- [자동 처리] \`battle-log\` 전투 로그 플러그인(YEP) — YEP_BattleEngineCore가 전투 로그를 기술 이름만 보이게 바꿔요. 기록 플러그인이 누가 무엇을 썼는지 따로 남겨요.
+  - YEP_BattleEngineCore
+- [확인 필요] \`battle-plugins\` 전투 진행을 바꾸는 플러그인 — 전투 방식을 바꾸는 플러그인이 있어요. 전투 기록(시작·끝·로그)이 제대로 남는지 플레이 뒤 다시 진단해 보세요.
+  - MysteryHud
+- [자동 처리] \`battle-common\` 커먼 이벤트로 전투를 시작해요 — 여러 이벤트가 같은 커먼 이벤트를 불러 전투를 걸어요. 뷰어가 커먼 이벤트 안까지 따라가 적을 찾아요.
+  - 커먼 이벤트 3(전투 시작) — 2곳에서 부름
+- [괜찮아요] \`random-encounters\` 랜덤 인카운트 맵 1개 — 걸어 다니면 적이 나오는 맵이에요. 이 맵 화면에서 나오는 적을 보여줘요.
+  - 맵 1(마을)
+
+## 알림
+
+- [켜면 돼요] \`notices\` 화면에 잠깐 뜨는 알림이 있어요 — 티커·코멘트·토스트·업적 같은 알림 문구를 기록하면 읽기와 전투 기록에 같이 보여줘요.
+  - 추천 설정: \`{"kind":"enable-addon","addon":"notices"}\`
+  - Ticker
+- [켜면 돼요] \`html-overlay\` 게임 화면 위에 HTML 글을 띄워요 — 플러그인이 게임 위에 웹 글자를 띄워요. 알림 문구 기록(기록 플러그인 1.19.0 이상)이 그 글도 모아요.
+  - 추천 설정: \`{"kind":"enable-addon","addon":"notices"}\`
+  - HtmlPopup
+
+## 세이브
+
+- [자동 처리] \`save-path\` 세이브 폴더를 옮겨요 — SavePathRelocation이 세이브 파일을 다른 폴더에 둬요. 세이브 백업이 그 폴더를 따라가요.
+  - BaseAt www
+  - RelatedName save2
+
+## 이벤트
+
+- [자동 처리] \`spawned-events\` 게임 중에 이벤트를 만들어요 — 플레이 중에 새로 생기는 이벤트의 원본을 기록 플러그인(1.16.0 이상)이 알려줘서, 그 이벤트의 대사도 보여줘요.
+  - EventReSpawn
+
+## 메뉴
+
+- [자동 처리] \`menu-common-events\` 메뉴 화면에서 커먼 이벤트를 돌려요 — 메뉴를 열었을 때 도는 커먼 이벤트의 그림·대사를 이야기와 섞지 않고 따로 다뤄요.
+  - 메뉴: 커먼 이벤트 1(메뉴 그림)
+- [확인 필요] \`custom-scenes\` 게임만의 화면이 있어요 — 엔진에 없는 화면(도감·회상·옷 갈아입기 등)을 플러그인이 만들어요. 그 화면의 그림·글은 아직 따로 기록하지 않을 수 있어요.
+  - MysteryHud: Scene_Gallery
+
+## 화면
+
+- [자동 처리] \`screen-size\` 화면 크기 1280×720 — 게임 화면이 기본(816×624)과 달라서, 그 크기에 맞춰 그림을 그려요.
+  - 1280×720 (plugins.js YEP_CoreEngine)
+
+## 기타
+
+- [괜찮아요] \`engine\` MV 게임 — RPG Maker MV 게임이에요. 데이터는 www/data, 그림은 www/img에서 읽어요.
+  - 데이터 www/data
+  - 그림 www/img
+  - 켜진 플러그인 11개
+- [확인 필요] \`unknown-plugins\` 뷰어가 모르는 플러그인 2개 — 그림·알림·전투·화면·세이브를 건드리는 것 같은데 뷰어가 아직 모르는 플러그인이에요. 개발용 보고서를 복사해 Claude Code에 붙이면 어댑터를 만들 수 있어요.
+  - MysteryHud (ImageManager.loadPicture, new Sprite, blt, Scene_, BattleManager)
+  - HtmlPopup (document.)
+
+## 모르는 플러그인
+
+| 플러그인 | 짐작 | 열쇠말 | 함수 |
+| --- | --- | --- | --- |
+| MysteryHud | 그림, 화면, 전투 | ImageManager.loadPicture, new Sprite, blt, Scene_, BattleManager | Sprite_Hud.prototype.refresh, BattleManager.startBattle |
+| HtmlPopup | 알림 | document. | Popup.show |
+
+## 다음 단계
+
+Claude Code에서 \`onboard-game\` 스킬로 이 게임 폴더를 진단하고, \`확인 필요\`·\`아직 안 돼요\` 항목마다 어댑터(adapters/)를 만들어 주세요.
+"
+`;

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { BookOpen, EyeOff, FolderOpen, FolderTree, Gamepad2, History, MapPin, Search, type LucideIcon } from "lucide-react";
+import { BookOpen, EyeOff, FolderOpen, FolderTree, Gamepad2, History, MapPin, Search, Stethoscope, type LucideIcon } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem,
@@ -10,6 +10,8 @@ import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { formatRoute, type Route } from "@/app/route";
 import { reachableCount } from "@/core/live/missingGroups";
+import { useDiagnosis } from "@/app/DiagnosisProvider";
+import { attentionCount } from "@/core/diagnose";
 import { ErrorsBadge } from "./ErrorsBadge";
 import { ConnectionBadge } from "./live/ConnectionBadge";
 import { NowGroup } from "./live/NowGroup";
@@ -25,6 +27,7 @@ const NAV: { view: ViewKind; route: Route; icon: LucideIcon }[] = [
   { view: "history", route: { kind: "history" }, icon: History },
   { view: "missing", route: { kind: "missing" }, icon: EyeOff },
   { view: "explore", route: { kind: "home" }, icon: FolderTree },
+  { view: "diagnose", route: { kind: "diagnose" }, icon: Stethoscope },
 ];
 
 export function AppSidebar({ route, follow, onFollowChange, onOpenMissing, onSearch, onClose }: {
@@ -44,9 +47,12 @@ export function AppSidebar({ route, follow, onFollowChange, onOpenMissing, onSea
     () => (connected ? reachableCount(groups) : groups.reduce((s, g) => s + g.events.length, 0)),
     [connected, groups],
   );
+  const { report } = useDiagnosis();
+  const diagnoseCount = report ? attentionCount(report) : 0;
   const active = viewOf(route);
   const badge = (v: ViewKind): number | null =>
-    v === "here" ? (checklist ? checklist.remaining : null) : v === "missing" ? missingCount : null;
+    v === "here" ? (checklist ? checklist.remaining : null) : v === "missing" ? missingCount
+      : v === "diagnose" ? (diagnoseCount > 0 ? diagnoseCount : null) : null;
 
   return (
     <Sidebar>
