@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveStatus } from "@/app/LiveProvider";
 import type { InstallResult, InstallStatus } from "@/core/live/installer";
 import { fsAccessSupport, type FsAccessWindow } from "../fsAccess";
 import { formatBytes } from "./formatBytes";
@@ -20,7 +20,8 @@ function statusLabel(s: InstallStatus | null): string {
 type Outcome = { action: "install" | "uninstall"; result: InstallResult };
 
 export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion, logStats } = useLive();
+  const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion } = useLive();
+  const { logStats } = useLiveStatus();
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);

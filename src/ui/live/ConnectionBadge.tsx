@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveStatus } from "@/app/LiveProvider";
 import { branchLabel } from "@/core/live/history";
 import { Badge } from "@/components/ui/badge";
 import { InstallDialog } from "./InstallDialog";
@@ -12,7 +12,8 @@ function agoText(lastSeenT: number | null, now: number): string {
 
 /** 상단 연결 상태 Badge. 클릭하면 설치 Dialog. */
 export function ConnectionBadge() {
-  const { connection, lastLive, model, lastSeenT, supported, install } = useLive();
+  const { connection, model, supported, install } = useLive();
+  const { lastLive, lastSeenT } = useLiveStatus();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 

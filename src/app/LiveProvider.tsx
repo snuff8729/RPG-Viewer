@@ -22,8 +22,6 @@ export interface LiveContextValue {
   doUninstall(): Promise<InstallResult>;
   /** waiting = 설치됐지만 기록·상태 없음 */
   connection: Connection;
-  /** lastLive.t와 마지막 기록 t 중 최신 */
-  lastSeenT: number | null;
   /**
    * 파생 계산(model·coverage·missing)에 쓴 기록. 기록이 계속 들어오면 최대 1초에 한 번 갱신(마지막 변경 뒤엔 꼭 한 번).
    * 누적기 내부 배열이 아니라 파생 순간의 사본이라, 참조가 바뀌면 내용도 바뀐 것이다(memo deps로 써도 된다).
@@ -34,8 +32,6 @@ export interface LiveContextValue {
   coverage: Coverage;
   /** 연결됨(5초 이내)일 때만 현재 상태, 아니면 null → 판정은 모두 "?"가 된다. 하트비트(t만 바뀜)로는 참조가 바뀌지 않는다. */
   live: LiveSnapshot | null;
-  /** 연결 여부와 무관한 마지막 live.json(연결 Badge·라벨용). */
-  lastLive: LiveSnapshot | null;
   missing: MissingItem[];
   /** noisyVariables(records) — foldTimeline opts.noisy로 넘긴다. */
   noisy: Set<number>;
@@ -45,10 +41,21 @@ export interface LiveContextValue {
   changedSeqs: Set<number>;
   /** model.latestBranch */
   latestBranch: number | null;
-  /** 기록 파일 크기(바이트)와 줄 수(누적 기록 + 잘못된 줄). 아직 못 읽었으면 null. */
-  logStats: { bytes: number; lines: number } | null;
   /** 뷰어에 들어 있는 플러그인 버전 */
   bundledVersion: string;
+}
+
+/**
+ * 폴링·하트비트마다 바뀌는 값. useLive()와 나눠 두어, 이 값이 바뀌어도
+ * useLive()만 쓰는 화면(기록 탭 등)은 다시 그리지 않는다.
+ */
+export interface LiveStatusValue {
+  /** lastLive.t와 마지막 기록 t 중 최신 */
+  lastSeenT: number | null;
+  /** 연결 여부와 무관한 마지막 live.json(연결 Badge·라벨용). 하트비트마다 바뀐다. */
+  lastLive: LiveSnapshot | null;
+  /** 기록 파일 크기(바이트)와 줄 수(누적 기록 + 잘못된 줄). 아직 못 읽었으면 null. */
+  logStats: { bytes: number; lines: number } | null;
 }
 
 const bundledVersion = pluginVersionOf(pluginSource) ?? "";
@@ -64,14 +71,18 @@ const EMPTY_MODEL: HistoryModel = buildHistory([]);
 const EMPTY_COVERAGE: Coverage = { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() };
 const EMPTY_NOISY = new Set<number>();
 
-/** 폴링이 본 최신 기록 상태(변경 즉시 갱신). 파생값은 Derived로 따로 스로틀한다. */
-interface TailInfo { version: number; count: number; lastT: number | null; badLines: number; bytes: number | null }
-const EMPTY_TAIL: TailInfo = { version: 0, count: 0, lastT: null, badLines: 0, bytes: null };
+/**
+ * 폴링이 본 최신 기록 상태(변경 즉시 갱신). 파생값은 Derived로 따로 스로틀한다.
+ * gen: 누적기마다 다른 번호 — 새 누적기의 version이 이전 누적기의 version과 같아도 섞이지 않게 (gen, version)으로 구분한다.
+ */
+interface TailInfo { gen: number; version: number; count: number; lastT: number | null; badLines: number; bytes: number | null }
+const EMPTY_TAIL: TailInfo = { gen: 0, version: 0, count: 0, lastT: null, badLines: 0, bytes: null };
 
 /** 스로틀된 파생 순간의 누적기 스냅숏(모두 이후 append로 바뀌지 않는다). */
-interface Derived { version: number; records: LogRecord[]; model: HistoryModel; coverage: Coverage; noisy: Set<number> }
+interface Derived { gen: number; version: number; records: LogRecord[]; model: HistoryModel; coverage: Coverage; noisy: Set<number> }
 
 const LiveContext = createContext<LiveContextValue | null>(null);
+const LiveStatusContext = createContext<LiveStatusValue | null>(null);
 
 /** t만 다른 live.json(하트비트)이면 같은 키 → 판정·못 본 것 재계산을 건너뛴다. */
 function stateKey(s: LiveSnapshot): string {
@@ -93,15 +104,20 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [fresh, setFresh] = useState(false);
 
   // 게임(폴더)이 바뀌면 렌더 중에 상태를 비운다(React 권장 패턴: 이전 값과 비교).
+  // 같은 폴더라도 데이터가 바뀌면 누적기를 새로 만들므로 기록·파생값도 비운다.
   const [prevFolder, setPrevFolder] = useState<WritableGameFolder | null>(wfolder);
+  const [prevData, setPrevData] = useState(data);
   if (prevFolder !== wfolder) {
     setPrevFolder(wfolder);
     setInstall(null);
-    setTailInfo(EMPTY_TAIL);
-    setDerived(null);
     setLastLive(null);
     setLiveState(null);
     setFresh(false);
+  }
+  if (prevFolder !== wfolder || prevData !== data) {
+    setPrevData(data);
+    setTailInfo(EMPTY_TAIL);
+    setDerived(null);
   }
 
   // 비동기 결과가 이전 게임 것이면 버린다.
@@ -132,7 +148,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refreshInstall(); }, [refreshInstall]);
 
   // 누적기: 폴링 효과가 게임(폴더·데이터)마다 새로 만든다. 파생 스로틀이 여기서 읽는다.
-  const accRef = useRef<LiveAccumulator | null>(null);
+  const accRef = useRef<{ acc: LiveAccumulator; gen: number } | null>(null);
+  const genCounter = useRef(0);
 
   // 폴링: 자기 재예약 setTimeout(setInterval 아님). 숨겨진 탭이면 건너뛴다. more면 바로 다시.
   useEffect(() => {
@@ -140,7 +157,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const paths = livePaths(dataRoot);
     const tail = new LogTail(wfolder, paths.logFile);
     const acc = createAccumulator(data);
-    accRef.current = acc;
+    const gen = ++genCounter.current;
+    const entry = { acc, gen };
+    accRef.current = entry;
     let bad = 0;
     let liveModified: number | null = null;
     let lastKey: string | null = null;
@@ -165,7 +184,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             if (cancelled) return;
             const recs = acc.records;
             setTailInfo({
-              version: acc.version, count: recs.length, lastT: recs.length > 0 ? recs[recs.length - 1].t : null,
+              gen, version: acc.version, count: recs.length, lastT: recs.length > 0 ? recs[recs.length - 1].t : null,
               badLines: bad, bytes,
             });
           }
@@ -191,7 +210,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
-      if (accRef.current === acc) accRef.current = null;
+      if (accRef.current === entry) accRef.current = null;
     };
   }, [wfolder, dataRoot, data]);
 
@@ -211,21 +230,24 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // 변경마다 타이머를 다시 걸지만 대기 시간은 "마지막 파생 + DERIVE_MS"까지라 미뤄지지 않는다.
   // records는 누적기 내부 배열(이후 append로 바뀜)이라 파생 순간에 slice() 사본을 내보낸다(초당 최대 한 번 O(n)).
   // model/coverage/noisy는 누적기가 version마다 만든 불변 사본이다.
+  // 스냅숏은 (누적기 gen, version)으로 구분한다.
   const lastDeriveAt = useRef(0);
+  const tailGen = tailInfo.gen;
   const tailVersion = tailInfo.version;
   useEffect(() => {
     const wait = Math.max(0, lastDeriveAt.current + DERIVE_MS - Date.now());
     const id = setTimeout(() => {
       lastDeriveAt.current = Date.now();
-      const acc = accRef.current;
-      if (!acc || acc.records.length === 0) { setDerived(null); return; }
+      const cur = accRef.current;
+      if (!cur || cur.acc.records.length === 0) { setDerived(null); return; }
+      const { acc, gen } = cur;
       const v = acc.version;
-      setDerived((prev) => (prev && prev.version === v
+      setDerived((prev) => (prev && prev.gen === gen && prev.version === v
         ? prev
-        : { version: v, records: acc.records.slice(), model: acc.model(), coverage: acc.coverage(), noisy: acc.noisy() }));
+        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: acc.coverage(), noisy: acc.noisy() }));
     }, wait);
     return () => clearTimeout(id);
-  }, [tailVersion]);
+  }, [tailGen, tailVersion]);
 
   const derivedRecords = derived?.records ?? EMPTY_RECORDS;
   const model = derived?.model ?? EMPTY_MODEL;
@@ -262,16 +284,30 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<LiveContextValue>(() => ({
     supported, install, refreshInstall, doInstall, doUninstall,
-    connection, lastSeenT, records: derivedRecords, badLines, model, coverage, live, lastLive, missing,
-    noisy, uncertainSeqs: coverage.uncertainSeqs, changedSeqs: coverage.changedSeqs, latestBranch: model.latestBranch, logStats, bundledVersion,
-  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, derivedRecords, badLines, model, coverage, live, lastLive, missing, noisy, logStats]);
+    connection, records: derivedRecords, badLines, model, coverage, live, missing,
+    noisy, uncertainSeqs: coverage.uncertainSeqs, changedSeqs: coverage.changedSeqs, latestBranch: model.latestBranch, bundledVersion,
+  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, derivedRecords, badLines, model, coverage, live, missing, noisy]);
 
-  return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
+  const statusValue = useMemo<LiveStatusValue>(() => ({ lastSeenT, lastLive, logStats }), [lastSeenT, lastLive, logStats]);
+
+  return (
+    <LiveContext.Provider value={value}>
+      <LiveStatusContext.Provider value={statusValue}>{children}</LiveStatusContext.Provider>
+    </LiveContext.Provider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function useLive(): LiveContextValue {
   const v = useContext(LiveContext);
   if (!v) throw new Error("useLive must be used within LiveProvider");
+  return v;
+}
+
+/** 자주 바뀌는 연결 상태값(lastSeenT·lastLive·logStats). 이 값이 필요한 작은 컴포넌트만 쓴다. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLiveStatus(): LiveStatusValue {
+  const v = useContext(LiveStatusContext);
+  if (!v) throw new Error("useLiveStatus must be used within LiveProvider");
   return v;
 }
