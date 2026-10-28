@@ -1,6 +1,7 @@
 import { ADDONS, type AddonState } from "./registry";
 import { isPictureRole, type PictureRoles, type SpriteRoles } from "./screenPictures";
 import { cleanNoticeHooks } from "./notices";
+import { cleanHiddenImages } from "./hiddenImages";
 import { keyText, parseKeyText } from "../story/progress";
 
 /**
@@ -15,18 +16,21 @@ export interface AddonFile {
   adapters?: Record<string, boolean>;
   /** 이야기 진행 기준(직접 고른 것, `v:12` 또는 `s:3,4,5`). 없으면 자동 */
   storyProgress?: string;
+  /** 읽기에서 숨길 그림 이름(그대로 또는 `앞부분*`). 없으면 없음 */
+  hiddenImages?: string[];
 }
 
 /**
  * 게임 폴더의 rpg-viewer/addons.json 본문(계약 v1):
  * { v: 1, enabled: { [id]: boolean }, pictureRoles?: { [그림 번호]: 구분 }, noticeHooks?: string[] }.
  * pictureRoles·noticeHooks·spriteRoles({ [이름 열쇠]: 구분 }, 1.10.0)·storyProgress(이야기 진행 기준 `v:12`·`s:3,4`)는
- * 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
+ * hiddenImages(읽기에서 숨길 그림 이름·`앞부분*`)는 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
  */
 export function addonsJson(
   state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null, spriteRoles?: SpriteRoles | null,
   adapters?: Record<string, boolean> | null,
   storyProgress?: string | null,
+  hiddenImages?: readonly string[] | null,
 ): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
@@ -41,6 +45,8 @@ export function addonsJson(
   if (Object.keys(ad).length > 0) body.adapters = ad;
   const story = cleanStoryProgress(storyProgress);
   if (story) body.storyProgress = story;
+  const hidden = cleanHiddenImages(hiddenImages);
+  if (hidden.length > 0) body.hiddenImages = hidden;
   return JSON.stringify(body, null, 2) + "\n";
 }
 
@@ -111,6 +117,8 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
     if (Object.keys(ad).length > 0) file.adapters = ad;
     const story = cleanStoryProgress((raw as { storyProgress?: unknown }).storyProgress);
     if (story) file.storyProgress = story;
+    const hidden = cleanHiddenImages((raw as { hiddenImages?: unknown }).hiddenImages);
+    if (hidden.length > 0) file.hiddenImages = hidden;
     return file;
   } catch {
     return null;

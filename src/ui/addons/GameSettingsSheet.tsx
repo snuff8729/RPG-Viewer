@@ -13,6 +13,7 @@ import { PictureRolesSection } from "./PictureRolesSection";
 import { NoticeHooksSection } from "./NoticeHooksSection";
 import { AdapterCard } from "./AdapterCard";
 import { StoryProgressSection } from "./StoryProgressSection";
+import { HiddenImagesSection } from "./HiddenImagesSection";
 import { useGameSettingsOpen } from "./gameSettingsOpen";
 import { useGame } from "@/app/GameProvider";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +79,7 @@ export function GameSettingsSheet() {
         </SheetHeader>
         <div className="flex flex-col gap-4 px-4 pb-4">
           <StoryProgressSection />
+          <HiddenImagesSection />
           {adapters.map((a) => <AdapterCard key={a.manifest.id} adapter={a} />)}
           {ADDONS.map((a) => {
             const id = `addon-${a.id}`;

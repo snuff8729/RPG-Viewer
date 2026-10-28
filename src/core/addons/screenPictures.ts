@@ -187,6 +187,8 @@ export interface PictureContext {
   defaultRole?: ((p: ScreenPicture) => PictureRole | null | undefined) | null;
   /** 그림 이름 → 투명도 통계(그림 파일을 읽은 뒤). 모르면 null — 그동안은 가림 판정을 하지 않는다. */
   statsOf?: ((name: string) => AlphaStats | null | undefined) | null;
+  /** 읽기에서 숨길 그림 이름인가(hiddenImageMatcher). 맞으면 다른 구분보다 먼저 숨김. 없으면 null. */
+  hidden?: ((name: string) => boolean) | null;
 }
 
 /**
@@ -346,6 +348,9 @@ export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
 
 /** 직접 고른 구분 → 어댑터 기본 구분 → 확장이 붙인 구분 → 화면 장식으로 본 그림. 없으면 null(자동 판정). */
 function chosenRole(p: ScreenPicture, ctx: PictureContext): PictureRole | null {
+  try {
+    if (ctx.hidden?.(p.name)) return "hidden";
+  } catch { /* 숨기지 않음 */ }
   const o = p.kind === "sprite" ? ctx.spriteRoles?.[spriteKeyOf(p.name)] : ctx.roles?.[p.id];
   if (isPictureRole(o)) return o;
   try {
@@ -446,8 +451,11 @@ export function scenesBySeq(pictures: Map<number, ScreenPicture[]>, ctx: Picture
   return out;
 }
 
-/** 읽기에 보일 그림: cg = 화면 크기 그대로(위에 보이는 스탠딩 포함), stand = 스탠딩 겹만 잘라서 */
-export interface ScreenShot { kind: "cg" | "stand"; pictures: ScreenPicture[] }
+/**
+ * 읽기에 보일 그림: cg = 화면 크기 그대로(위에 보이는 스탠딩 포함), stand = 스탠딩 겹만 잘라서.
+ * cg 종류의 cg = pictures 중 이벤트 그림인 것(나머지는 스탠딩). 없으면 모름.
+ */
+export interface ScreenShot { kind: "cg" | "stand"; pictures: ScreenPicture[]; cg?: ScreenPicture[] }
 
 /**
  * 앞에 보인 것(key)과 비교해 이 대사에 새로 보일 그림을 정한다.
@@ -461,7 +469,7 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
     if (scene.cg.length > 0) {
       const pictures = [...scene.cg, ...scene.stand].sort((a, b) => a.id - b.id);
       const key = "cg:" + JSON.stringify(pictures);
-      return { shot: key === prevKey ? null : { kind: "cg", pictures }, key };
+      return { shot: key === prevKey ? null : { kind: "cg", pictures, cg: [...scene.cg] }, key };
     }
     if (scene.stand.length > 0) {
       const key = "stand:" + JSON.stringify(scene.stand);

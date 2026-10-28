@@ -5,6 +5,7 @@ import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
 import { cleanStoryProgress, type AddonFile } from "@/core/addons/settings";
 import { cleanNoticeHooks } from "@/core/addons/notices";
+import { cleanHiddenImages } from "@/core/addons/hiddenImages";
 import { keyText, parseKeyText, type StoryKey } from "@/core/story/progress";
 import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
@@ -47,6 +48,10 @@ export interface AddonsValue {
   isAdapterOn(id: string): boolean;
   /** 어댑터를 켜고 끈다(켤 때 기본 애드온도 켠다). 클릭 핸들러 안에서 부를 것. 게임 쪽 확장 설치는 부르는 쪽이 한다. */
   setAdapterOn(id: string, on: boolean): void;
+  /** 읽기에서 숨길 그림 이름(그대로 또는 `앞부분*`) */
+  hiddenImages: string[];
+  /** 숨길 그림 목록을 바꾼다(쓸 수 없는 것은 버린다). 클릭 핸들러 안에서 부를 것. */
+  setHiddenImages(patterns: string[]): void;
   /** 켠 어댑터들이 정한 그림 기본 구분(없으면 null) */
   defaultRole: ((p: ScreenPicture) => PictureRole | null) | null;
 }
@@ -55,12 +60,14 @@ const EMPTY: AddonState = {};
 const NO_ROLES: PictureRoles = {};
 const NO_HOOKS: string[] = [];
 const NO_SPRITE_ROLES: SpriteRoles = {};
+const NO_HIDDEN: string[] = [];
 const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
   state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {},
   spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {},
   storyProgress: null, setStoryProgress: () => {}, controlFlags: {}, savedInFolder: false,
   adapters: [], enabledAdapters: [], isAdapterOn: () => false, setAdapterOn: () => {}, defaultRole: null,
+  hiddenImages: NO_HIDDEN, setHiddenImages: () => {},
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
 
@@ -89,6 +96,7 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const pictureRoles = current?.file.pictureRoles ?? NO_ROLES;
   const noticeHooks = current?.file.noticeHooks ?? NO_HOOKS;
   const spriteRoles = current?.file.spriteRoles ?? NO_SPRITE_ROLES;
+  const hiddenImages = current?.file.hiddenImages ?? NO_HIDDEN;
   const adapterState = current?.file.adapters;
   const enabledPlugins = data?.enabledPlugins;
   const gameTitle = data?.system.gameTitle;
@@ -176,6 +184,15 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setHiddenImages = useCallback((patterns: string[]) => {
+    update((prev) => {
+      const list = cleanHiddenImages(patterns);
+      const next: AddonFile = { ...prev };
+      if (list.length > 0) next.hiddenImages = list; else delete next.hiddenImages;
+      return next;
+    });
+  }, [update]);
+
   const value = useMemo<AddonsValue>(() => ({
     state,
     isOn: (id) => state[id] === true,
@@ -195,8 +212,10 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     isAdapterOn: (id) => enabledAdapters.some((a) => a.manifest.id === id),
     setAdapterOn,
     defaultRole,
+    hiddenImages,
+    setHiddenImages,
   }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, storyProgress, setStoryProgress,
-    current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole]);
+    current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole, hiddenImages, setHiddenImages]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }
