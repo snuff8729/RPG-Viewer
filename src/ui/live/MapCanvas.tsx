@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, type CurrentEvent } from "./mapEvents";
+import { fitZoom, MAX_ZOOM, MIN_ZOOM } from "./mapZoom";
 import { eventStyle, sectionStyle } from "./sectionStyle";
 import type { LoadedTiles } from "./useMapTiles";
 
@@ -19,8 +20,6 @@ import type { LoadedTiles } from "./useMapTiles";
 const T = 48;
 /** 캔버스 한 장의 최대 픽셀 수(메모리 상한) */
 const MAX_AREA = 16_000_000;
-const MIN_ZOOM = 2;
-const MAX_ZOOM = 96;
 /** 한 프레임에 그리는 시간(ms). 넘으면 다음 프레임으로 넘겨 큰 맵에서도 화면이 멈추지 않게 한다 */
 const SLICE_MS = 10;
 const LEGEND: Section[] = ["now", "item", "repeat", "talk", "locked"];
@@ -332,14 +331,36 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     setZoom(z);
   };
 
-  // 처음(맵이 바뀔 때): 내 주변이 가로를 채우도록 확대하고 나를 가운데로
+  /** 맵 전체가 보이게(맞춤). 보이는 영역이 아직 0 크기면 false(크기가 잡히면 아래 ResizeObserver가 다시 부른다) */
+  const fitNow = (): boolean => {
+    const el = scrollRef.current;
+    const z = el && fitZoom(el.clientWidth, el.clientHeight, map.width, map.height);
+    if (!z) return false;
+    zoomAndCenter(z, map.width / 2, map.height / 2);
+    return true;
+  };
+  const fitRef = useRef(fitNow);
+  useLayoutEffect(() => { fitRef.current = fitNow; });
+  /** 이 맵에서 사용자가 직접 확대·축소했는지(했으면 크기가 바뀌어도 맞춤을 다시 하지 않는다) */
+  const manualZoom = useRef(false);
+
+  // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때는 그대로 둔다.
   const initFor = useRef<LoadedTiles | null>(null);
   useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || initFor.current === tiles) return;
+    if (initFor.current === tiles) return;
     initFor.current = tiles;
-    zoomAndCenter(clamp(el.clientWidth / Math.min(map.width, 17), 8, 48), player.x + 0.5, player.y + 0.5);
-  }, [tiles, map.width, player.x, player.y]);
+    manualZoom.current = false;
+    fitRef.current();
+  }, [tiles]);
+
+  // 보이는 영역 크기가 바뀌면(레이아웃이 자리 잡힌 뒤·창 크기 변경) 직접 확대하지 않았으면 다시 맞춤
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { if (!manualZoom.current) fitRef.current(); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // 가운데 맞추기는 확대 크기가 반영된 뒤에
   useLayoutEffect(() => {
@@ -376,13 +397,10 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     const el = scrollRef.current;
     if (!el || zoom == null) return;
     const cx = (el.scrollLeft + el.clientWidth / 2) / zoom, cy = (el.scrollTop + el.clientHeight / 2) / zoom;
+    manualZoom.current = true;
     zoomAndCenter(clamp(zoom * f, MIN_ZOOM, MAX_ZOOM), cx, cy);
   };
-  const fit = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    zoomAndCenter(clamp(Math.min(el.clientWidth / map.width, el.clientHeight / map.height), 1, MAX_ZOOM), map.width / 2, map.height / 2);
-  };
+  const fit = () => { if (fitNow()) manualZoom.current = false; };
   const toPlayer = () => { if (zoom != null) zoomAndCenter(zoom, px + 0.5, py + 0.5); };
 
   /** 화면 좌표(캔버스 기준) → 가장 가까운 이벤트 표시 */
