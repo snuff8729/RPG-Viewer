@@ -6,7 +6,7 @@ import { nowItems, placesToGo } from "./sidebarItems";
 const ev = (eventId: number, section: ChecklistEvent["section"], hasLoc = true): ChecklistEvent => ({
   eventId, name: `E${eventId}`, title: `T${eventId}`, x: 0, y: 0, section, activePage: 0,
   location: hasLoc ? { source: "map", mapId: 1, eventId, page: 0 } : null,
-  auto: false, unseen: 0, unpicked: 0, repeat: [], locked: [],
+  auto: false, unseen: 0, unpicked: 0, repeat: [], locked: [], interactable: true, gains: [], story: false,
 });
 const checklist = (events: ChecklistEvent[]): MapChecklist =>
   ({ mapId: 1, mapName: "M", width: 1, height: 1, player: { x: 0, y: 0 }, events, remaining: events.length });
@@ -18,9 +18,9 @@ const group = (mapId: number | undefined, kind: MissingGroup["kind"], current: b
   ({ key: `${kind}:${mapId}`, kind, mapId, name: `맵${mapId}`, current, events, choiceCount: 0, pageCount: 0, reachableEvents: 0 });
 
 describe("nowItems", () => {
-  it("takes now then repeat, only openable, up to limit", () => {
-    const c = checklist([ev(1, "repeat"), ev(2, "now"), ev(3, "now", false), ev(4, "locked"), ev(5, "done"), ev(6, "now")]);
-    expect(nowItems(c).map((e) => e.eventId)).toEqual([2, 6, 1]);
+  it("takes now, item then repeat, only openable, up to limit", () => {
+    const c = checklist([ev(1, "repeat"), ev(2, "now"), ev(3, "now", false), ev(4, "locked"), ev(5, "done"), ev(6, "now"), ev(7, "talk"), ev(8, "item")]);
+    expect(nowItems(c).map((e) => e.eventId)).toEqual([2, 6, 8, 1]);
     expect(nowItems(c, 2).map((e) => e.eventId)).toEqual([2, 6]);
     expect(nowItems(null)).toEqual([]);
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import type { EventPage, MapData } from "@/core/types";
-import { blockersFor, currentEvents, pagesKey, targetOf } from "./mapEvents";
+import { blockersFor, currentEvents, mapMarkers, pagesKey, spriteEffect, targetOf } from "./mapEvents";
 
 const page = (o: Partial<EventPage> = {}): EventPage => ({ conditions: {} as EventPage["conditions"], trigger: 0, list: [], ...o });
 const map: MapData = {
@@ -31,5 +31,33 @@ describe("mapEvents", () => {
     expect(targetOf(map, ev)).toEqual({ x: 3, y: 3, priorityType: 1, trigger: 2, through: false });
     const locked = { eventId: 1, x: 1, y: 1, activePage: -1, locked: [{ page: 1 }] } as unknown as ChecklistEvent;
     expect(targetOf(map, locked).priorityType).toBe(0);
+  });
+});
+
+describe("mapMarkers", () => {
+  const e = (eventId: number, section: ChecklistEvent["section"], story = false) => ({ eventId, section, story }) as ChecklistEvent;
+  const listed = [e(1, "now"), e(2, "item"), e(3, "repeat"), e(4, "talk"), e(5, "locked"), e(6, "locked", true), e(7, "done")];
+  it("draws actionable ones; locked only when asked; never story or done", () => {
+    expect(mapMarkers(listed, false).map((x) => x.eventId)).toEqual([1, 2, 3, 4]);
+    expect(mapMarkers(listed, true).map((x) => x.eventId)).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe("spriteEffect", () => {
+  const route = (...list: [number, number][]) => ({ list: [...list.map(([code, v]) => ({ code, indent: 0, parameters: [v] })), { code: 0, indent: 0, parameters: [] }] });
+  const cmd = (code: number, parameters: unknown[]) => ({ code, indent: 0, parameters });
+  it("defaults", () => expect(spriteEffect(page(), 1)).toEqual({ opacity: 255, blendMode: 0 }));
+  it("reads the page move route", () => {
+    expect(spriteEffect(page({ moveRoute: route([42, 128], [43, 1]) }), 1)).toEqual({ opacity: 128, blendMode: 1 });
+  });
+  it("reads set-move-route on this event, later wins; ignores the player and other events", () => {
+    const list = [
+      cmd(205, [0, route([43, 3])]),
+      cmd(205, [-1, route([42, 10])]),
+      cmd(205, [2, route([42, 20])]),
+      cmd(205, [1, route([42, 200], [43, 2])]),
+    ];
+    expect(spriteEffect(page({ moveRoute: route([43, 1]), list }), 1)).toEqual({ opacity: 200, blendMode: 2 });
+    expect(spriteEffect(page({ list: [cmd(205, [0, route([43, 3])])] }), 1)).toEqual({ opacity: 255, blendMode: 3 });
   });
 });
