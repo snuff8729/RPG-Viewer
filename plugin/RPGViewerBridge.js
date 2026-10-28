@@ -40,7 +40,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.10.0",
+    VERSION: "1.10.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -128,7 +128,7 @@
   // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
   var capturePictures = false;
   var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
-  var lastPicsNames = null;   // names of that snapshot (1.10.0 screen watch: images appearing / disappearing)
+  var lastPicsSet = null;     // set signature of that snapshot (1.10.1 screen records: visible images, coarse places)
   var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
   // 1.7.0: a message record waits in the buffer (unserialized) until its text starts drawing, then takes the
   // snapshot of what is actually on screen; flushes write only up to it (at most PICS_HOLD_MS, then snapshot now).
@@ -459,7 +459,7 @@
     run = newRun;
     branch = meta.nextBranch++;
     lastChoices = null;
-    lastPicsKey = null; lastPicsNames = null;
+    lastPicsKey = null; lastPicsSet = null; screenSettle = null;
     battleLog = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
@@ -475,7 +475,7 @@
     run = r;
     branch = b;
     lastChoices = null;
-    lastPicsKey = null; lastPicsNames = null;
+    lastPicsKey = null; lastPicsSet = null; screenSettle = null;
     battleLog = null;
     deferredNewGame = false;
   }
@@ -712,7 +712,7 @@
     if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
     if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
     var cap = c.capturePictures === true;
-    if (cap !== capturePictures) { lastPicsKey = null; lastPicsNames = null; } // turned on again: the next snapshot is written in full
+    if (cap !== capturePictures) { lastPicsKey = null; lastPicsSet = null; screenSettle = null; } // turned on again: the next snapshot is written in full
     capturePictures = cap;
     captureNotices = c.captureNotices === true;
     noticeExtra = noticePaths(c.noticeHooks);
@@ -1266,26 +1266,42 @@
     var key = JSON.stringify(pics);
     if (key === lastPicsKey) return { picsSame: true };
     lastPicsKey = key;
-    lastPicsNames = picsNames(pics);
+    lastPicsSet = picsSet(pics);
     return { pics: pics };
   }
-  function picsNames(pics) {
-    var out = [];
-    for (var i = 0; i < pics.length; i++) out.push(pics[i][1]);
-    return out.join("\n");
+  // 1.10.1 change signature of a snapshot: only the SET of visible images (opacity > 10% of 255), each as
+  // name + 64 px position bucket. Opacity, tone, scale and small moves alone never change it.
+  var SCREEN_VISIBLE_OP = 25.5, SCREEN_POS_BUCKET = 64;
+  function picVisible(e) { return e[7] > SCREEN_VISIBLE_OP; }
+  function picSetPart(e) {
+    return e[1] + "|" + Math.round(e[3] / SCREEN_POS_BUCKET) + "|" + Math.round(e[4] / SCREEN_POS_BUCKET);
+  }
+  function picsSet(pics) {
+    var parts = [];
+    for (var i = 0; i < pics.length; i++) if (picVisible(pics[i])) parts.push(picSetPart(pics[i]));
+    parts.sort();
+    return parts.join("\n");
   }
 
-  // ---------------------------------------------------------------- screen snapshots between records (1.10.0)
+  // ---------------------------------------------------------------- screen snapshots between records (1.10.0 / 1.10.1)
   // Images other plugins show briefly (battle cut-ins) appear and vanish between messages. Event-driven: picture
   // loads (ImageManager.loadPicture & co, and when their bitmap becomes ready), plugin commands, battle actions /
   // log lines, picture commands and message starts mark the screen dirty; after the next scene update the drawn
-  // pictures are read and, when they differ from the last snapshot written, recorded as { type: "screen", scene, pics }.
-  // For SCREEN_WATCH_MS after a dirty frame the screen is re-read every SCREEN_WATCH_GAP_MS and recorded when images
-  // appear / disappear (names). A slow poll (SCREEN_POLL_MS) records anything else once it stayed the same for two
-  // checks. Never while a message waits for its own snapshot; at most SCREEN_RATE_MAX per second.
+  // pictures are read. For SCREEN_WATCH_MS after a dirty frame the screen is re-read every SCREEN_WATCH_GAP_MS, and a
+  // slow poll (SCREEN_POLL_MS) re-reads it anyway.
+  // 1.10.1: a record is written only when the SET of visible images changed (picsSet: name + 64 px bucket, opacity
+  // > 10%) — fades, tone, scale animation and small moves alone never make one. Once the set changed, it waits until
+  // the screen settles (no set change and no opacity change > 10% for SCREEN_SETTLE_MS, at most SCREEN_SETTLE_MAX_MS)
+  // and records the settled visible images (a fade-in with the highest opacity seen while settling). A fading-out
+  // image is recorded as gone once it drops to 10% or less. A record before the screen settled (max wait) keeps at
+  // least SCREEN_MIN_GAP_MS from the one before. Never while a message waits for its own snapshot; at most
+  // SCREEN_RATE_MAX per second. Written as { type: "screen", scene, pics }.
   var SCREEN_RATE_MAX = 8, SCREEN_RATE_MS = 1000, SCREEN_WATCH_MS = 600, SCREEN_WATCH_GAP_MS = 100, SCREEN_POLL_MS = 1000;
+  var SCREEN_SETTLE_MS = 150, SCREEN_SETTLE_MAX_MS = 600, SCREEN_SETTLE_GAP_MS = 50, SCREEN_MIN_GAP_MS = 250;
   var screenDirty = false;
-  var screenWatch = { until: -Infinity, lastT: -Infinity, pollT: -Infinity, pollSig: null, pollN: 0, times: [] };
+  var screenWatch = { until: -Infinity, lastT: -Infinity, pollT: -Infinity, writeT: -Infinity, times: [] };
+  // set change waiting to settle: { set, start, since, ops: { part: opacity at the last change }, max: { part: highest } }
+  var screenSettle = null;
   function markScreenDirty() { if (capturePictures) screenDirty = true; }
   function watchBitmap(b) {
     if (!capturePictures) return;
@@ -1296,54 +1312,73 @@
       }
     } catch (e) { reportError(e); }
   }
-  function pollKey(snap) {
-    var parts = [];
-    for (var i = 0; i < snap.pics.length; i++) {
-      var e = snap.pics[i];
-      parts.push(e[1] + "|" + Math.round(e[3] / 8) + "|" + Math.round(e[4] / 8) + "|" + Math.floor(e[7] / 32));
+  // part (picSetPart) -> opacity of the visible images
+  function visibleOps(pics) {
+    var o = Object.create(null);
+    for (var i = 0; i < pics.length; i++) {
+      var e = pics[i];
+      if (!picVisible(e)) continue;
+      var k = picSetPart(e);
+      if (!(o[k] >= e[7])) o[k] = e[7];
     }
-    return parts.join("\n") + "#" + snap.pending;
+    return o;
   }
-  // true when nothing is left to do (written, or nothing new); false = try again on a later frame
-  function writeScreen(snap, t) {
-    if (heldMsg) return false;
-    var key = JSON.stringify(snap.pics);
-    if (key === lastPicsKey) return true;
-    if (lastPicsKey === null && snap.pics.length === 0) return true; // nothing on screen, nothing known yet
+  // One read of a loaded screen: start / follow the settling of a set change and write it once settled.
+  function screenStep(snap, t) {
+    var set = picsSet(snap.pics);
+    if (heldMsg || set === lastPicsSet || (lastPicsSet === null && set === "")) { screenSettle = null; return; }
+    var ops = visibleOps(snap.pics), st = screenSettle, k;
+    if (!st || st.set !== set) {
+      var max = Object.create(null);
+      for (k in ops) max[k] = st && st.max[k] > ops[k] ? st.max[k] : ops[k];
+      st = screenSettle = { set: set, start: st ? st.start : t, since: t, ops: ops, max: max };
+    } else {
+      var moved = false;
+      for (k in ops) {
+        if (!(Math.abs(ops[k] - st.ops[k]) <= SCREEN_VISIBLE_OP)) moved = true;
+        if (!(st.max[k] >= ops[k])) st.max[k] = ops[k];
+      }
+      if (moved) { st.since = t; st.ops = ops; }
+    }
+    var settled = t - st.since >= SCREEN_SETTLE_MS;
+    if (!settled && (t - st.start < SCREEN_SETTLE_MAX_MS || t - screenWatch.writeT < SCREEN_MIN_GAP_MS)) return;
     var times = screenWatch.times;
     while (times.length && t - times[0] >= SCREEN_RATE_MS) times.shift();
-    if (times.length >= SCREEN_RATE_MAX) return false;
+    if (times.length >= SCREEN_RATE_MAX) return;
+    var out = [];
+    for (var i = 0; i < snap.pics.length; i++) {
+      var e = snap.pics[i];
+      if (!picVisible(e)) continue;
+      var c = e.slice();
+      var m = st.max[picSetPart(e)];
+      if (m > c[7]) c[7] = m;
+      out.push(c);
+    }
     times.push(t);
-    lastPicsKey = key;
-    lastPicsNames = picsNames(snap.pics);
-    emit("screen", { scene: inBattleNow() ? "battle" : "map", pics: snap.pics });
-    return true;
+    screenWatch.writeT = t;
+    screenSettle = null;
+    lastPicsKey = JSON.stringify(out);
+    lastPicsSet = set;
+    emit("screen", { scene: inBattleNow() ? "battle" : "map", pics: out });
   }
   // After each real frame's scene update (what is about to be rendered).
   function screenFrame() {
-    if (!capturePictures || run === null) { screenDirty = false; return; }
+    if (!capturePictures || run === null) { screenDirty = false; screenSettle = null; return; }
     var t = now();
     var dirty = screenDirty;
     var watching = t < screenWatch.until && t - screenWatch.lastT >= SCREEN_WATCH_GAP_MS;
+    var settling = screenSettle !== null && t - screenWatch.lastT >= SCREEN_SETTLE_GAP_MS;
     var polling = t - screenWatch.pollT >= SCREEN_POLL_MS;
-    if (!dirty && !watching && !polling) return;
+    if (!dirty && !watching && !settling && !polling) return;
     var sc = G.SceneManager && G.SceneManager._scene;
     var snap = sc && sc._spriteset ? screenNow() : null;
-    if (!snap) { screenDirty = false; return; }
+    screenDirty = false;
+    if (!snap) { screenSettle = null; return; }
     screenWatch.lastT = t;
-    if (dirty) {
-      screenWatch.until = t + SCREEN_WATCH_MS;
-      // still loading: its load listener marks the screen dirty again
-      if (snap.pending > 0 || writeScreen(snap, t)) screenDirty = false;
-    } else if (watching && snap.pending === 0 && picsNames(snap.pics) !== lastPicsNames) {
-      writeScreen(snap, t);
-    }
-    if (polling) {
-      screenWatch.pollT = t;
-      var pk = pollKey(snap);
-      if (pk !== screenWatch.pollSig) { screenWatch.pollSig = pk; screenWatch.pollN = 1; }
-      else if (++screenWatch.pollN === 2 && !dirty) writeScreen(snap, t);
-    }
+    if (polling) screenWatch.pollT = t;
+    if (dirty) screenWatch.until = t + SCREEN_WATCH_MS;
+    if (snap.pending > 0) return; // still loading: its load listener marks the screen dirty again
+    screenStep(snap, t);
   }
 
   // ---------------------------------------------------------------- battle log (1.8.0)

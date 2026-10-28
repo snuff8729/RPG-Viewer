@@ -32,7 +32,7 @@ const line = (seq: number, text: string): LogRecord => ({ ...base, seq, type: "b
 
 // bridge 1.10.0 entries of a CallCutin-like cut-in (world positions, "sprite")
 const CUT = [1000, "actor01_cutin_A_0001", 0, 240, 256, 100, 100, 255, 0, [10, 0, -20, 0], 0, 300, 400, "sprite"];
-const ORGAN = [1001, "organ/A_b", 0, 270, 296, 100, 100, 128, 0, 0, 0, 50, 60, "sprite"];
+const ORGAN = [1001, "organ/A_b", 0, 270, 296, 100, 100, 128, 0, 0, 0, 200, 300, "sprite"];
 const FULL = [1000, "cutin_full", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624, "sprite"];
 const ctx: PictureContext = { screen: { width: 816, height: 624 } };
 
@@ -97,6 +97,52 @@ describe("screen records in the reader (1.10.0)", () => {
     const b = out[1] as Extract<ReaderItem, { kind: "battle" }>;
     expect(b.items.map(i => i.kind)).toEqual(["battlelog", "screen", "battlelog"]);
     expect(b.logLines).toBe(2);
+  });
+});
+
+describe("repeated screen records collapse (1.10.1)", () => {
+  // the user's game: 1024×768, three pictures that stay, the ticker plugin's 624×24 bar fading (bridge 1.10.0 log)
+  const big: PictureContext = { screen: { width: 1024, height: 768 } };
+  const PICS = [
+    [1, "bg", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768],
+    [2, "stand_a", 0, 100, 0, 100, 100, 255, 0, 0, 0, 400, 600],
+    [3, "stand_b", 0, 500, 0, 100, 100, 255, 0, 0, 0, 400, 600],
+  ];
+  const tick = (op: number) => [1000, "TickerTest", 0, 10, 60, 100, 100, op, 0, 0, 0, 624, 24, "sprite"];
+  const FADE = [80, 73.33, 50, 46.67, 40, 13.33, 6.67];
+
+  it("small plugin sprites (< 5% of the screen) and small pictures (< 2%) default to screen decoration", () => {
+    const P = (e: unknown[]) => parsePic(e)!;
+    expect(roleOf(P(tick(80)), big)).toBe("hud");
+    expect(roleOf(P(tick(80)), { ...big, spriteRoles: { TickerTest: "stand" } })).toBe("stand");
+    expect(roleOf(P([1000, "badge", 0, 0, 0, 100, 100, 255, 0, 0, 0, 200, 150, "sprite"]), big)).toBe("hud"); // 3.8%
+    expect(roleOf(P([5, "badge", 0, 0, 0, 100, 100, 255, 0, 0, 0, 200, 150]), big)).toBe("stand"); // a picture: 2% rule
+    expect(roleOf(P([5, "icon", 0, 0, 0, 100, 100, 255, 0, 0, 0, 100, 100]), big)).toBe("hud"); // 1.3%
+    expect(roleOf(P([5, "icon", 0, 0, 0, 100, 100, 255, 0, 0, 0, 100, 100]), { ...big, roles: { 5: "stand" } })).toBe("stand");
+  });
+
+  it("existing 1.10.0 fade records of the ticker add no items", () => {
+    const recs = [bs(1), msg(2, 0, { pics: [...PICS, tick(80)] }), ...FADE.map((op, i) => screen(3 + i, [...PICS, tick(op)])),
+      screen(10, PICS), msg(11, 1, { picsSame: true })];
+    const out = reader(recs, big);
+    expect(out.map(i => i.kind)).toEqual(["chapter", "message", "message"]);
+  });
+
+  it("a fading cut-in shows once when it appears and once more when it is gone, not per fade step", () => {
+    const CUTIN = (op: number) => [1001, "cutin", 0, 300, 200, 100, 100, op, 0, 0, 0, 500, 400, "sprite"];
+    const STAND = [2, "stand_a", 0, 100, 0, 100, 100, 255, 0, 0, 0, 400, 600];
+    const ops = [40, 120, 200, 255, 255, 200, 120, 40, 20];
+    const recs = [bs(1), msg(2, 0, { pics: [STAND] }), ...ops.map((op, i) => screen(3 + i, [STAND, CUTIN(op)])), screen(12, [STAND]),
+      msg(13, 1, { picsSame: true })];
+    const out = reader(recs, big);
+    expect(out.map(i => i.kind)).toEqual(["chapter", "message", "screen", "screen", "message"]);
+    const first = out[2] as Extract<ReaderItem, { kind: "screen" }>;
+    expect(first.screen.pictures.map(p => p.name)).toEqual(["stand_a", "cutin"]);
+    expect(first.screen.pictures[1].opacity).toBe(255); // the fade-in's fullest step
+    const gone = out[3] as Extract<ReaderItem, { kind: "screen" }>;
+    expect(gone.seq).toBe(11); // the cut-in dropped to 10% or less
+    expect(gone.screen.pictures.map(p => p.name)).toEqual(["stand_a"]);
+    expect(out[4]).not.toHaveProperty("screen");
   });
 });
 
