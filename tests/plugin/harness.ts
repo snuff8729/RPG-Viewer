@@ -23,6 +23,14 @@ function enoent(p: string): Error {
 export class MemFs {
   files = new Map<string, string>();
   dirs = new Set<string>([BASE_DIR]);
+  mtimes = new Map<string, number>();
+  private writes = 0;
+  statSync(p: string): { size: number; mtimeMs?: number } {
+    const v = this.files.get(p);
+    if (v === undefined) throw enoent(p);
+    return { size: Buffer.byteLength(v), mtimeMs: this.mtimes.get(p) ?? 0 };
+  }
+  private touch(p: string): void { this.mtimes.set(p, ++this.writes); }
   existsSync(p: string): boolean { return this.files.has(p) || this.dirs.has(p); }
   mkdirSync(p: string): void { this.dirs.add(p); }
   readFileSync(p: string): string {
@@ -30,14 +38,15 @@ export class MemFs {
     if (v === undefined) throw enoent(p);
     return v;
   }
-  writeFileSync(p: string, data: string): void { this.needDir(p); this.files.set(p, String(data)); }
-  appendFileSync(p: string, data: string): void { this.needDir(p); this.files.set(p, (this.files.get(p) ?? "") + String(data)); }
+  writeFileSync(p: string, data: string): void { this.needDir(p); this.files.set(p, String(data)); this.touch(p); }
+  appendFileSync(p: string, data: string): void { this.needDir(p); this.files.set(p, (this.files.get(p) ?? "") + String(data)); this.touch(p); }
   renameSync(from: string, to: string): void {
     const v = this.files.get(from);
     if (v === undefined) throw enoent(from);
     this.needDir(to);
     this.files.delete(from);
     this.files.set(to, v);
+    this.touch(to);
   }
   unlinkSync(p: string): void { if (!this.files.delete(p)) throw enoent(p); }
   private needDir(p: string): void { if (!this.dirs.has(path.posix.dirname(p))) throw enoent(p); }
@@ -79,6 +88,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Message.prototype.setChoices = function (c: string[]) { this._choices = c; };
   Game_Message.prototype.setChoiceCallback = function (cb: any) { this._choiceCallback = cb; };
   Game_Message.prototype.isChoice = function () { return this._choices.length > 0; };
+  Game_Message.prototype.isNumberInput = function () { return !!this._numInput; };
+  Game_Message.prototype.isItemChoice = function () { return false; };
   Game_Message.prototype.onChoice = function (n: number) {
     if (this._choiceCallback) { this._choiceCallback(n); this._choiceCallback = null; }
     this._choices = [];
@@ -104,7 +115,16 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     this._items = {}; this._weapons = {}; this._armors = {}; this._gold = 0; this._actors = []; this._inBattle = false;
   }
   Game_Party.prototype.inBattle = function () { return this._inBattle; };
-  function Game_Troop(this: any) { this._troopId = 0; }
+  Game_Party.prototype.aliveMembers = function () { return (this._battlers ?? []).filter((b: any) => b.isAlive()); };
+  function Game_Troop(this: any) { this._troopId = 0; this._enemies = []; }
+  Game_Troop.prototype.aliveMembers = function () { return this._enemies.filter((b: any) => b.isAlive()); };
+  // ---- battlers (death state 1)
+  function Game_Battler(this: any) { this._states = []; this._collapsed = false; }
+  Game_Battler.prototype.deathStateId = function () { return 1; };
+  Game_Battler.prototype.addNewState = function (id: number) { this._states.push(id); };
+  Game_Battler.prototype.refresh = function () {};
+  Game_Battler.prototype.isAlive = function () { return !this._states.includes(1); };
+  Game_Battler.prototype.performCollapse = function () { this._collapsed = true; };
   Game_Troop.prototype.troop = function () { return g.$dataTroops[this._troopId]; };
   function Game_Player(this: any) { this.x = 0; this.y = 0; this._transferring = false; this._newMapId = 0; this._newX = 0; this._newY = 0; }
   Game_Player.prototype.isTransferring = function () { return this._transferring; };
@@ -203,10 +223,56 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Scene_Boot(this: any) {}
   function Scene_Title(this: any) {}
   function Scene_Map(this: any) {}
-  const SceneManager = { _scene: null as any };
+  function Scene_Battle(this: any) {}
+  // Input: keyMapper like the engine's default (subset), one triggered button per frame.
+  const Input = {
+    keyMapper: { 9: "tab", 13: "ok", 16: "shift", 27: "escape", 32: "ok", 37: "left", 38: "up", 39: "right", 40: "down", 90: "ok", 88: "escape" } as Record<number, string>,
+    _triggered: null as string | null,
+    updates: 0,
+    isTriggered(name: string) { return this._triggered === name; },
+    update() { this._triggered = null; this.updates++; },
+    press(keyCode: number) { this._triggered = this.keyMapper[keyCode] ?? null; },
+  };
+  const SceneManager = {
+    _scene: null as any, _sceneStarted: true, _nextScene: null as any, _exiting: false,
+    sceneUpdates: 0,
+    onSceneUpdate: null as null | (() => void),
+    updateInputData() { Input.update(); },
+    updateScene() { this.sceneUpdates++; if (this.onSceneUpdate) this.onSceneUpdate(); },
+  };
+  // Window_Message: the flag/pause/input surface the plugin hooks (shared names in MV and MZ).
+  function Window_Message(this: any) { this.pause = false; this._okPressed = false; this.advanced = 0; this.clearFlags(); }
+  Window_Message.prototype.clearFlags = function () { this._showFast = false; this._lineShowFast = false; this._pauseSkip = false; };
+  Window_Message.prototype.newPage = function () { this.clearFlags(); };
+  Window_Message.prototype.startMessage = function () { this.newPage(); };
+  Window_Message.prototype.isTriggered = function () { return this._okPressed; };
+  Window_Message.prototype.updateInput = function () {
+    if (this.pause) {
+      if (this.isTriggered()) { this.pause = false; this.advanced++; }
+      return true;
+    }
+    return false;
+  };
   const BattleManager = {
-    setup(troopId: number) { g.$gameTroop._troopId = troopId; g.$gameParty._inBattle = true; },
-    endBattle(_result: number) { g.$gameParty._inBattle = false; },
+    _phase: null as string | null, _canEscape: true, _escapeRatio: 0.5, _escaped: false,
+    calls: [] as string[],
+    setup(troopId: number) { g.$gameTroop._troopId = troopId; g.$gameParty._inBattle = true; this._phase = "init"; this._escaped = false; },
+    endBattle(_result: number) { g.$gameParty._inBattle = false; this._phase = "battleEnd"; },
+    canEscape() { return this._canEscape; },
+    checkBattleEnd() {
+      if (g.$gameParty.aliveMembers().length === 0) { this.processDefeat(); return true; }
+      if (g.$gameTroop.aliveMembers().length === 0) { this.processVictory(); return true; }
+      return false;
+    },
+    processVictory() { this.calls.push("victory"); this.endBattle(0); },
+    processDefeat() { this.calls.push("defeat:" + g.$gameParty.aliveMembers().length); this.endBattle(2); },
+    processEscape() {
+      this.calls.push("escape:" + this._escapeRatio);
+      const ok = Math.random() < this._escapeRatio;
+      if (ok) { this._escaped = true; this.processAbort(); }
+      return ok;
+    },
+    processAbort() { this.calls.push("abort"); this.endBattle(1); },
   };
   const DataManager = {
     createGameObjects() {
@@ -250,7 +316,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
-    Game_Event, Game_Map, Game_Interpreter, Scene_Boot, Scene_Title, Scene_Map, SceneManager, BattleManager, DataManager,
+    Game_Event, Game_Map, Game_Interpreter, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
+    SceneManager, BattleManager, DataManager, Input, Window_Message,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
