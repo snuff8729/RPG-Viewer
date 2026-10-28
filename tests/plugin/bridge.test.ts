@@ -444,7 +444,7 @@ describe("RPGViewerBridge", () => {
     h = newGame();
     h.g.$gameVariables.setValue(1, 1);
     h.readLog();
-    expect(JSON.parse(h.fs.readFileSync(META_PATH))).toEqual({ nextRun: 2, nextBranch: 2, nextSeq: 3, lastStory: { "1": 0 } });
+    expect(JSON.parse(h.fs.readFileSync(META_PATH))).toEqual({ nextRun: 2, nextBranch: 2, nextSeq: 3, lastStory: { "1": { run: 1, seq: 0 } } });
     const fs = h.fs;
     h = newGame("MZ", fs);
     const log = h.readLog();
@@ -595,7 +595,7 @@ describe("RPGViewerBridge", () => {
       await h.g.DataManager.saveGame(1);
       const stamp = h.saves[1];
       h.bridge._tick();
-      expect(JSON.parse(h.fs.readFileSync(META_PATH)).lastStory).toEqual({ "1": 2 });
+      expect(JSON.parse(h.fs.readFileSync(META_PATH)).lastStory).toEqual({ "1": { run: 1, seq: 2 } });
       const fs = h.fs;
       h = newGame("MZ", fs); // restart + a new game (branch 2) before continuing
       h.saves[1] = stamp;
@@ -619,6 +619,48 @@ describe("RPGViewerBridge", () => {
       expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 1);
       h.g.DataManager.extractSaveContents({ rpgViewer: { run: 1, branch: 77, seq: 5 } }); // never seen: safe default
       expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 2);
+    });
+
+    it("continues the branch when run and seq match (no branchStart)", () => {
+      h = newGame();
+      say(h);
+      h.bridge._flushNow();
+      const nb = h.readLog().filter((r) => r.type === "branchStart").length;
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 1, branch: 1, seq: 5 } });
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb);
+    });
+
+    it("starts a new branch when the branch id exists with a different run", () => {
+      h = newGame();
+      say(h);
+      h.bridge._flushNow();
+      const nb = h.readLog().filter((r) => r.type === "branchStart").length;
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 9, branch: 1, seq: 5 } });
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 1);
+    });
+
+    it("treats a legacy numeric lastStory entry by the seq rule only", () => {
+      h = newGame();
+      const fs = h.fs;
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 2, nextBranch: 2, nextSeq: 10, lastStory: { "1": 2 } }));
+      fs.files.set(LOG_PATH, "");
+      h = newGame("MZ", fs);
+      const nb = h.readLog().filter((r) => r.type === "branchStart").length;
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 42, branch: 1, seq: 5 } }); // run unknown: 2 <= 5 resumes
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb);
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 42, branch: 1, seq: 1 } }); // 2 > 1: new branch
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 1);
+    });
+
+    it("rebuilds lastStory with run from the log tail", () => {
+      h = newGame();
+      say(h);
+      const fs = h.fs;
+      h.bridge._flushNow();
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+      h = newGame("MZ", fs);
+      h.bridge._tick();
+      expect(JSON.parse(h.fs.readFileSync(META_PATH)).lastStory["1"]).toEqual({ run: 1, seq: 2 });
     });
 
     it("keeps at most 200 branches in lastStory", () => {
