@@ -84,6 +84,7 @@ describe("howTo", () => {
     if (r.end.kind !== "fork") return;
     expect(r.end.candidates.map(s => s.where)).toEqual(["숲 › E3 › p1", "숲 › E2 › p1"]);
     expect(r.end.more).toBe(0);
+    expect(r.end.req.atom).toEqual({ kind: "switch", id: 5 });   // 깊은 갈림길도 그 지점의 요구를 알려 준다
 
     const many = game([[2, map(Array.from({ length: 7 }, (_, i) => ev(i + 1, [page([swOn(5)], sw1(1))])))]]);
     const m = howTo(swReq(5), many, live());

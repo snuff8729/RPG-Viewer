@@ -19,7 +19,8 @@ export interface HowToStep {
 }
 export type HowToEnd =
   | { kind: "done" }
-  | { kind: "fork"; candidates: HowToStep[]; more: number }
+  /** req: 갈림길에서 채워야 하는 요구. 후보를 고르면 howTo(req, …, { from: 후보.writer })로 이어 본다 */
+  | { kind: "fork"; req: Req; candidates: HowToStep[]; more: number }
   | { kind: "opaque"; reason: "plugin" | "script" | "noWriter" }
   | { kind: "depthLimit" }
   | { kind: "cycle" };
@@ -249,7 +250,7 @@ function solve(run: Run, req: Req, ancestors: Set<string>): HowToEnd {
           const s = stepOf(c, r.w, req);
           if (s) candidates.push(s);
         }
-        return { kind: "fork", candidates, more: Math.max(0, traceable.length - candidates.length) };
+        return { kind: "fork", req, candidates, more: Math.max(0, traceable.length - candidates.length) };
       }
     }
   }
