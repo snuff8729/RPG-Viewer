@@ -5,8 +5,10 @@ import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import { ChecklistCard } from "./ChecklistCard";
 import { MapGrid } from "./MapGrid";
+import { sectionStyle } from "./sectionStyle";
 import { useMapChecklist } from "./useMapChecklist";
 
 const HIGHLIGHT_MS = 1500;
@@ -18,13 +20,16 @@ const SECTIONS: [Exclude<Section, "done">, string][] = [
 
 type CardRefs = Map<number, HTMLDivElement>;
 
-function Cards({ events, refs, highlight }: { events: ChecklistEvent[]; refs: CardRefs; highlight: number | null }) {
+function Cards({ events, numbers, refs, highlight }: {
+  events: ChecklistEvent[]; numbers: Map<number, number>; refs: CardRefs; highlight: number | null;
+}) {
   return (
     <div className="space-y-3">
       {events.map((ev) => (
         <ChecklistCard
           key={ev.eventId}
           ev={ev}
+          number={numbers.get(ev.eventId)}
           highlighted={highlight === ev.eventId}
           ref={(el) => { if (el) refs.set(ev.eventId, el); else refs.delete(ev.eventId); }}
         />
@@ -64,6 +69,9 @@ export function HereView() {
 
   const bySection = (s: Section) => checklist.events.filter((e) => e.section === s);
   const done = bySection("done");
+  // 목록 순서(지금 → 반복 → 잠김)대로 1..n 번호. 맵 점과 카드 제목이 같이 쓴다
+  const numbers = new Map<number, number>();
+  for (const [s] of SECTIONS) for (const e of bySection(s)) numbers.set(e.eventId, numbers.size + 1);
   const onPick = (id: number) => {
     if (done.some((e) => e.eventId === id)) setDoneOpen(true);
     setHighlight(id);
@@ -77,15 +85,19 @@ export function HereView() {
         <span className="text-sm text-muted-foreground">내 위치 ({live.x}, {live.y})</span>
         <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>할 것 {checklist.remaining}개 남음</Badge>
       </div>
-      <MapGrid width={checklist.width} height={checklist.height} events={checklist.events} player={{ x: live.x, y: live.y }} onPick={onPick} />
+      <MapGrid width={checklist.width} height={checklist.height} events={checklist.events} player={{ x: live.x, y: live.y }} numbers={numbers} onPick={onPick} />
       {checklist.events.length === 0 && <p className="text-sm text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}
       {SECTIONS.map(([s, label]) => {
         const evs = bySection(s);
         if (evs.length === 0) return null;
+        const st = sectionStyle(s);
         return (
           <section key={s} className="space-y-2">
-            <h3 className="text-sm font-semibold">{label} <span className="font-normal text-muted-foreground">({evs.length})</span></h3>
-            <Cards events={evs} refs={refs} highlight={highlight} />
+            <h3 className={cn("flex items-center gap-1.5 text-sm font-semibold", st.text)}>
+              <st.Icon className="size-4 shrink-0" aria-hidden />
+              {label} <span className="font-normal text-muted-foreground">({evs.length})</span>
+            </h3>
+            <Cards events={evs} numbers={numbers} refs={refs} highlight={highlight} />
           </section>
         );
       })}
@@ -96,7 +108,7 @@ export function HereView() {
             다 봤어요 ({done.length})
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">
-            <Cards events={done} refs={refs} highlight={highlight} />
+            <Cards events={done} numbers={numbers} refs={refs} highlight={highlight} />
           </CollapsibleContent>
         </Collapsible>
       )}

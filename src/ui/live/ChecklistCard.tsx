@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { HowToView } from "./HowToView";
+import { sectionStyle } from "./sectionStyle";
 
 /** `새 대화 N · 선택지 N` (0인 쪽 생략) */
 function newText(unseen: number, unpicked: number): string {
@@ -53,17 +54,22 @@ function Locked({ lp }: { lp: LockedPage }) {
   );
 }
 
-export function ChecklistCard({ ev, highlighted, ref }: { ev: ChecklistEvent; highlighted: boolean; ref?: Ref<HTMLDivElement> }) {
+export function ChecklistCard({ ev, number, highlighted, ref }: {
+  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 이벤트는 없음 */ number?: number; highlighted: boolean; ref?: Ref<HTMLDivElement>;
+}) {
+  const st = sectionStyle(ev.section);
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
   return (
-    <Card ref={ref} className={cn("gap-3 py-4 transition-shadow", highlighted && "ring-2 ring-ring")}>
+    <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, highlighted && "ring-2 ring-ring")}>
       <CardHeader className="px-4">
         <CardTitle className="flex flex-wrap items-center gap-2">
-          <span>{ev.title}</span>
+          <st.Icon className={cn("size-4 shrink-0", st.text)} aria-hidden />
+          <span>{number != null ? `${number}. ` : ""}{ev.title}</span>
+          <Badge variant="outline" className={cn(st.text, st.border)}>{st.label}</Badge>
           {ev.unseen > 0 && <Badge>새 대화 {ev.unseen}</Badge>}
           {ev.unpicked > 0 && <Badge>선택지 {ev.unpicked}</Badge>}
-          {ev.repeat.length > 0 && <Badge variant="secondary">반복하면 달라짐</Badge>}
+          {ev.section !== "repeat" && ev.repeat.length > 0 && <Badge variant="secondary">반복하면 달라짐</Badge>}
           {ev.auto && <Badge variant="outline">자동</Badge>}
           {lockedPages > 0 && <Badge variant="outline">잠긴 내용 {lockedPages}</Badge>}
         </CardTitle>

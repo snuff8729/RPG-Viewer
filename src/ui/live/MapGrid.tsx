@@ -1,19 +1,8 @@
 import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
+import { sectionStyle } from "./sectionStyle";
 
-/** 구역별 점 색(테마 CSS 변수) */
-const DOT: Record<Section, string> = {
-  now: "fill-primary",
-  repeat: "fill-primary/60",
-  locked: "fill-muted-foreground",
-  done: "fill-border",
-};
-const LEGEND: [Section, string, string][] = [
-  ["now", "지금 할 수 있음", "bg-primary"],
-  ["repeat", "반복하면 달라짐", "bg-primary/60"],
-  ["locked", "잠김", "bg-muted-foreground"],
-  ["done", "다 봄", "bg-border"],
-];
+const LEGEND: Section[] = ["now", "repeat", "locked", "done"];
 const GRID_MAX = 60;
 
 function GridLines({ width, height }: { width: number; height: number }) {
@@ -24,8 +13,10 @@ function GridLines({ width, height }: { width: number; height: number }) {
 }
 
 /** 맵 크기만큼의 위치 그림: 이벤트 점(구역 색)과 플레이어 고리. 점을 누르면 onPick(eventId). */
-export function MapGrid({ width, height, events, player, onPick }: {
+export function MapGrid({ width, height, events, player, numbers, onPick }: {
   width: number; height: number; events: ChecklistEvent[]; player: { x: number; y: number };
+  /** eventId → 목록 번호. 번호가 있는 점에는 번호를 쓴다 */
+  numbers?: Map<number, number>;
   onPick: (eventId: number) => void;
 }) {
   if (!(width > 0 && height > 0)) return null;
@@ -42,13 +33,15 @@ export function MapGrid({ width, height, events, player, onPick }: {
         >
           <rect width={width} height={height} className="fill-muted" />
           {width <= GRID_MAX && height <= GRID_MAX && <GridLines width={width} height={height} />}
-          {events.map((ev) => (
+          {events.map((ev) => {
+            const n = numbers?.get(ev.eventId);
+            return (
+            <g key={ev.eventId}>
             <circle
-              key={ev.eventId}
               cx={ev.x + 0.5}
               cy={ev.y + 0.5}
-              r={r}
-              className={`${DOT[ev.section]} cursor-pointer stroke-background`}
+              r={n != null ? r * 1.5 : r}
+              className={`${sectionStyle(ev.section).fill} cursor-pointer stroke-background`}
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
               role="button"
@@ -59,7 +52,21 @@ export function MapGrid({ width, height, events, player, onPick }: {
             >
               <title>{ev.name ? `${ev.name} — ${ev.title}` : ev.title}</title>
             </circle>
-          ))}
+            {n != null && (
+              <text
+                x={ev.x + 0.5}
+                y={ev.y + 0.5}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={r * (n >= 10 ? 1.4 : 1.9)}
+                className="pointer-events-none fill-background font-semibold"
+              >
+                {n}
+              </text>
+            )}
+            </g>
+            );
+          })}
           <circle
             cx={player.x + 0.5}
             cy={player.y + 0.5}
@@ -72,9 +79,10 @@ export function MapGrid({ width, height, events, player, onPick }: {
           </circle>
         </svg>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {LEGEND.map(([k, label, bg]) => (
-            <span key={k} className="flex items-center gap-1"><span className={`size-2 rounded-full ${bg}`} />{label}</span>
-          ))}
+          {LEGEND.map((k) => {
+            const st = sectionStyle(k);
+            return <span key={k} className="flex items-center gap-1"><span className={`size-2 rounded-full ${st.bg}`} />{st.label}</span>;
+          })}
           <span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-foreground" />내 위치</span>
         </div>
       </CardContent>
