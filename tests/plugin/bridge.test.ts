@@ -721,6 +721,139 @@ describe("RPGViewerBridge", () => {
     });
   });
 
+  describe("plugin commands", () => {
+    const plugins = (log: any[]) => log.filter((r) => r.type === "plugin");
+    const runList = (hh: Harness, list: any[], eventId = 5, index = 0) => {
+      const interp = hh.g.$gameMap._interpreter;
+      interp.setup(list, eventId);
+      hh.runCommand(interp, index);
+      return interp;
+    };
+
+    it("records a 356 plugin command with src, cmd and trimmed text (MV)", () => {
+      h = newGame("MV");
+      const list = [cmd(0), cmd(356, ["  ShowExamine door 3  "]), cmd(0)];
+      h.addMapEvent(5, [[cmd(0)], list], 1);
+      const interp = runList(h, list, 5, 1);
+      expect(interp.pluginCalls).toBe(1); // original still ran
+      expect(plugins(h.readLog())).toEqual([{
+        v: 1, seq: 2, t: 1_000_000, run: 1, branch: 1, type: "plugin",
+        src: { source: "map", mapId: 1, eventId: 5, page: 1 }, cmd: 1, code: 356, text: "ShowExamine door 3",
+      }]);
+    });
+
+    it("caps 356 text at 500 characters", () => {
+      h = newGame("MV");
+      const list = [cmd(356, ["x".repeat(800)]), cmd(0)];
+      h.addMapEvent(5, [list]);
+      runList(h, list);
+      expect(plugins(h.readLog())[0].text).toHaveLength(500);
+    });
+
+    it("records a 357 plugin command as plugin, command and string args (MZ)", () => {
+      h = newGame("MZ");
+      const args = { text: "A note on the desk", id: 3, empty: "", n: "2" };
+      const list = [cmd(357, ["TextPlugin", "show", "Show text", args]), cmd(0)];
+      h.g.$dataCommonEvents[2] = { id: 2, trigger: 0, list };
+      const interp = h.newInterpreter();
+      interp.setup(list, 0);
+      h.runCommand(interp, 0);
+      expect(interp.pluginCalls).toBe(1);
+      expect(plugins(h.readLog())).toEqual([expect.objectContaining({
+        src: { source: "common", commonEventId: 2 }, cmd: 0, code: 357, text: "TextPlugin show A note on the desk 2",
+      })]);
+    });
+
+    it("caps 357 text at 500 characters", () => {
+      h = newGame("MZ");
+      const list = [cmd(357, ["P", "c", "", { a: "y".repeat(400), b: "z".repeat(400) }]), cmd(0)];
+      h.addMapEvent(5, [list]);
+      runList(h, list);
+      expect(plugins(h.readLog())[0].text).toHaveLength(500);
+    });
+
+    it("records under the innermost (common event) source when called from an event", () => {
+      h = newGame("MZ");
+      const ceList = [cmd(357, ["P", "c", "", {}]), cmd(0)];
+      h.g.$dataCommonEvents[1] = { id: 1, trigger: 0, list: ceList };
+      const list = [cmd(117, [1]), cmd(0)];
+      h.addMapEvent(2, [list]);
+      const interp = runList(h, list, 2);
+      h.runCommand(interp._childInterpreter, 0);
+      expect(plugins(h.readLog())).toEqual([
+        expect.objectContaining({ src: { source: "common", commonEventId: 1 }, cmd: 0, code: 357, text: "P c" }),
+      ]);
+    });
+
+    it("skips parallel map events and parallel common events (and their children)", () => {
+      h = newGame("MV");
+      const list = [cmd(356, ["Par"]), cmd(117, [1]), cmd(0)];
+      const ev = h.addMapEvent(4, [list]);
+      ev._trigger = 4;
+      ev._interpreter = h.newInterpreter();
+      ev._interpreter.setup(list, 4);
+      h.runCommand(ev._interpreter, 0);
+      const ceList = [cmd(356, ["ParCE"]), cmd(0)];
+      h.g.$dataCommonEvents[1] = { id: 1, trigger: 2, list: ceList };
+      h.runCommand(ev._interpreter, 1); // common event called by a parallel event
+      h.runCommand(ev._interpreter._childInterpreter, 0);
+      const ce = { _interpreter: h.newInterpreter() };
+      h.g.$gameMap._commonEvents = [ce];
+      ce._interpreter.setup(ceList, 0);
+      h.runCommand(ce._interpreter, 0);
+      expect(plugins(h.readLog())).toEqual([]);
+      // the same list run by the map interpreter (autorun / player-started) is recorded
+      runList(h, list, 4);
+      expect(plugins(h.readLog())).toEqual([expect.objectContaining({ cmd: 0, text: "Par" })]);
+    });
+
+    it("records a src+cmd once per interpreter run and once per 2 s", () => {
+      h = newGame("MV");
+      const list = [cmd(356, ["Look"]), cmd(0)];
+      h.addMapEvent(5, [list]);
+      const interp = runList(h, list);
+      h.clock.t += 3000;
+      h.runCommand(interp, 0); // same run (a loop): not again
+      expect(plugins(h.readLog())).toHaveLength(1);
+      runList(h, list); // new run, 3 s after the record
+      expect(plugins(h.readLog())).toHaveLength(2);
+      h.clock.t += 1000;
+      runList(h, list); // new run 1 s later: within 2 s
+      expect(plugins(h.readLog())).toHaveLength(2);
+      h.clock.t += 1000;
+      runList(h, list);
+      expect(plugins(h.readLog())).toHaveLength(3);
+    });
+
+    it("records at most 20 plugin commands per second", () => {
+      h = newGame("MV");
+      const list: any[] = [];
+      for (let i = 0; i < 30; i++) list.push(cmd(356, ["C" + i]));
+      list.push(cmd(0));
+      h.addMapEvent(5, [list]);
+      const interp = h.g.$gameMap._interpreter;
+      interp.setup(list, 5);
+      for (let i = 0; i < 30; i++) h.runCommand(interp, i);
+      expect(interp.pluginCalls).toBe(30);
+      expect(plugins(h.readLog()).map((r) => r.cmd)).toEqual([...Array(20).keys()]);
+      h.clock.t += 1000;
+      for (let i = 0; i < 30; i++) h.runCommand(interp, i); // dropped ones were not marked seen
+      expect(plugins(h.readLog())).toHaveLength(30);
+    });
+
+    it("is not a story record: a plugin record after a save does not force a new branch on load", async () => {
+      h = newGame("MV");
+      await h.g.DataManager.saveGame(1);
+      const list = [cmd(356, ["Look"]), cmd(0)];
+      h.addMapEvent(5, [list]);
+      runList(h, list);
+      await h.g.DataManager.loadGame(1);
+      const log = h.readLog();
+      expect(types(log)).toEqual(["branchStart", "save", "plugin", "load"]);
+      expect(log.at(-1)).toMatchObject({ run: 1, branch: 1 });
+    });
+  });
+
   it("writes meta.json on the tick, not on scheduled flushes", () => {
     h = newGame();
     h.bridge._tick();

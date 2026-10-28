@@ -219,6 +219,9 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     return true;
   };
   Game_Interpreter.prototype.command231 = function () { return true; };
+  Game_Interpreter.prototype.pluginCalls = 0;
+  Game_Interpreter.prototype.command356 = function () { this.pluginCalls++; return true; };
+  if (engine === "MZ") Game_Interpreter.prototype.command357 = function () { this.pluginCalls++; return true; };
 
   // ---- Managers
   function Scene_Boot(this: any) {}
