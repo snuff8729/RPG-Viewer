@@ -1,7 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { MapCanvas } from "./MapCanvas";
 import { MapGrid } from "./MapGrid";
-import { mapMarkers } from "./mapEvents";
 import type { HereMap } from "./useHereMap";
 
 /** 지금 맵 그림(이 맵·플레이 화면 공용): 읽는 중이면 Skeleton, 타일을 못 읽으면 칸 그림. */
@@ -36,7 +35,7 @@ export function HereMapArea({ here, focus, onPick, compact = false }: {
       )}
       {tilesState.status === "failed" && (
         <div className={compact ? "h-full overflow-auto" : undefined}>
-          <MapGrid width={checklist.width} height={checklist.height} events={mapMarkers(listed, false)} player={player} numbers={numbers} onPick={onPick} />
+          <MapGrid width={checklist.width} height={checklist.height} events={listed} player={player} numbers={numbers} onPick={onPick} />
         </div>
       )}
     </>

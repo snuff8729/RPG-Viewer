@@ -11,6 +11,9 @@ import { HereNotConnected } from "./HereNotConnected";
 import { NextStoryCard } from "./NextStoryCard";
 import { eventStyle, sectionStyle, type SectionStyle } from "./sectionStyle";
 import { useHereMap } from "./useHereMap";
+import { useGame } from "@/app/GameProvider";
+import { useMapLegend, visibleByLegend } from "./mapLegendState";
+import { gameKeyOf } from "./readPosition";
 
 const HIGHLIGHT_MS = 1500;
 /** 다 봄 (다시 가능)이 이보다 많으면 처음엔 접어 둔다 */
@@ -52,6 +55,9 @@ function Cards({ events, numbers, refs, highlight, selected, route, onLocate }: 
 export function HereView() {
   const here = useHereMap();
   const { live, checklist, listed, numbers, selected, select, routeText } = here;
+  const { data } = useGame();
+  // 범례에서 끈 항목은 목록에서도 뺀다
+  const [legendHidden] = useMapLegend(data ? gameKeyOf(data) : "");
   // 카드 DOM 맵(바뀌지 않는 객체 하나)
   const [refs] = useState<CardRefs>(() => new Map());
   /** 접을 수 있는 구역을 사용자가 펼치거나 접은 상태(없으면 기본값) */
@@ -72,7 +78,7 @@ export function HereView() {
   if (!live || !checklist) return <HereNotConnected />;
 
   const groups = new Map<GroupKey, ChecklistEvent[]>(GROUP_KEYS.map((k) => [k, []]));
-  for (const e of listed) groups.get(groupOf(e))?.push(e);
+  for (const e of visibleByLegend(listed, legendHidden)) groups.get(groupOf(e))?.push(e);
   /** 접을 수 있는 구역과 처음에 접혀 있는지 */
   const foldable: Partial<Record<GroupKey, boolean>> = {
     talk: (groups.get("talk")?.length ?? 0) > TALK_FOLD, story: true, done: true,
