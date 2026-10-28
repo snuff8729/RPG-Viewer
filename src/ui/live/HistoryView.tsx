@@ -23,15 +23,21 @@ export function HistoryView() {
   const [shown, setShown] = useState(PAGE);
   const selected = picked !== null && model.branches.has(picked) ? picked : latestBranch;
 
+  // 경로는 한 번만 계산해 타임라인과 선택 문구가 함께 쓴다
+  const path = useMemo(
+    () => (selected === null ? [] : branchPath(records, model, selected)),
+    [records, model, selected],
+  );
+
   const items = useMemo(() => {
     if (selected === null) return [];
-    return foldTimeline(branchPath(records, model, selected), model, { uncertainSeqs, noisy });
-  }, [records, selected, model, noisy, uncertainSeqs]);
+    return foldTimeline(path, model, { uncertainSeqs, noisy });
+  }, [path, selected, model, noisy, uncertainSeqs]);
 
   const choiceText = useMemo(() => {
     if (!data || selected === null) return new Map<number, string>();
-    return choiceTexts(branchPath(records, model, selected), data);
-  }, [records, selected, model, data]);
+    return choiceTexts(path, data);
+  }, [path, selected, data]);
 
   const onJump = useCallback((src: Location, cmd: number) => {
     const key = locationKey(src);

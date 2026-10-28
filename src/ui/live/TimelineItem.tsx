@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { FaceImage } from "../script/FaceImage";
-import { battleText, reasonText, stateChangeText, transferText } from "./historyText";
+import { battleText, pickedFallbackText, reasonText, stateChangeText, transferText } from "./historyText";
 
 export interface TimelineCtx {
   data: GameData;
@@ -55,7 +55,7 @@ function RecordLine({ r, ctx, uncertain }: { r: LogRecord; ctx: TimelineCtx; unc
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}><div className="whitespace-pre-line text-muted-foreground">{formatText(r.text, ctx.data)}</div></Line>;
     case "choices": case "error": return null;
     case "choice":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? `${r.picked + 1}번째 선택지`}"</Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
     case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>🖼 {r.name}</Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;

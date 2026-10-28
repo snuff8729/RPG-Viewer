@@ -13,11 +13,16 @@ export function choiceTexts(path: LogRecord[], data: GameData, fallback?: (r: Re
       last.set(`${locationKey(r.src)}#${r.cmd}`, Array.isArray(r.options) ? r.options : []);
     } else if (r.type === "choice") {
       const opts = (r.src ? last.get(`${locationKey(r.src)}#${r.cmd}`) : undefined) ?? fallback?.(r) ?? null;
-      const raw = opts?.[r.picked];
-      out.set(r.seq, raw !== undefined ? formatText(raw, data) : `${r.picked + 1}번째 선택지`);
+      const raw = r.picked >= 0 ? opts?.[r.picked] : undefined;
+      out.set(r.seq, raw !== undefined ? formatText(raw, data) : pickedFallbackText(r.picked));
     }
   }
   return out;
+}
+
+/** 옵션 문구를 모를 때: 취소(-2)는 `취소`, 그 밖은 `{n}번째 선택지`. */
+export function pickedFallbackText(picked: number): string {
+  return picked === -2 ? "취소" : `${picked + 1}번째 선택지`;
 }
 
 export function stateChangeText(c: StateChange, data: GameData): string {

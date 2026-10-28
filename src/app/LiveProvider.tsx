@@ -23,6 +23,7 @@ export interface LiveContextValue {
   connection: Connection;
   /** lastLive.t와 마지막 기록 t 중 최신 */
   lastSeenT: number | null;
+  /** 파생 계산(model·coverage·missing)에 쓴 기록. 기록이 계속 들어오면 최대 1초에 한 번 갱신(마지막 변경 뒤엔 꼭 한 번). */
   records: LogRecord[];
   badLines: number;
   model: HistoryModel;
@@ -45,6 +46,8 @@ export interface LiveContextValue {
 const bundledVersion = pluginVersionOf(pluginSource) ?? "";
 const POLL_MS = 500;
 const FRESH_MS = 5000;
+/** 기록에서 파생하는 계산(갈래 모델·잦은 변수·진행도·못 본 것)은 최대 이 간격에 한 번. */
+const DERIVE_MS = 1000;
 const UNSUPPORTED_FOLDER = "크롬이나 엣지에서 폴더 열기로 연 게임만 지원해요";
 const NO_WRITE = "쓰기 권한이 필요해요";
 
@@ -64,6 +67,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const [install, setInstall] = useState<InstallStatus | null>(null);
   const [records, setRecords] = useState<LogRecord[]>([]);
+  const [derivedRecords, setDerivedRecords] = useState<LogRecord[]>([]);
   const [badLines, setBadLines] = useState(0);
   const [lastLive, setLastLive] = useState<LiveSnapshot | null>(null);
   const [liveState, setLiveState] = useState<LiveSnapshot | null>(null);
@@ -75,6 +79,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setPrevFolder(wfolder);
     setInstall(null);
     setRecords([]);
+    setDerivedRecords([]);
     setBadLines(0);
     setLastLive(null);
     setLiveState(null);
@@ -165,11 +170,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; cleanup?.(); };
   }, [wfolder, dataRoot, refreshInstall]);
 
-  const model = useMemo(() => buildHistory(records), [records]);
-  const noisy = useMemo(() => noisyVariables(records), [records]);
+  // 기록 → 파생 계산용 기록: 스로틀(최대 DERIVE_MS에 한 번, 마지막 변경 뒤 반드시 한 번).
+  // 변경마다 타이머를 다시 걸지만 대기 시간은 "마지막 파생 + DERIVE_MS"까지라 미뤄지지 않는다.
+  const lastDeriveAt = useRef(0);
+  useEffect(() => {
+    const wait = Math.max(0, lastDeriveAt.current + DERIVE_MS - Date.now());
+    const id = setTimeout(() => {
+      lastDeriveAt.current = Date.now();
+      setDerivedRecords(records);
+    }, wait);
+    return () => clearTimeout(id);
+  }, [records]);
+
+  const model = useMemo(() => buildHistory(derivedRecords), [derivedRecords]);
+  const noisy = useMemo(() => noisyVariables(derivedRecords), [derivedRecords]);
   const coverage = useMemo<Coverage>(
-    () => (data ? computeCoverage(records, data) : { seen: new Set(), picks: new Map(), uncertainSeqs: new Set() }),
-    [records, data],
+    () => (data ? computeCoverage(derivedRecords, data) : { seen: new Set(), picks: new Map(), uncertainSeqs: new Set() }),
+    [derivedRecords, data],
   );
   // 연결이 끊기면 null → 조건 판정 "?" (fresh가 바뀔 때만 다시 계산)
   const live = fresh ? liveState : null;
@@ -189,9 +206,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<LiveContextValue>(() => ({
     supported, install, refreshInstall, doInstall, doUninstall,
-    connection, lastSeenT, records, badLines, model, coverage, live, lastLive, missing,
+    connection, lastSeenT, records: derivedRecords, badLines, model, coverage, live, lastLive, missing,
     noisy, uncertainSeqs: coverage.uncertainSeqs, latestBranch: model.latestBranch, bundledVersion,
-  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, records, badLines, model, coverage, live, lastLive, missing, noisy]);
+  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, derivedRecords, badLines, model, coverage, live, lastLive, missing, noisy]);
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

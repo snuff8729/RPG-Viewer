@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { battleText, choiceTexts, stateChangeText, transferText } from "./historyText";
+import { battleText, choiceTexts, pickedFallbackText, stateChangeText, transferText } from "./historyText";
 import type { LogRecord } from "@/core/live/types";
 import type { GameData } from "@/core/types";
 
@@ -21,6 +21,18 @@ describe("historyText", () => {
     const m = choiceTexts(path, data);
     expect(m.get(2)).toBe("아니오");
     expect(m.get(3)).toBe("1번째 선택지");
+  });
+  it("a cancelled pick (-2) reads 취소", () => {
+    const path = [
+      { ...base, seq: 1, type: "choices", src, cmd: 3, options: ["예", "아니오"] },
+      { ...base, seq: 2, type: "choice", src, cmd: 3, picked: -2 },
+      { ...base, seq: 3, type: "choice", src, cmd: 9, picked: -2 },
+    ] as LogRecord[];
+    const m = choiceTexts(path, data);
+    expect(m.get(2)).toBe("취소");
+    expect(m.get(3)).toBe("취소");
+    expect(pickedFallbackText(-2)).toBe("취소");
+    expect(pickedFallbackText(1)).toBe("2번째 선택지");
   });
   it("names state changes", () => {
     expect(stateChangeText({ kind: "switch", id: 1, value: true }, data)).toBe("스위치 문 열림 → ON");
