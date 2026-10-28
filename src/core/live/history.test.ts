@@ -104,5 +104,31 @@ describe("foldTimeline", () => {
     expect(items[1]).toMatchObject({ kind: "record", uncertain: true, record: { seq: 2 } });
     expect(items[2]).toMatchObject({ kind: "record", uncertain: false });
   });
-  it("handles empty path", () => expect(foldTimeline([], buildHistory([]), {})).toEqual([]));
+  it("noisy-only state does not split a dialogue episode", () => {
+    const noisyState = (seq: number) => ({ ...base, seq, t: 0, type: "state", src: null, cmd: null,
+      changes: [{ kind: "variable", id: 7, value: seq }] }) as LogRecord;
+    const recs = [start, msg(2, 1, 0), noisyState(3), msg(4, 1, 1),
+      msg(5, 1, 0), noisyState(6), msg(7, 1, 1)] as LogRecord[];
+    const items = foldTimeline(recs, buildHistory(recs), { noisy: new Set([7]) });
+    expect(kinds(items)).toEqual([1, 2, 4, "repeat"]);
+    expect(items[3]).toMatchObject({ kind: "repeat", count: 1, record: { seq: 5 } });
+  });
+  it("uses opts.noisy instead of computing from the path", () => {
+    const recs = [start,
+      { ...base, seq: 2, t: 0, type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 9, value: 1 }] },
+      { ...base, seq: 3, t: 0, type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 4, value: 1 }] }] as LogRecord[];
+    const items = foldTimeline(recs, buildHistory(recs), { noisy: new Set([9]) });
+    expect(items[1]).toMatchObject({ kind: "stateGroup", count: 1, records: [{ seq: 3 }] });
+    expect(foldTimeline(recs, buildHistory(recs), {})[1]).toMatchObject({ kind: "stateGroup", count: 2 });
+    // 경로만으로는 잦지 않던 변수도 opts.noisy로 제외되고, 경로상 잦은 변수라도 opts.noisy에 없으면 남는다
+    const fix = fixtureRecords(); const m = buildHistory(fix);
+    const kept = foldTimeline(branchPath(fix, m, 1), m, { noisy: new Set() });
+    expect(kept.find(i => i.kind === "stateGroup")).toMatchObject({ count: 12 });
+  });
+  it("uncertain episode does not seed repeat detection", () => {
+    const recs = [start, msg(2, 1, 0), msg(3, 9, 0), msg(4, 1, 0)] as LogRecord[];
+    const items = foldTimeline(recs, buildHistory(recs), { uncertainSeqs: new Set([2]) });
+    expect(kinds(items)).toEqual([1, 2, 3, 4]);
+  });
+  it("handles empty path",() => expect(foldTimeline([], buildHistory([]), {})).toEqual([]));
 });

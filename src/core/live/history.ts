@@ -117,10 +117,13 @@ function srcKey(src: Location | null | undefined): string | null {
 interface Episode { key: string | null; lastCmd: number; records: EpisodeRecord[] }
 
 /** 경로 기록을 화면용 타임라인으로 접는다(반복 대화, 상태 변경 묶음, 잦은 변수 제외, 갈래 지점). */
-export function foldTimeline(path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number> }): HistoryItem[] {
+/** opts.noisy: 기록 전체 기준 잦은 변수(noisyVariables(전체 기록)). 없으면 경로에서 계산한다. */
+export function foldTimeline(
+  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; noisy?: Set<number> },
+): HistoryItem[] {
   const records = bySeq(Array.isArray(path) ? path : []);
   const uncertain = (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false;
-  const noisy = noisyVariables(records);
+  const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
 
   // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들
   const forkChildren = new Map<string, number[]>();
@@ -165,7 +168,7 @@ export function foldTimeline(path: LogRecord[], model: HistoryModel, opts: { unc
     } else {
       for (const r of ep.records) pushRecord(r);
     }
-    if (signature !== null) seenSignatures.add(signature);
+    if (signature !== null && !ep.records.some(r => uncertain(r.seq))) seenSignatures.add(signature);
     lastEpisode = { key: ep.key, talk: ep.records.some(r => TALK_TYPES.has(r.type)) };
   };
 
@@ -183,10 +186,11 @@ export function foldTimeline(path: LogRecord[], model: HistoryModel, opts: { unc
         episode = { key, lastCmd: cmd, records: [er] };
       }
     } else if (r.type === "state") {
-      flushEpisode();
       const original: StateChange[] = Array.isArray(r.changes) ? r.changes : [];
       const changes = original.filter(c => !(c && c.kind === "variable" && noisy.has(Number(c.id))));
+      // 잦은 변수만 바꾼 기록은 화면에서 사라지므로 에피소드·묶음도 끊지 않는다
       if (changes.length > 0) {
+        flushEpisode();
         const rec: RecordOf<"state"> = changes.length === original.length && original === r.changes ? r : { ...r, changes };
         const key = srcKey(r.src);
         // flushEpisode가 클로저 안에서 갱신하므로 TS 좁히기를 피해 명시적 타입으로 읽는다
