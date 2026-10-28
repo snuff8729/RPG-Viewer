@@ -1,4 +1,4 @@
-import { listChildren, type GameFolder } from "./folder";
+import { listChildren, type FileStat, type GameFolder, type WritableGameFolder } from "./folder";
 
 // 브라우저 전용. lib.dom에 비동기 이터레이터 타입이 없을 수 있어 최소 타입을 둔다.
 type IterableDir = FileSystemDirectoryHandle & { keys(): AsyncIterable<string> };
@@ -17,12 +17,15 @@ async function childNames(dir: FileSystemDirectoryHandle): Promise<string[]> {
  * 핸들 객체는 호출마다 새로 만들어질 수 있으므로, 디렉터리는 폴더 루트 기준 경로(소문자)로 식별한다.
  * 각 디렉터리의 `소문자 이름 → 실제 이름` 표는 처음 필요할 때 한 번만 나열해 만든다.
  */
-export class DirectoryHandleFolder implements GameFolder {
+export class DirectoryHandleFolder implements WritableGameFolder {
   private dirs = new Map<string, Promise<FileSystemDirectoryHandle | null>>();
   private names = new Map<string, Promise<Map<string, string>>>();
 
-  constructor(handle: FileSystemDirectoryHandle) {
-    this.dirs.set("", Promise.resolve(handle));
+  private root: FileSystemDirectoryHandle;
+
+  constructor(root: FileSystemDirectoryHandle) {
+    this.root = root;
+    this.dirs.set("", Promise.resolve(root));
   }
 
   /** 디렉터리(key) 안 이름을 대소문자 무시로 실제 이름으로 바꾼다. 나열은 디렉터리당 한 번. */
@@ -65,28 +68,55 @@ export class DirectoryHandleFolder implements GameFolder {
     return p;
   }
 
-  private async fileOf(path: string): Promise<File | null> {
+  private async fileHandleOf(path: string): Promise<{ fh: FileSystemFileHandle; dir: FileSystemDirectoryHandle; name: string } | null> {
     const segs = path.split("/").filter(Boolean);
     const name = segs.pop();
     if (!name) return null;
     const dir = await this.dirOf(segs);
     if (!dir) return null;
-    let fh: FileSystemFileHandle | null = null;
     try {
-      fh = await dir.getFileHandle(name);
+      return { fh: await dir.getFileHandle(name), dir, name };
     } catch {
       const real = await this.realName(segs.join("/").toLowerCase(), dir, name);
-      if (real !== null && real !== name) {
-        try {
-          fh = await dir.getFileHandle(real);
-        } catch {
-          fh = null;
-        }
+      if (real === null || real === name) return null;
+      try {
+        return { fh: await dir.getFileHandle(real), dir, name: real };
+      } catch {
+        return null;
       }
     }
-    if (!fh) return null;
+  }
+
+  private async fileOf(path: string): Promise<File | null> {
+    const h = await this.fileHandleOf(path);
+    if (!h) return null;
     try {
-      return await fh.getFile();
+      return await h.fh.getFile();
+    } catch {
+      return null;
+    }
+  }
+
+  /** 새 항목 이름을 해당 디렉터리의 이름 표에 반영한다(표가 아직 없으면 나중에 실제 나열로 만들어진다). */
+  private async learn(key: string, name: string): Promise<void> {
+    const t = this.names.get(key);
+    if (t) (await t).set(name.toLowerCase(), name);
+  }
+
+  /** 디렉터리를 (없으면 만들며) 얻는다. */
+  private async ensureDir(segments: string[]): Promise<FileSystemDirectoryHandle | null> {
+    const existing = await this.dirOf(segments);
+    if (existing) return existing;
+    if (segments.length === 0) return null;
+    const parentSegs = segments.slice(0, -1);
+    const parent = await this.ensureDir(parentSegs);
+    if (!parent) return null;
+    const name = segments[segments.length - 1];
+    try {
+      const d = await parent.getDirectoryHandle(name, { create: true });
+      this.dirs.set(segments.join("/").toLowerCase(), Promise.resolve(d));
+      await this.learn(parentSegs.join("/").toLowerCase(), name);
+      return d;
     } catch {
       return null;
     }
@@ -94,17 +124,109 @@ export class DirectoryHandleFolder implements GameFolder {
 
   async readText(path: string): Promise<string | null> {
     const f = await this.fileOf(path);
-    return f ? await f.text() : null;
+    try {
+      return f ? await f.text() : null;
+    } catch {
+      return null;
+    }
   }
 
   async readBinary(path: string): Promise<ArrayBuffer | null> {
     const f = await this.fileOf(path);
-    return f ? await f.arrayBuffer() : null;
+    try {
+      return f ? await f.arrayBuffer() : null;
+    } catch {
+      return null;
+    }
   }
 
   async list(dir: string): Promise<string[]> {
     const d = await this.dirOf(dir.split("/").filter(Boolean));
     return d ? childNames(d) : [];
+  }
+
+  async stat(path: string): Promise<FileStat | null> {
+    const f = await this.fileOf(path);
+    try {
+      return f ? { size: f.size, lastModified: f.lastModified } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async readRange(path: string, start: number, end: number): Promise<ArrayBuffer | null> {
+    const f = await this.fileOf(path);
+    if (!f) return null;
+    const s = Math.max(0, start);
+    try {
+      return await f.slice(s, Math.max(s, end)).arrayBuffer();
+    } catch {
+      return null;
+    }
+  }
+
+  async writeText(path: string, text: string): Promise<boolean> {
+    try {
+      const segs = path.split("/").filter(Boolean);
+      const name = segs.pop();
+      if (!name) return false;
+      const dir = await this.ensureDir(segs);
+      if (!dir) return false;
+      const existing = await this.fileHandleOf(path);
+      const key = segs.join("/").toLowerCase();
+      const fh = existing ? existing.fh : await dir.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      try {
+        await w.write(text);
+        await w.close();
+      } catch {
+        try {
+          await (w as unknown as { abort?: () => Promise<void> }).abort?.();
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
+      if (!existing) await this.learn(key, name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async remove(path: string): Promise<boolean> {
+    const h = await this.fileHandleOf(path);
+    if (!h) return false;
+    try {
+      await h.dir.removeEntry(h.name);
+      const segs = path.split("/").filter(Boolean);
+      segs.pop();
+      const t = this.names.get(segs.join("/").toLowerCase());
+      if (t) (await t).delete(h.name.toLowerCase());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async canWrite(): Promise<boolean> {
+    const h = this.root as unknown as { queryPermission?: (d: { mode: string }) => Promise<string> };
+    if (typeof h.queryPermission !== "function") return false;
+    try {
+      return (await h.queryPermission({ mode: "readwrite" })) === "granted";
+    } catch {
+      return false;
+    }
+  }
+
+  async requestWrite(): Promise<boolean> {
+    const h = this.root as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> };
+    if (typeof h.requestPermission !== "function") return false;
+    try {
+      return (await h.requestPermission({ mode: "readwrite" })) === "granted";
+    } catch {
+      return false;
+    }
   }
 }
 
