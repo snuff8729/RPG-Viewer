@@ -206,6 +206,33 @@ describe("createAccumulator", () => {
     expectSameAsBatch(acc);
   });
 
+  it("coverage() keeps its object while appended records don't touch coverage", () => {
+    const recs = fixtureRecords();
+    const acc = createAccumulator(data);
+    acc.append(recs);
+    const c = acc.coverage();
+    const last = recs[recs.length - 1];
+    const next = (seq: number, extra: object) => ({ v: 1, seq, t: last.t + seq, run: last.run, branch: 999, ...extra }) as LogRecord;
+    // 열린 선택이 없는 갈래의 이동·상태 기록: 진행도는 그대로
+    acc.append([next(1000, { type: "transfer", mapId: 3, x: 0, y: 0 })]);
+    acc.append([next(1001, { type: "state", src: null, cmd: null, changes: [{ kind: "switch", id: 1, value: true }] })]);
+    expect(acc.coverage()).toBe(c);
+    expectSameAsBatch(acc);
+    // 열린 선택의 결과를 채우는 기록은 새 객체
+    const src = { source: "map" as const, mapId: 2, eventId: 1, page: 0 };
+    acc.append([next(1002, { branch: 998, type: "choices", src, cmd: 10, options: ["네, 도울게요", "생각해볼게요"] })]);
+    acc.append([next(1003, { branch: 998, type: "choice", src, cmd: 10, picked: 0 })]);
+    const c2 = acc.coverage();
+    expect(c2).not.toBe(c);
+    acc.append([next(1004, { branch: 998, type: "transfer", mapId: 3, x: 0, y: 0 })]);
+    const c3 = acc.coverage();
+    expect(c3).not.toBe(c2);
+    expect(c2.picks.get("map:2:1:0#10")!.at(-1)!.aftermath).toEqual([]);
+    expectSameAsBatch(acc);
+    acc.reset();
+    expect(acc.coverage()).not.toBe(c3);
+  });
+
   it("never throws on junk input", () => {
     const acc = createAccumulator(data);
     expect(() => {

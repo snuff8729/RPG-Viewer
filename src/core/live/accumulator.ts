@@ -16,10 +16,14 @@ export interface LiveAccumulator {
   reset(): void;
   /** 지금까지의 전체 기록(append 순). 내부 배열이므로 고치지 말 것. */
   readonly records: LogRecord[];
-  /** append/reset마다 +1 */
+  /** 비어 있지 않은 append와 reset마다 +1(빈 append는 그대로). */
   readonly version: number;
   /** version이 같으면 같은 객체, 바뀌면 새 객체(이후 append로 바뀌지 않는 사본). */
   model(): HistoryModel;
+  /**
+   * model()과 같되, 마지막 호출 뒤 들어온 기록이 진행도(seen·picks·결과·uncertain·changed)를
+   * 바꾸지 않았으면 version이 바뀌어도 같은 객체를 돌려준다.
+   */
   coverage(): Coverage;
   noisy(): Set<number>;
 }
@@ -41,12 +45,15 @@ export function createAccumulator(data: GameData): LiveAccumulator {
   let cov: Coverage = emptyCoverage();
   let lastOptions = new Map<string, unknown>();
   let open = new Map<unknown, OpenPick[]>();
+  // 마지막 coverage() 사본 이후 진행도가 바뀌었는가
+  let covDirty = true;
+  let covCopy: Coverage | null = null;
 
   // 잦은 변수: 아직 아닌 변수의 변경 시각(정렬). 잦은 변수가 되면 목록을 버린다(한 번 잦으면 계속 잦음).
   let times = new Map<number, number[]>();
   let noisySet = new Set<number>();
 
-  let cache: { version: number; model?: HistoryModel; coverage?: Coverage; noisy?: Set<number> } = { version };
+  let cache: { version: number; model?: HistoryModel; noisy?: Set<number> } = { version };
 
   function feedCoverage(r: LogRecord) {
     if (!isObj(r)) return;
@@ -55,17 +62,22 @@ export function createAccumulator(data: GameData): LiveAccumulator {
     if (list) {
       const keep: OpenPick[] = [];
       for (const p of list) {
+        const n = p.st.out.length;
         try {
           aftermathStep(p.st, r, data);
+          if (p.st.out.length !== n) covDirty = true;
           if (!p.st.done) keep.push(p);
         } catch {
           dropPick(p);   // 일괄 계산에서도 결과 계산이 던지면 그 선택은 빠진다
+          covDirty = true;
         }
       }
       if (keep.length > 0) open.set(branch, keep); else open.delete(branch);
     }
     const st = newAftermath();
+    const sizes = cov.seen.size + cov.uncertainSeqs.size + cov.changedSeqs.size;
     const info = coverRecord(cov, r, data, lastOptions, () => st.out);
+    if (info || cov.seen.size + cov.uncertainSeqs.size + cov.changedSeqs.size !== sizes) covDirty = true;
     if (info) {
       try {
         const p: OpenPick = { info, key: seenKey((r as RecordOf<"choice">).src!, (r as RecordOf<"choice">).cmd), st };
@@ -127,7 +139,7 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       if (!Array.isArray(batch) || batch.length === 0) return;
       for (const r of batch) {
         records.push(r);
-        try { feed(r); } catch { /* 이상한 기록은 건너뛴다 */ }
+        try { feed(r); } catch { covDirty = true; /* 이상한 기록은 건너뛴다 */ }
       }
       version++;
     },
@@ -139,6 +151,8 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       cov = emptyCoverage();
       lastOptions = new Map();
       open = new Map();
+      covDirty = true;
+      covCopy = null;
       times = new Map();
       noisySet = new Set();
       version++;
@@ -160,13 +174,13 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       return c.model;
     },
     coverage() {
-      const c = fresh();
-      if (!c.coverage) {
+      if (!covCopy || covDirty) {
         const picks = new Map<string, PickInfo[]>();
         for (const [k, l] of cov.picks) picks.set(k, l.map(p => ({ ...p, aftermath: p.aftermath.slice() })));
-        c.coverage = { seen: new Set(cov.seen), picks, uncertainSeqs: new Set(cov.uncertainSeqs), changedSeqs: new Set(cov.changedSeqs) };
+        covCopy = { seen: new Set(cov.seen), picks, uncertainSeqs: new Set(cov.uncertainSeqs), changedSeqs: new Set(cov.changedSeqs) };
+        covDirty = false;
       }
-      return c.coverage;
+      return covCopy;
     },
     noisy() {
       const c = fresh();
