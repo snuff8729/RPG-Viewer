@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGame } from "@/app/GameProvider";
 import { loadRecent } from "@/app/recent";
+import { fsAccessSupport, type FsAccessWindow } from "./fsAccess";
 
 type PickerWindow = Window & { showDirectoryPicker?: (o?: { mode?: "read" }) => Promise<FileSystemDirectoryHandle> };
 type PermHandle = FileSystemDirectoryHandle & { requestPermission?: (d: { mode: "read" }) => Promise<PermissionState> };
@@ -14,6 +15,7 @@ export function StartScreen() {
   const [recent, setRecent] = useState<FileSystemDirectoryHandle | null>(null);
   const [denied, setDenied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const access = fsAccessSupport(window as unknown as FsAccessWindow);
 
   useEffect(() => { void loadRecent().then(setRecent); }, []);
 
@@ -54,6 +56,11 @@ export function StartScreen() {
             </div>
           ) : (
             <>
+              {access.message && (
+                <Alert>
+                  <AlertDescription>{access.message}</AlertDescription>
+                </Alert>
+              )}
               <Button onClick={pick}>게임 폴더 열기</Button>
               {recent && (
                 <Button variant="outline" onClick={reopen}>최근 게임 다시 열기: {recent.name}</Button>
