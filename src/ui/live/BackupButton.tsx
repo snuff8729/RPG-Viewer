@@ -76,7 +76,7 @@ export function BackupButton() {
   const { supported, connection } = useLive();
   const available = useLauncherAvailable();
   const gameKey = data ? gameKeyOf(data) : null;
-  const [path, setPath] = useGamePath(gameKey);
+  const { path, save: setPath } = useGamePath(gameKey);
   const connected = connection === "connected";
 
   const [autoState, setAutoState] = useState(() => ({ key: gameKey, on: gameKey ? loadAutoBackup(gameKey) : true }));
