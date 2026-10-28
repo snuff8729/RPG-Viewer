@@ -2,6 +2,7 @@ import { memo, type ReactNode } from "react";
 import { branchLabel, representative } from "@/core/live/history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live/types";
 import { formatText } from "@/core/text/escape";
+import { textPictureLabel } from "@/core/text/textPicture";
 import type { GameData, Location } from "@/core/types";
 import { Badge } from "@/components/ui/badge";
 import { explainRecord, reasonLabel } from "@/core/live/mismatch";
@@ -89,7 +90,9 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
     case "choices": case "error": return null;
     case "choice":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
-    case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>🖼 {r.name}</Line>;
+    case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>
+      🖼 {r.name || <span className="text-muted-foreground">{textPictureLabel(undefined)}</span>}
+    </Line>;
     case "plugin":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><PluginRecordLine r={r} data={ctx.data} /></Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;

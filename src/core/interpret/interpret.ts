@@ -4,6 +4,7 @@ import { parseTeCall, resolveTeCall, TE_MAX_DEPTH, type CallCtx } from "./teCall
 import { formatText } from "../text/escape";
 import { describeBranchCondition } from "../conditions/describe";
 import { describeStateChange } from "./stateChange";
+import { dTextCaptionBefore } from "../text/textPicture";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -148,8 +149,14 @@ export function interpret(list: EventCommand[], data: GameData, ctx?: CallCtx | 
         }
         case 231: {
           const name = str(params(c)[1]);
-          if (name) { push({ kind: "picture", cmd: here, pictureId: num(params(c)[0]), name }); continue; }
-          break;
+          const node: Extract<ScriptNode, { kind: "picture" }> = { kind: "picture", cmd: here, pictureId: num(params(c)[0]), name };
+          if (!name) {
+            // 파일 이름 없는 그림: 글자 그림(DTextPicture)이나 플러그인이 정한 그림
+            const caption = dTextCaptionBefore(list, here);
+            if (caption) node.caption = caption;
+          }
+          push(node);
+          continue;
         }
         default: {
           const sc = describeStateChange(c, data);

@@ -4,7 +4,7 @@ import { clampRange, extendDown, extendUp, grownRange, initialView, rangeShowing
 
 const msg = (seq: number, repeat?: number): ReaderItem => ({ kind: "message", key: `r${seq}`, seq, speaker: "", face: "", faceIndex: 0, lines: ["x"], src: null, cmd: null, ...(repeat ? { repeat } : {}) });
 const chapter = (k: string): ReaderItem => ({ kind: "chapter", key: k, text: "— 숲 —" });
-const pic = (seq: number): ReaderItem => ({ kind: "picture", key: `r${seq}`, seq, name: "p" });
+const pic = (seq: number): ReaderItem => ({ kind: "picture", key: `r${seq}`, seq, pictureId: 1, name: "p" });
 const scroll = (seq: number): ReaderItem => ({ kind: "scroll", key: `r${seq}`, seq, lines: ["s"] });
 
 describe("readStats", () => {

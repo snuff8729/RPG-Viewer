@@ -87,7 +87,8 @@ export type ScriptNode =
   | { kind: "choices"; cmd: number; branches: { label: string; body: ScriptNode[] }[]; cancelBranch?: ScriptNode[] }
   | { kind: "conditional"; condition: Condition; then: ScriptNode[]; else?: ScriptNode[] }
   | { kind: "loop"; body: ScriptNode[] }
-  | { kind: "picture"; cmd: number; pictureId: number; name: string }
+  /** name이 ""이면 플러그인이 그린 그림(파일 없음). caption: 바로 앞 D_TEXT 글(있을 때) */
+  | { kind: "picture"; cmd: number; pictureId: number; name: string; caption?: string }
   | { kind: "commonEvent"; commonEventId: number }
   /** TemplateEvent 호출(원래 이벤트 페이지·다른 맵 이벤트 페이지)을 펼친 것. `cmd`: 356/357 명령 인덱스.
    *  `location`: 펼친 `nodes`의 `cmd`가 가리키는 목록의 위치(본 대사 키도 이 위치로 만든다). */

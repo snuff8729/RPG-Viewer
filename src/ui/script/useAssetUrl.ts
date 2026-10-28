@@ -10,7 +10,7 @@ export type AssetView =
 
 type Loaded = { status: "ok"; url: string } | { status: "missing" } | { status: "failed" };
 
-/** 그림 하나의 상태. Blob은 object URL로 만들고 unmount 시 revoke. failed면 retry()로 다시 읽는다. */
+/** 그림 하나의 상태. name이 ""이면 읽지 않고 missing(화면은 이름 없는 그림을 따로 그린다). Blob은 object URL로 만들고 unmount 시 revoke. failed면 retry()로 다시 읽는다. */
 export function useAsset(kind: AssetKind, name: string): AssetView {
   const { assets } = useGame();
   const [attempt, setAttempt] = useState(0);
@@ -19,7 +19,8 @@ export function useAsset(kind: AssetKind, name: string): AssetView {
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
-    if (!assets) return;
+    // 이름 없는 그림(글자·플러그인 그림)은 파일이 없으니 읽지 않는다
+    if (!assets || !name) return;
     let cancelled = false;
     let created: string | null = null;
     assets.fetch(kind, name).then(
@@ -38,7 +39,7 @@ export function useAsset(kind: AssetKind, name: string): AssetView {
     };
   }, [assets, kind, name, key]);
 
-  if (!assets) return { status: "missing" };
+  if (!assets || !name) return { status: "missing" };
   if (!state || state.key !== key || state.assets !== assets) return { status: "loading" };
   return state.value.status === "failed" ? { status: "failed", retry } : state.value;
 }

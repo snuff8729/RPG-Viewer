@@ -1,4 +1,6 @@
 import { formatText } from "../text/escape";
+import { dTextCaption } from "../text/textPicture";
+import { locationKey } from "../index/locations";
 import type { GameData, Location } from "../types";
 import { branchLabel, isContinuation } from "./history";
 import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginText";
@@ -8,7 +10,8 @@ export type ReaderItem =
   | { kind: "chapter"; key: string; text: string }
   | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number }
   | { kind: "scroll"; key: string; seq: number; lines: string[] }
-  | { kind: "picture"; key: string; seq: number; name: string }
+  /** name이 ""이면 플러그인이 그린 그림(파일 없음). caption: 바로 앞 D_TEXT 플러그인 기록의 글(있을 때) */
+  | { kind: "picture"; key: string; seq: number; pictureId: number; name: string; caption?: string }
   /**
    * 이벤트가 실행한 플러그인 명령. tech = 기술 명령(기본으로 숨김). text = 글이면 고른 글(제어 문자 처리), 기술 명령이면 원문.
    * raw = 원문, name = 명령별 설정 키(pluginKey)
@@ -45,13 +48,39 @@ function pluginItem(r: RecordOf<"plugin">, data: GameData, overrides: PluginOver
   return { kind: "plugin", key: `r${r.seq}`, seq: r.seq, text, raw, name: pluginKey(r), tech: c.kind === "tech" };
 }
 
+/** 파일 없는 그림 기록 바로 앞(같은 목록, 이어진 명령 위치)의 D_TEXT 플러그인 기록들에서 설명을 만든다. */
+function pictureCaption(r: RecordOf<"picture">, before: RecordOf<"plugin">[]): string {
+  if (!r.src || typeof r.cmd !== "number") return "";
+  const at = locationKey(r.src);
+  const texts: string[] = [];
+  let want = r.cmd - 1;
+  for (let i = before.length - 1; i >= 0; i--) {
+    const p = before[i];
+    if (!p.src || p.code !== 356 || p.cmd !== want || locationKey(p.src) !== at || !/^\s*D_TEXT/i.test(safe(p.text))) break;
+    texts.unshift(safe(p.text));
+    want--;
+  }
+  return dTextCaption(texts);
+}
+
+function pictureItem(r: RecordOf<"picture">, before: RecordOf<"plugin">[]): ReaderItem {
+  const item: Extract<ReaderItem, { kind: "picture" }> = { kind: "picture", key: `r${r.seq}`, seq: r.seq,
+    pictureId: typeof r.pictureId === "number" ? r.pictureId : 0, name: safe(r.name),
+  };
+  if (!item.name) {
+    const caption = pictureCaption(r, before);
+    if (caption) item.caption = caption;
+  }
+  return item;
+}
+
 function fromRecord(
   r: LogRecord, data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null,
 ): ReaderItem | null {
   switch (r.type) {
     case "message": return messageItem(r, data);
     case "scroll": return { kind: "scroll", key: `r${r.seq}`, seq: r.seq, lines: lines(r.text, data) };
-    case "picture": return { kind: "picture", key: `r${r.seq}`, seq: r.seq, name: safe(r.name) };
+    case "picture": return pictureItem(r, []);
     case "plugin": return pluginItem(r, data, overrides);
     case "choice": {
       // historyText.pickedFallbackText와 같은 규칙: 취소(-2)는 `취소`, 그 밖은 `{n}번째 선택지`
@@ -78,13 +107,18 @@ export function readerItems(
   items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
 ): ReaderItem[] {
   const out: ReaderItem[] = [];
+  /** 바로 앞에 이어진 플러그인 기록들(글자 그림 설명용) */
+  let plugins: RecordOf<"plugin">[] = [];
   for (const it of Array.isArray(items) ? items : []) {
     try {
       if (!it) continue;
       if (it.kind === "record") {
-        const r = fromRecord(it.record, data, choiceText, model, overrides);
+        const rec = it.record;
+        const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);
+        plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
         if (r) out.push(r);
       } else if (it.kind === "repeat") {
+        plugins = [];
         out.push(messageItem(it.record, data, it.count));
       }
     } catch { /* 깨진 항목은 건너뛴다 */ }

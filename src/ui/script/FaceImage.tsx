@@ -3,7 +3,7 @@ import { useAsset } from "./useAssetUrl";
 
 export function FaceImage({ name, index }: { name: string; index: number }) {
   const a = useAsset("faces", name);
-  if (a.status === "missing" || a.status === "failed") return <AssetPlaceholder view={a} name={name} compact className="size-10" />;
+  if (a.status === "missing" || a.status === "failed") return <AssetPlaceholder view={a} kind="faces" name={name} compact className="size-10" />;
   if (a.status !== "ok") return <div className="size-10 shrink-0 rounded-md bg-muted" title={name} />;
   return (
     <div
