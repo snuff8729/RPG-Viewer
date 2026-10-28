@@ -21,6 +21,7 @@
  * 전투는 시작(적 무리 이름)·전투 로그 글(공격·피해·상태·승리·경험치 등)·
  * 결과(승리/패배/도주/중단, 보상)를 기록합니다. 전투 한 번에 최대 2000줄,
  * 초당 50줄까지만 남깁니다(배속 중에도 전투를 느리게 하지 않음).
+ * 기술·아이템 사용 줄에는 누가(아군/적) 무엇을 썼는지도 함께 남깁니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -33,7 +34,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.8.0",
+    VERSION: "1.8.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1180,15 +1181,17 @@
   // Buffered like any record (written by the 250 ms tick). With picture capture on, a line carries the
   // pictures only when they changed (checked at most every BATTLE_PICS_GAP_MS, never while a message waits
   // for its own snapshot).
-  function battleLine(text) {
+  // extra (1.8.1): fields of an action line ({ kind: "action", by, isEnemy, item, itemKind, targets? }); its text may be "".
+  function battleLine(text, extra) {
     var b = battleLog;
     if (!b || run === null) return;
     var s = text == null ? "" : String(text);
-    if (s === "") return;
+    if (s === "" && !extra) return;
     if (s.length > BATTLE_TEXT_MAX) s = s.slice(0, BATTLE_TEXT_MAX);
+    var key = extra ? "\u0001" + extra.by + "\u0001" + extra.item + "\u0001" + s : s;
     var t = now();
-    if (s === b.lastText && t - b.lastT < BATTLE_DUP_MS) { b.lastT = t; return; }
-    b.lastText = s;
+    if (key === b.lastText && t - b.lastT < BATTLE_DUP_MS) { b.lastT = t; return; }
+    b.lastText = key;
     b.lastT = t;
     if (b.lines >= BATTLE_LINES_MAX) { b.dropped++; return; }
     while (b.times.length && t - b.times[0] >= BATTLE_RATE_MS) b.times.shift();
@@ -1196,6 +1199,7 @@
     b.times.push(t);
     b.lines++;
     var fields = { text: s };
+    if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) fields[k] = extra[k];
     if (capturePictures && !heldMsg && t - b.picsT >= BATTLE_PICS_GAP_MS) {
       b.picsT = t;
       var pf = null;
@@ -1203,6 +1207,76 @@
       if (pf && pf.pics) fields.pics = pf.pics;
     }
     emit("battlelog", fields);
+  }
+
+  // 1.8.1: who used which skill / item. Window_BattleLog.displayAction(subject, item) queues the action line
+  // (push('addText', …)); battle plugins such as YEP_BattleEngineCore replace it with a bare skill name
+  // ("<SIMPLE>할퀴기"). The wrapper writes one action line right away (by, isEnemy, item, itemKind, targets)
+  // with the first queued text, and that queued text is not written again when addText runs it later.
+  function actionInfo(subject, item) {
+    if (!subject || !item || typeof item !== "object") return null;
+    var info = { kind: "action", by: "", isEnemy: false, item: clipName(typeof item.name === "string" ? item.name : ""), itemKind: "skill" };
+    try { if (typeof subject.name === "function") info.by = clipName(subject.name()); } catch (e1) { reportError(e1); }
+    try { info.isEnemy = typeof subject.isEnemy === "function" && !!subject.isEnemy(); } catch (e2) { reportError(e2); }
+    try {
+      var DM = G.DataManager;
+      var isItem = DM && typeof DM.isItem === "function" ? !!DM.isItem(item) : "itypeId" in item;
+      if (isItem) info.itemKind = "item";
+    } catch (e3) { reportError(e3); }
+    try {
+      var tg = G.BattleManager && G.BattleManager._targets;
+      if (tg && typeof tg.length === "number" && tg.length > 0) {
+        var names = [];
+        for (var i = 0; i < tg.length && names.length < BATTLE_ENEMIES_MAX; i++) {
+          if (tg[i] && typeof tg[i].name === "function") names.push(clipName(tg[i].name()));
+        }
+        if (names.length) info.targets = names;
+      }
+    } catch (e4) { reportError(e4); }
+    return info;
+  }
+
+  // Wraps whatever displayAction is installed now (a battle plugin loaded after this one replaces the
+  // prototype function: checked again at every battle setup). Never changes what the game shows.
+  function ensureActionHook() {
+    var WB = G.Window_BattleLog && G.Window_BattleLog.prototype;
+    if (!WB || typeof WB.displayAction !== "function" || WB.displayAction.__rpgvAction) return;
+    var orig = WB.displayAction;
+    var wrapped = function (subject, item) {
+      var info = null, captured = null, hadOwn = false, ownPush = null, self = this;
+      try {
+        if (battleLog && run !== null && inBattleNow()) {
+          info = actionInfo(subject, item);
+          if (info && typeof self.push === "function") {
+            captured = [];
+            hadOwn = Object.prototype.hasOwnProperty.call(self, "push");
+            ownPush = self.push;
+            var basePush = self.push;
+            self.push = function (name, text) {
+              try { if (name === "addText" && captured.length < 1) captured.push(text == null ? "" : String(text)); } catch (ec) { reportError(ec); }
+              return basePush.apply(this, arguments);
+            };
+          }
+        }
+      } catch (e) { reportError(e); }
+      try {
+        return orig.apply(this, arguments);
+      } finally {
+        if (captured) {
+          try { if (hadOwn) self.push = ownPush; else delete self.push; } catch (er) { reportError(er); }
+        }
+        if (info) {
+          try {
+            var first = captured && captured.length ? captured[0] : "";
+            self._rpgvSkip = first !== "" ? first : null;
+            battleLine(first, info);
+          } catch (ea) { reportError(ea); }
+        }
+      }
+    };
+    wrapped.__rpgvAction = true;
+    WB.displayAction = wrapped;
+    if (bridge._hooks.indexOf("Window_BattleLog.displayAction") < 0) bridge._hooks.push("Window_BattleLog.displayAction");
   }
 
   // ---------------------------------------------------------------- plugin commands
@@ -1531,6 +1605,7 @@
       return function (troopId) {
         var r = orig.apply(this, arguments);
         try { battleStartT = now(); } catch (eb) { reportError(eb); }
+        try { ensureActionHook(); } catch (eh) { reportError(eh); }
         try {
           battleLog = { lines: 0, dropped: 0, times: [], lastText: null, lastT: -Infinity, picsT: -Infinity };
           // capturing: the start record waits for the battle scene (Scene_Battle.start) to take its pictures
@@ -1577,10 +1652,16 @@
     var WB = G.Window_BattleLog && G.Window_BattleLog.prototype;
     hook(WB, "Window_BattleLog", "addText", function (orig) {
       return function (text) {
-        try { if (battleLog && inBattleNow()) battleLine(text); } catch (e) { reportError(e); }
+        try {
+          var skip = this._rpgvSkip;
+          // the action line displayAction queued was already written with who used it (until the next action)
+          if (skip != null && skip === (text == null ? "" : String(text))) this._rpgvSkip = null;
+          else if (battleLog && inBattleNow()) battleLine(text);
+        } catch (e) { reportError(e); }
         return orig.apply(this, arguments);
       };
     });
+    try { ensureActionHook(); } catch (eh) { reportError(eh); }
 
     try { installAssist(); } catch (ea) { reportError(ea); } // the log hooks below must still install
 

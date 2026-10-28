@@ -262,8 +262,25 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Scene_Battle(this: any) {}
   Scene_Battle.prototype.start = function () { this.started = true; };
   // Window_BattleLog: addText is where every displayed log line ends up (push('addText') calls it later)
-  function Window_BattleLog(this: any) { this._lines = []; }
+  function Window_BattleLog(this: any) { this._lines = []; this._methods = []; }
   Window_BattleLog.prototype.addText = function (text: string) { this._lines.push(text); };
+  Window_BattleLog.prototype.push = function (name: string, ...params: unknown[]) { this._methods.push({ name, params }); };
+  Window_BattleLog.prototype.callNextMethod = function () {
+    const m = this._methods.shift();
+    if (m && typeof this[m.name] === "function") this[m.name](...m.params);
+  };
+  Window_BattleLog.prototype.wait = function () {};
+  // like rpg_windows.js: skill message1/message2 (%1 = skill name) or the item use line, queued with push
+  Window_BattleLog.prototype.displayAction = function (subject: any, item: any) {
+    const n = this._methods.length;
+    if ("stypeId" in item) {
+      if (item.message1) this.push("addText", subject.name() + item.message1.replace("%1", item.name));
+      if (item.message2) this.push("addText", item.message2.replace("%1", item.name));
+    } else {
+      this.push("addText", `${subject.name()}은(는) ${item.name}을(를) 사용했다!`);
+    }
+    if (this._methods.length === n) this.push("wait");
+  };
   // Input: keyMapper like the engine's default (subset); update / isTriggered / isRepeated /
   // isLongPressed follow rpg_core.js (latest button + _pressedTime, repeat wait 24, interval 6).
   const Input = {

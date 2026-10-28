@@ -32,7 +32,14 @@ export type LogRecord = RecordBase & (
     rewards?: { exp: number; gold: number; items: string[] }; dropped?: number; pics?: unknown[]; picsSame?: true;
   }
   /** 1.8.0+: 전투 로그 한 줄(제어 문자 그대로). 이야기 기록이 아니다. pics: 그림이 바뀌었을 때만 */
-  | { type: "battlelog"; text: string; pics?: unknown[] }
+  /**
+   * 1.8.1+: kind "action" = 기술·아이템 사용 줄(Window_BattleLog.displayAction). by = 쓴 쪽 이름, isEnemy = 적이 썼는지,
+   * item = 기술·아이템 이름, itemKind, targets = 대상 이름들(있을 때만). text = 그때 띄운 첫 줄(없으면 "")
+   */
+  | {
+    type: "battlelog"; text: string; pics?: unknown[];
+    kind?: "action"; by?: string; isEnemy?: boolean; item?: string; itemKind?: "skill" | "item"; targets?: string[];
+  }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
   | { type: "save"; slot: number }
   | { type: "load"; slot: number }

@@ -7,6 +7,7 @@ import { branchPath, buildHistory, foldTimeline } from "./history";
 import { parseLogText } from "./log";
 import { lastSeqOf, readerItems, type ReaderItem } from "./reader";
 import { choiceFlow } from "./choiceFlow";
+import { battleActionLabel, stripLineTags } from "./battleLine";
 import type { Coverage, HistoryItem, LogRecord } from "./types";
 import { readStats } from "../../ui/live/readerWindow";
 import { filterItems } from "../../ui/live/historyFilter";
@@ -169,6 +170,53 @@ describe("readerItems battle blocks", () => {
     const seg = flow.find(f => f.kind === "segment");
     expect(seg).toMatchObject({ messages: 1 });
     expect(seg?.kind === "segment" && seg.items.map(i => i.kind)).toEqual(["battle", "battle"]);
+  });
+});
+
+describe("battle action lines (1.8.1)", () => {
+  const items = (recs: LogRecord[]) => {
+    const model = buildHistory(recs);
+    return readerItems(foldTimeline(branchPath(recs, model, 1), model, {}), data, new Map(), model, null, null);
+  };
+  const logOf = (recs: LogRecord[]) => (items(recs)[1] as Extract<ReaderItem, { kind: "battle" }>).items;
+
+  it("strips YEP line tags at line starts from every log line", () => {
+    expect(stripLineTags("<SIMPLE>할퀴기")).toBe("할퀴기");
+    expect(stripLineTags("<CENTER><WRAP>할퀴기 공격!\n<LEFT>둘째 줄 <B>그대로")).toBe("할퀴기 공격!\n둘째 줄 <B>그대로");
+    expect(stripLineTags("<b>small tags stay</b>")).toBe("<b>small tags stay</b>");
+    const out = logOf([bs(1), start(2), line(3, "<CENTER>\\C[2]할퀴기\\C[0] 공격!"), end(4, "win")]);
+    expect(out[0]).toMatchObject({ kind: "battlelog", text: "할퀴기 공격!" });
+    expect(out[0]).not.toHaveProperty("action");
+  });
+
+  it("1.8.1 action records: who used which skill / item, party or enemy, targets", () => {
+    const out = logOf([
+      bs(1), start(2),
+      line(3, "<SIMPLE>할퀴기", { kind: "action", by: "고블린 A", isEnemy: true, item: "할퀴기", itemKind: "skill", targets: ["\\N[1]"] }),
+      line(4, "", { kind: "action", by: "\\N[1]", isEnemy: false, item: "포션", itemKind: "item" }),
+      line(5, "", { kind: "action", by: 3, item: null }),
+      end(6, "win"),
+    ]);
+    const actor1 = data.actors[1]?.name ?? "";
+    expect(out[0]).toMatchObject({ text: "할퀴기", action: { by: "고블린 A", item: "할퀴기", itemKind: "skill", enemy: true, targets: [actor1] } });
+    expect(out[1]).toMatchObject({ action: { by: actor1, item: "포션", itemKind: "item", enemy: false, targets: [] } });
+    expect(out[2]).not.toHaveProperty("action"); // broken fields: a plain (empty) line
+    const a = (out[0] as Extract<ReaderItem, { kind: "battlelog" }>).action!;
+    expect(battleActionLabel(a)).toBe("고블린 A: 할퀴기");
+  });
+
+  it("1.8.0 `<SIMPLE>X` lines become `기술: X` (who used it is unknown)", () => {
+    const out = logOf([bs(1), start(2), line(3, "<SIMPLE>할퀴기"), line(4, "<SIMPLE>"), end(5, "win")]);
+    const a = (out[0] as Extract<ReaderItem, { kind: "battlelog" }>).action!;
+    expect(a).toEqual({ by: "", item: "할퀴기", itemKind: "skill", enemy: false, targets: [] });
+    expect(battleActionLabel(a)).toBe("기술: 할퀴기");
+    expect(out[1]).not.toHaveProperty("action");
+  });
+
+  it("battles with the same lines but different users are not folded as repeats", () => {
+    const fight = (s: number, by: string) => [start(s), line(s + 1, "<SIMPLE>할퀴기", { kind: "action", by, item: "할퀴기" }), end(s + 2, "win")];
+    expect(battles(fold([bs(1), ...fight(10, "고블린 A"), ...fight(20, "고블린 B")])).map(b => b.repeat)).toEqual([0, 0]);
+    expect(battles(fold([bs(1), ...fight(10, "고블린 A"), ...fight(20, "고블린 A")])).map(b => b.repeat)).toEqual([0, 1]);
   });
 });
 

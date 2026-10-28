@@ -157,6 +157,88 @@ describe("battle log (1.8.0)", () => {
   });
 });
 
+describe("battle actions (1.8.1)", () => {
+  const actor = (name: string) => ({ name: () => name, isEnemy: () => false });
+  const foe = (name: string) => ({ name: () => name, isEnemy: () => true });
+  const scratch = { id: 7, name: "할퀴기", stypeId: 1, message1: "의 %1!", message2: "" };
+  const potion = { id: 1, name: "포션", itypeId: 1 };
+  const drain = (w: any) => { while (w._methods.length) w.callNextMethod(); };
+  const lines = (hh: Harness) => log(hh).filter((r) => r.type === "battlelog");
+
+  for (const engine of ["MZ", "MV"] as const) {
+    it(`writes who used which skill / item once, with targets; the queued line is not written again (${engine})`, () => {
+      h = newGame(engine);
+      startBattle(h);
+      const w = new h.g.Window_BattleLog();
+      h.g.BattleManager._targets = [enemy("슬라임 A")];
+      w.displayAction(actor("리드"), scratch);
+      expect(w._methods).toEqual([{ name: "addText", params: ["리드의 할퀴기!"] }]);
+      expect(Object.prototype.hasOwnProperty.call(w, "push")).toBe(false); // the window's push is restored
+      drain(w);
+      w.addText("슬라임 A에게 12의 데미지!");
+      h.g.BattleManager._targets = [];
+      w.displayAction(foe("슬라임 A"), potion);
+      drain(w);
+      expect(w._lines).toEqual(["리드의 할퀴기!", "슬라임 A에게 12의 데미지!", "슬라임 A은(는) 포션을(를) 사용했다!"]);
+      expect(lines(h)).toEqual([
+        expect.objectContaining({ kind: "action", by: "리드", isEnemy: false, item: "할퀴기", itemKind: "skill", targets: ["슬라임 A"], text: "리드의 할퀴기!" }),
+        expect.objectContaining({ text: "슬라임 A에게 12의 데미지!" }),
+        expect.objectContaining({ kind: "action", by: "슬라임 A", isEnemy: true, item: "포션", itemKind: "item", text: "슬라임 A은(는) 포션을(를) 사용했다!" }),
+      ]);
+      expect(lines(h)[2]).not.toHaveProperty("targets");
+    });
+  }
+
+  it("wraps a displayAction a battle plugin installed later (YEP <SIMPLE> name box + <CENTER> message2)", () => {
+    h = newGame();
+    // YEP_BattleEngineCore (Show Action Text off) replaces the prototype function after this plugin loaded
+    h.g.Window_BattleLog.prototype.displayAction = function (this: any, _subject: any, item: any) {
+      this.push("addText", "<SIMPLE>" + item.name);
+      if (item.message2) this.push("addText", "<CENTER>" + item.message2.replace("%1", item.name));
+    };
+    startBattle(h);
+    const w = new h.g.Window_BattleLog();
+    w.displayAction(foe("늑대"), { ...scratch, message2: "%1 공격!" });
+    drain(w);
+    expect(w._lines).toEqual(["<SIMPLE>할퀴기", "<CENTER>할퀴기 공격!"]);
+    expect(lines(h)).toEqual([
+      expect.objectContaining({ kind: "action", by: "늑대", isEnemy: true, item: "할퀴기", text: "<SIMPLE>할퀴기" }),
+      expect.objectContaining({ text: "<CENTER>할퀴기 공격!" }),
+    ]);
+    expect(lines(h)[1]).not.toHaveProperty("kind");
+    expect(h.bridge._hooks.filter((x: string) => x === "Window_BattleLog.displayAction")).toHaveLength(1);
+  });
+
+  it("an action without a message line is still written; outside battle nothing is", () => {
+    h = newGame();
+    const w = new h.g.Window_BattleLog();
+    w.displayAction(actor("리드"), scratch);
+    drain(w);
+    startBattle(h);
+    w.displayAction(actor("리드"), { ...scratch, message1: "" });
+    drain(w);
+    expect(lines(h)).toEqual([expect.objectContaining({ kind: "action", by: "리드", item: "할퀴기", text: "" })]);
+  });
+
+  it("survives a throwing subject and broken items", () => {
+    h = newGame();
+    startBattle(h);
+    const w = new h.g.Window_BattleLog();
+    const bad = { name: () => "리드", isEnemy: () => { throw new Error("boom"); } };
+    h.g.BattleManager._targets = [null, { name: 5 }];
+    w.displayAction(bad, { stypeId: 1, name: 3, message1: "의 공격!" });
+    drain(w);
+    expect(w._lines).toEqual(["리드의 공격!"]);
+    expect(lines(h)).toEqual([expect.objectContaining({ kind: "action", by: "리드", isEnemy: false, item: "", text: "리드의 공격!" })]);
+    expect(lines(h)[0]).not.toHaveProperty("targets");
+    // a displayAction that throws still gives the window its own push back
+    h.g.Window_BattleLog.prototype.displayAction = function () { this.push("addText", "x"); throw new Error("plugin bug"); };
+    h.g.BattleManager.setup(3, true, false);
+    expect(() => w.displayAction(bad, scratch)).toThrow("plugin bug");
+    expect(Object.prototype.hasOwnProperty.call(w, "push")).toBe(false);
+  });
+});
+
 describe("battle pictures (1.8.0)", () => {
   it("captures the battle scene's pictures at start (after Scene_Battle starts), on troop messages and at the end", () => {
     h = newGame();

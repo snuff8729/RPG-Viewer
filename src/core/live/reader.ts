@@ -1,4 +1,5 @@
 import { formatText } from "../text/escape";
+import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
 import { locationKey } from "../index/locations";
 import { nextShot, type ScreenScene, type ScreenShot } from "../addons/screenPictures";
@@ -31,8 +32,8 @@ export type ReaderItem =
     items: ReaderItem[]; logLines: number; dropped: number; rewards: string | null; repeat: number;
     screen?: ScreenShot; endScreen?: ScreenShot;
   }
-  /** 전투 로그 한 줄(제어 문자 처리). screen: 이 줄에서 새로 보일 화면 그림 */
-  | { kind: "battlelog"; key: string; seq: number; text: string; screen?: ScreenShot };
+  /** 전투 로그 한 줄(제어 문자·줄 태그 처리). action: 기술·아이템 사용 줄. screen: 이 줄에서 새로 보일 화면 그림 */
+  | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot };
 
 export type BattleResult = "win" | "lose" | "escape" | "abort";
 const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
@@ -113,7 +114,12 @@ function fromRecord(
       if (isContinuation(model, r.branch)) return null;
       return { kind: "chapter", key: `c${r.seq}`, text: `— ${branchLabel(model, r.branch)} 시작 —` };
     case "battle": return r.phase === "start" ? battleItem(r, null, [], 0, 0, data) : null;
-    case "battlelog": return { kind: "battlelog", key: `r${r.seq}`, seq: r.seq, text: formatText(safe(r.text), data) };
+    case "battlelog": {
+      const item: Extract<ReaderItem, { kind: "battlelog" }> = { kind: "battlelog", key: `r${r.seq}`, seq: r.seq, text: battleLogText(r.text, data) };
+      const action = battleActionOf(r, data);
+      if (action) item.action = action;
+      return item;
+    }
     default: return null;
   }
 }
