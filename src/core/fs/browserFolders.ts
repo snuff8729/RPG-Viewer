@@ -124,12 +124,20 @@ export class DirectoryHandleFolder implements WritableGameFolder {
 
   async readText(path: string): Promise<string | null> {
     const f = await this.fileOf(path);
-    return f ? await f.text() : null;
+    try {
+      return f ? await f.text() : null;
+    } catch {
+      return null;
+    }
   }
 
   async readBinary(path: string): Promise<ArrayBuffer | null> {
     const f = await this.fileOf(path);
-    return f ? await f.arrayBuffer() : null;
+    try {
+      return f ? await f.arrayBuffer() : null;
+    } catch {
+      return null;
+    }
   }
 
   async list(dir: string): Promise<string[]> {
@@ -139,12 +147,22 @@ export class DirectoryHandleFolder implements WritableGameFolder {
 
   async stat(path: string): Promise<FileStat | null> {
     const f = await this.fileOf(path);
-    return f ? { size: f.size, lastModified: f.lastModified } : null;
+    try {
+      return f ? { size: f.size, lastModified: f.lastModified } : null;
+    } catch {
+      return null;
+    }
   }
 
   async readRange(path: string, start: number, end: number): Promise<ArrayBuffer | null> {
     const f = await this.fileOf(path);
-    return f ? await f.slice(start, end).arrayBuffer() : null;
+    if (!f) return null;
+    const s = Math.max(0, start);
+    try {
+      return await f.slice(s, Math.max(s, end)).arrayBuffer();
+    } catch {
+      return null;
+    }
   }
 
   async writeText(path: string, text: string): Promise<boolean> {
@@ -158,8 +176,17 @@ export class DirectoryHandleFolder implements WritableGameFolder {
       const key = segs.join("/").toLowerCase();
       const fh = existing ? existing.fh : await dir.getFileHandle(name, { create: true });
       const w = await fh.createWritable();
-      await w.write(text);
-      await w.close();
+      try {
+        await w.write(text);
+        await w.close();
+      } catch {
+        try {
+          await (w as unknown as { abort?: () => Promise<void> }).abort?.();
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
       if (!existing) await this.learn(key, name);
       return true;
     } catch {

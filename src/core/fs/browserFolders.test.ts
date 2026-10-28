@@ -101,6 +101,50 @@ describe("DirectoryHandleFolder", () => {
     expect(await f.canWrite()).toBe(false);
     expect(await f.requestWrite()).toBe(true);
   });
+  it("writeText aborts the writable and returns false when write throws", async () => {
+    let aborted = false;
+    const fh = {
+      kind: "file",
+      getFile: async () => new Blob([""]),
+      createWritable: async () => ({
+        async write() {
+          throw new Error("disk full");
+        },
+        async close() {},
+        async abort() {
+          aborted = true;
+        },
+      }),
+    };
+    const root = {
+      kind: "directory",
+      getFileHandle: async () => fh,
+      async *keys() {},
+    } as unknown as FileSystemDirectoryHandle;
+    expect(await new DirectoryHandleFolder(root).writeText("a.txt", "x")).toBe(false);
+    expect(aborted).toBe(true);
+  });
+  it("reads resolve null when the file read rejects; negative range is normalized", async () => {
+    const bad = {
+      size: 1,
+      lastModified: 1,
+      text: async () => Promise.reject(new Error("NotReadableError")),
+      arrayBuffer: async () => Promise.reject(new Error("NotReadableError")),
+      slice: () => ({ arrayBuffer: async () => Promise.reject(new Error("NotReadableError")) }),
+    };
+    const root = {
+      kind: "directory",
+      getFileHandle: async () => ({ kind: "file", getFile: async () => bad }),
+      async *keys() {},
+    } as unknown as FileSystemDirectoryHandle;
+    const f = new DirectoryHandleFolder(root);
+    expect(await f.readRange("a", 0, 5)).toBeNull();
+    expect(await f.readText("a")).toBeNull();
+    expect(await f.readBinary("a")).toBeNull();
+    const g = new DirectoryHandleFolder(fakeDir({ "l.txt": "hello" }, { lists: 0 }));
+    expect(new TextDecoder().decode((await g.readRange("l.txt", -3, 2))!)).toBe("he");
+    expect((await g.readRange("l.txt", 4, 1))!.byteLength).toBe(0);
+  });
   it("FileListFolder is not writable", () => {
     expect(isWritableFolder(new FileListFolder([] as unknown as FileList))).toBe(false);
   });
