@@ -11,6 +11,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Switch } from "@/components/ui/switch";
 import { PictureRolesSection } from "./PictureRolesSection";
 import { NoticeHooksSection } from "./NoticeHooksSection";
+import { AdapterCard } from "./AdapterCard";
+import { StoryProgressSection } from "./StoryProgressSection";
+import { useGameSettingsOpen } from "./gameSettingsOpen";
 import { useGame } from "@/app/GameProvider";
 import { Badge } from "@/components/ui/badge";
 import type { GameData } from "@/core/types";
@@ -58,10 +61,11 @@ function availableHere(addon: AddonDef, data: GameData | null | undefined): bool
 
 /** 상단 `게임 설정` Sheet: 이 게임에서만 켜는 부가 기능(애드온) 목록. */
 export function GameSettingsSheet() {
-  const { isOn, setOn, savedInFolder } = useAddons();
+  const { isOn, setOn, savedInFolder, adapters } = useAddons();
   const { data } = useGame();
+  const [open, setOpen] = useGameSettingsOpen();
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button variant="outline" size="sm"><Settings2 />게임 설정</Button>
       </SheetTrigger>
@@ -69,10 +73,12 @@ export function GameSettingsSheet() {
         <SheetHeader>
           <SheetTitle>게임 설정</SheetTitle>
           <SheetDescription>
-            이 게임에만 적용되는 부가 기능이에요.{savedInFolder ? " 설정은 게임 폴더(rpg-viewer/addons.json)에 저장돼요." : " 설정은 이 브라우저에 저장돼요."}
+            이 게임에만 적용되는 설정과 부가 기능이에요.{savedInFolder ? " 설정은 게임 폴더(rpg-viewer/addons.json)에 저장돼요." : " 설정은 이 브라우저에 저장돼요."}
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-4 px-4 pb-4">
+          <StoryProgressSection />
+          {adapters.map((a) => <AdapterCard key={a.manifest.id} adapter={a} />)}
           {ADDONS.map((a) => {
             const id = `addon-${a.id}`;
             const on = isOn(a.id);

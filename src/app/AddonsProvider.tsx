@@ -3,10 +3,15 @@ import { useGame } from "./GameProvider";
 import { loadAddonFile, saveAddonFile } from "./addons";
 import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
-import type { AddonFile } from "@/core/addons/settings";
+import { cleanStoryProgress, type AddonFile } from "@/core/addons/settings";
 import { cleanNoticeHooks } from "@/core/addons/notices";
+import { keyText, parseKeyText, type StoryKey } from "@/core/story/progress";
 import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
+import { BUNDLED_ADAPTERS } from "./adapterBundle";
+import type { BundledAdapter } from "@/core/adapters/bundle";
+import { applyAddonDefaults, defaultRoleOf, matchesGame, roleDefaultsOf } from "@/core/adapters/manifest";
+import type { ScreenPicture } from "@/core/addons/screenPictures";
 
 /** 게임별 애드온(부가 기능) 켜짐 상태와 화면 그림 구분. */
 export interface AddonsValue {
@@ -27,10 +32,23 @@ export interface AddonsValue {
   noticeHooks: string[];
   /** 직접 추가한 함수 경로를 바꾼다(쓸 수 없는 경로는 버린다). 클릭 핸들러 안에서 부를 것. */
   setNoticeHooks(paths: string[]): void;
+  /** 직접 고른 이야기 진행 기준(없으면 자동) */
+  storyProgress: StoryKey | null;
+  /** 이야기 진행 기준을 정한다(null = 자동). 선택 핸들러 안에서 부를 것. */
+  setStoryProgress(key: StoryKey | null): void;
   /** 켜진 애드온이 control.json에 싣는 값 */
   controlFlags: Record<string, unknown>;
   /** 설정이 게임 폴더(rpg-viewer/addons.json)에 저장되는가(아니면 이 브라우저에만) */
   savedInFolder: boolean;
+  /** 이 게임에 맞는 게임 전용 어댑터(뷰어에 들어 있는 것 중) */
+  adapters: readonly BundledAdapter[];
+  /** 이 게임에서 켠 어댑터(맞는 것 중) */
+  enabledAdapters: readonly BundledAdapter[];
+  isAdapterOn(id: string): boolean;
+  /** 어댑터를 켜고 끈다(켤 때 기본 애드온도 켠다). 클릭 핸들러 안에서 부를 것. 게임 쪽 확장 설치는 부르는 쪽이 한다. */
+  setAdapterOn(id: string, on: boolean): void;
+  /** 켠 어댑터들이 정한 그림 기본 구분(없으면 null) */
+  defaultRole: ((p: ScreenPicture) => PictureRole | null) | null;
 }
 
 const EMPTY: AddonState = {};
@@ -40,7 +58,9 @@ const NO_SPRITE_ROLES: SpriteRoles = {};
 const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
   state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {},
-  spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
+  spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {},
+  storyProgress: null, setStoryProgress: () => {}, controlFlags: {}, savedInFolder: false,
+  adapters: [], enabledAdapters: [], isAdapterOn: () => false, setAdapterOn: () => {}, defaultRole: null,
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
 
@@ -69,6 +89,21 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const pictureRoles = current?.file.pictureRoles ?? NO_ROLES;
   const noticeHooks = current?.file.noticeHooks ?? NO_HOOKS;
   const spriteRoles = current?.file.spriteRoles ?? NO_SPRITE_ROLES;
+  const adapterState = current?.file.adapters;
+  const enabledPlugins = data?.enabledPlugins;
+  const gameTitle = data?.system.gameTitle;
+  const adapters = useMemo(
+    () => BUNDLED_ADAPTERS.filter((a) => matchesGame(a.manifest, { plugins: enabledPlugins ?? [], gameTitle })),
+    [enabledPlugins, gameTitle],
+  );
+  const enabledAdapters = useMemo(() => adapters.filter((a) => adapterState?.[a.manifest.id] === true), [adapters, adapterState]);
+  const defaultRole = useMemo(() => {
+    const d = roleDefaultsOf(enabledAdapters.map((a) => a.manifest));
+    if (d.pictureRoles.length === 0 && d.spriteRoles.length === 0) return null;
+    return (p: ScreenPicture) => defaultRoleOf(p, d);
+  }, [enabledAdapters]);
+  const storyText = current?.file.storyProgress ?? null;
+  const storyProgress = useMemo(() => parseKeyText(storyText), [storyText]);
 
   /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
@@ -114,11 +149,29 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setAdapterOn = useCallback((id: string, on: boolean) => {
+    const manifest = BUNDLED_ADAPTERS.find((a) => a.manifest.id === id)?.manifest ?? null;
+    update((prev) => ({
+      ...prev,
+      state: on ? applyAddonDefaults(prev.state, manifest) : prev.state,
+      adapters: { ...(prev.adapters ?? {}), [id]: on },
+    }));
+  }, [update]);
+
   const setNoticeHooks = useCallback((paths: string[]) => {
     update((prev) => {
       const hooks = cleanNoticeHooks(paths);
       const next: AddonFile = { ...prev };
       if (hooks.length > 0) next.noticeHooks = hooks; else delete next.noticeHooks;
+      return next;
+    });
+  }, [update]);
+
+  const setStoryProgress = useCallback((key: StoryKey | null) => {
+    update((prev) => {
+      const next: AddonFile = { ...prev };
+      const text = key ? cleanStoryProgress(keyText(key)) : null;
+      if (text) next.storyProgress = text; else delete next.storyProgress;
       return next;
     });
   }, [update]);
@@ -133,9 +186,17 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     setSpriteRole,
     noticeHooks,
     setNoticeHooks,
+    storyProgress,
+    setStoryProgress,
     controlFlags: addonControlFlags(state, { noticeHooks }),
     savedInFolder: current?.inFolder ?? false,
-  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, current?.inFolder]);
+    adapters,
+    enabledAdapters,
+    isAdapterOn: (id) => enabledAdapters.some((a) => a.manifest.id === id),
+    setAdapterOn,
+    defaultRole,
+  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, storyProgress, setStoryProgress,
+    current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

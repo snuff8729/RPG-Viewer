@@ -1,6 +1,7 @@
 import { ADDONS, type AddonState } from "./registry";
 import { isPictureRole, type PictureRoles, type SpriteRoles } from "./screenPictures";
 import { cleanNoticeHooks } from "./notices";
+import { keyText, parseKeyText } from "../story/progress";
 
 /**
  * 게임별 애드온 설정 전체: 켜짐 상태와 화면 그림 구분(그림 번호 → 직접 고른 구분),
@@ -10,15 +11,22 @@ export interface AddonFile {
   state: AddonState; pictureRoles: PictureRoles; noticeHooks?: string[];
   /** 플러그인이 띄운 그림(1.10.0)의 이름 열쇠(spriteKeyOf) → 직접 고른 구분(없으면 없음) */
   spriteRoles?: SpriteRoles;
+  /** 게임 전용 어댑터(adapters/<id>) 켜짐 상태: id → 켜짐. 없으면 모두 꺼짐. */
+  adapters?: Record<string, boolean>;
+  /** 이야기 진행 기준(직접 고른 것, `v:12` 또는 `s:3,4,5`). 없으면 자동 */
+  storyProgress?: string;
 }
 
 /**
  * 게임 폴더의 rpg-viewer/addons.json 본문(계약 v1):
  * { v: 1, enabled: { [id]: boolean }, pictureRoles?: { [그림 번호]: 구분 }, noticeHooks?: string[] }.
- * pictureRoles·noticeHooks·spriteRoles({ [이름 열쇠]: 구분 }, 1.10.0)는 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
+ * pictureRoles·noticeHooks·spriteRoles({ [이름 열쇠]: 구분 }, 1.10.0)·storyProgress(이야기 진행 기준 `v:12`·`s:3,4`)는
+ * 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
  */
 export function addonsJson(
   state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null, spriteRoles?: SpriteRoles | null,
+  adapters?: Record<string, boolean> | null,
+  storyProgress?: string | null,
 ): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
@@ -29,7 +37,30 @@ export function addonsJson(
   if (hooks.length > 0) body.noticeHooks = hooks;
   const sprites = cleanSpriteRoles(spriteRoles);
   if (Object.keys(sprites).length > 0) body.spriteRoles = sprites;
+  const ad = cleanAdapters(adapters);
+  if (Object.keys(ad).length > 0) body.adapters = ad;
+  const story = cleanStoryProgress(storyProgress);
+  if (story) body.storyProgress = story;
   return JSON.stringify(body, null, 2) + "\n";
+}
+
+/** 이야기 진행 기준 글(`v:12`·`s:3,4`)을 고쳐 쓴다. 못 읽으면 null */
+export function cleanStoryProgress(v: unknown): string | null {
+  const k = parseKeyText(v);
+  return k ? keyText(k) : null;
+}
+
+const ADAPTER_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+/** 어댑터 id → 켜짐(쓸 수 없는 id·참/거짓이 아닌 값은 버린다, 최대 50개) */
+export function cleanAdapters(v: unknown): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, on] of Object.entries(v as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 50) break;
+    if (ADAPTER_ID_RE.test(k) && typeof on === "boolean") out[k] = on;
+  }
+  return out;
 }
 
 const SPRITE_ROLES_MAX = 500, SPRITE_KEY_MAX = 200;
@@ -76,6 +107,10 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
     if (hooks.length > 0) file.noticeHooks = hooks;
     const sprites = cleanSpriteRoles((raw as { spriteRoles?: unknown }).spriteRoles);
     if (Object.keys(sprites).length > 0) file.spriteRoles = sprites;
+    const ad = cleanAdapters((raw as { adapters?: unknown }).adapters);
+    if (Object.keys(ad).length > 0) file.adapters = ad;
+    const story = cleanStoryProgress((raw as { storyProgress?: unknown }).storyProgress);
+    if (story) file.storyProgress = story;
     return file;
   } catch {
     return null;

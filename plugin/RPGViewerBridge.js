@@ -29,6 +29,8 @@
  * 위쪽에 잠깐 띄우는 문구(TickerManager.show, LiveCommentContainer의 show 등과
  * 설정에서 직접 추가한 함수)를 기록합니다. 같은 문구는 0.3초 안에 한 번,
  * 초당 30개까지만 남기고, 게임이 보여 주는 내용은 바꾸지 않습니다.
+ * 게임 전용 확장(RPGViewerBridge_<id>.js, 이 플러그인 바로 뒤)은
+ * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -581,6 +583,7 @@
         capturePictures: capturePictures,
         captureNotices: captureNotices,
         notices: noticeHooked.slice(),
+        extensions: bridge.extensions(),
         hotkeys: effectiveHotkeys()
       }
     };
@@ -1322,6 +1325,96 @@
     return out[0] || out[1] || out[2] || out[3] ? out : null;
   }
 
+  // ---------------------------------------------------------------- game extensions (1.13.0)
+  // Game adapters (adapters/<id>/bridge.js in the RPG Viewer repo, installed as js/plugins/RPGViewerBridge_<id>.js right
+  // after this plugin) register with RPGViewerBridge.registerExtension(ext). Every field but id is optional:
+  //   ext.onInstall(api)                   once, right away (api below)
+  //   ext.captureScene(scene) -> true      read this scene's images too although it has no spriteset (menu scenes)
+  //   ext.snapshotEntry(sprite, entry, scene) -> entry | null | undefined
+  //                                        for each captured image: a changed entry, null = drop it, undefined = keep it
+  //                                        (replace animated values with settled ones)
+  //   ext.snapshotMeta(sprite, entry, scene) -> { key: string | number | boolean } | null
+  //                                        stored at entry index 14 (indexes 9..13 padded with 0), at most 8 keys
+  // api: { version, global, hook(owner, ownerName, name, make), markScreenDirty(), capturing(), reportError(e) }
+  // A throwing hook is reported and skipped for that call. Extensions loaded before this plugin may push themselves
+  // onto window.RPGViewerBridgeExtensions; they are registered when this plugin starts.
+  var extensions = [], EXT_MAX = 16, META_KEYS_MAX = 8, META_TEXT_MAX = 60;
+  var extApi = {
+    version: bridge.VERSION,
+    global: G,
+    hook: function (owner, ownerName, name, make) { hook(owner, ownerName, name, make); },
+    markScreenDirty: function () { markScreenDirty(); },
+    capturing: function () { return capturePictures; },
+    reportError: function (e) { reportError(e); }
+  };
+  function registerExtension(ext) {
+    try {
+      if (!ext || typeof ext !== "object" || typeof ext.id !== "string" || ext.id === "") return false;
+      for (var i = 0; i < extensions.length; i++) if (extensions[i].id === ext.id) return false;
+      if (extensions.length >= EXT_MAX) return false;
+      extensions.push(ext);
+      if (typeof ext.onInstall === "function") {
+        try { ext.onInstall(extApi); } catch (ei) { reportError(ei); }
+      }
+      return true;
+    } catch (e) {
+      reportError(e);
+      return false;
+    }
+  }
+  bridge.registerExtension = registerExtension;
+  bridge.extensions = function () {
+    var ids = [];
+    for (var i = 0; i < extensions.length; i++) ids.push(extensions[i].id);
+    return ids;
+  };
+  function extCaptures(sc) {
+    for (var i = 0; i < extensions.length; i++) {
+      var x = extensions[i];
+      if (typeof x.captureScene !== "function") continue;
+      try { if (x.captureScene(sc) === true) return true; } catch (e) { reportError(e); }
+    }
+    return false;
+  }
+  function cleanMeta(m) {
+    if (!m || typeof m !== "object") return null;
+    var out = {}, n = 0;
+    for (var k in m) {
+      if (!Object.prototype.hasOwnProperty.call(m, k) || n >= META_KEYS_MAX) continue;
+      var v = m[k];
+      if (typeof v === "string") v = v.length > META_TEXT_MAX ? v.slice(0, META_TEXT_MAX) : v;
+      else if (typeof v === "number") { if (!isFinite(v)) continue; }
+      else if (typeof v !== "boolean") continue;
+      out[k] = v;
+      n++;
+    }
+    return n > 0 ? out : null;
+  }
+  // entry after every extension's snapshotEntry / snapshotMeta; null = dropped
+  function extEntry(sprite, entry, sc) {
+    if (!entry || extensions.length === 0) return entry;
+    var meta = null;
+    for (var i = 0; i < extensions.length; i++) {
+      var x = extensions[i];
+      if (typeof x.snapshotEntry === "function") {
+        try {
+          var r = x.snapshotEntry(sprite, entry, sc);
+          if (r === null) return null;
+          if (r && typeof r.length === "number" && r.length >= 9) entry = r;
+        } catch (e) { reportError(e); }
+      }
+      if (meta === null && typeof x.snapshotMeta === "function") {
+        try { meta = cleanMeta(x.snapshotMeta(sprite, entry, sc)); } catch (em) { reportError(em); }
+      }
+    }
+    if (!(entry[7] > 0)) return null;
+    if (meta) {
+      while (entry.length < 14) entry.push(0);
+      entry[14] = meta;
+    }
+    return entry;
+  }
+
   // Picture sprites of the current scene: the spriteset's _pictureContainer first, then any moved elsewhere.
   // 1.10.0: the same walk collects every other sprite showing an img/pictures bitmap (plugins drawing cut-ins with
   // plain Sprites), its world transform and alpha accumulated down the tree. Bounded: depth 8, PICS_TREE_MAX nodes;
@@ -1369,11 +1462,11 @@
     return s === "" ? null : s;
   }
   function scanScene(sc) {
-    if (!sc || !sc._spriteset) return null;
+    if (!sc || (!sc._spriteset && !extCaptures(sc))) return null;
     var SP = G.Sprite_Picture, TM = G.Tilemap;
     var res = { pictures: [], sprites: [], pending: 0 };
     var visited = 0;
-    var container = sc._spriteset._pictureContainer || null;
+    var container = (sc._spriteset && sc._spriteset._pictureContainer) || null;
     var walk = function (node, depth, m, alpha, skip) {
       var ch = node && node.children;
       if (!ch || typeof ch.length !== "number" || depth > 8) return;
@@ -1492,13 +1585,13 @@
     if (res && (res.pictures.length || res.sprites.length || res.pending)) {
       var out = [], ids = {};
       for (var i = 0; i < res.pictures.length; i++) {
-        var e = spriteEntry(res.pictures[i], sc);
+        var e = extEntry(res.pictures[i], spriteEntry(res.pictures[i], sc), sc);
         if (e && ids[e[0]] !== true) { ids[e[0]] = true; out.push(e); }
       }
       out.sort(function (a, b) { return a[0] - b[0]; });
       var n = 0;
       for (var j = 0; j < res.sprites.length; j++) {
-        var pe = plainEntry(res.sprites[j]);
+        var pe = extEntry(res.sprites[j].s, plainEntry(res.sprites[j]), sc);
         if (pe) { pe[0] = SPRITE_ID_BASE + n++; out.push(pe); }
       }
       return { pics: out.length > PICS_MAX ? out.slice(0, PICS_MAX) : out, pending: res.pending };
@@ -1629,7 +1722,8 @@
     screenSettle = null;
     lastPicsKey = JSON.stringify(out);
     lastPicsSet = set;
-    emit("screen", { scene: inBattleNow() ? "battle" : "map", pics: out });
+    var scn = G.SceneManager && G.SceneManager._scene;
+    emit("screen", { scene: inBattleNow() ? "battle" : (scn && !scn._spriteset ? "menu" : "map"), pics: out });
   }
   // After each real frame's scene update (what is about to be rendered).
   function screenFrame() {
@@ -1641,7 +1735,7 @@
     var polling = t - screenWatch.pollT >= SCREEN_POLL_MS;
     if (!dirty && !watching && !settling && !polling) return;
     var sc = G.SceneManager && G.SceneManager._scene;
-    var snap = sc && sc._spriteset ? screenNow() : null;
+    var snap = sc && (sc._spriteset || extCaptures(sc)) ? screenNow() : null;
     screenDirty = false;
     if (!snap) { screenSettle = null; return; }
     screenWatch.lastT = t;
@@ -2531,6 +2625,14 @@
     loadMeta();
     raiseMetaFromLog();
     install();
+  } catch (e) {
+    reportError(e);
+  }
+  try { // extensions loaded before this plugin (1.13.0)
+    var early = G.RPGViewerBridgeExtensions;
+    if (early && typeof early.length === "number") {
+      for (var xi = 0; xi < early.length; xi++) registerExtension(early[xi]);
+    }
   } catch (e) {
     reportError(e);
   }

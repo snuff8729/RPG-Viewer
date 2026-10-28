@@ -992,7 +992,7 @@ describe("RPGViewerBridge", () => {
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
         speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
-        lastCommand: null, controlT: null, capturePictures: false, captureNotices: false, notices: [],
+        lastCommand: null, controlT: null, capturePictures: false, captureNotices: false, notices: [], extensions: [],
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null },
       },
     });
