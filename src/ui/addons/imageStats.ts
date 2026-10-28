@@ -1,4 +1,4 @@
-import { alphaStatsOf, pngSize, type AlphaStats, type PicSize } from "@/core/addons/screenPictures";
+import { alphaStatsOf, FLAT_SAMPLE, isFlatPixels, pngSize, type AlphaStats, type PicSize } from "@/core/addons/screenPictures";
 
 /** 투명도 통계를 읽을 때 줄이는 최대 폭(px) */
 const SCAN_WIDTH = 256;
@@ -36,28 +36,23 @@ export function imageAlphaStats(img: ImageBitmap): AlphaStats | null {
 const flatByImage = new WeakMap<ImageBitmap, boolean>();
 
 /**
- * 한 가지 색으로만 칠한 그림인가(화면을 검게·하얗게 덮는 전환용 그림): 8×8로 줄여 읽은 색·투명도 차이가 거의 없다(이미지별 캐시).
- * 읽을 수 없으면 false.
+ * 한 가지 색으로 화면을 덮는 그림인가(화면을 검게·하얗게 덮는 전환용 그림, core isFlatPixels): 긴 변 64px 이상으로 줄여 읽어
+ * 거의 다 불투명하고 거의 다 같은 색(이미지별 캐시). 투명한 바탕의 실루엣은 아니다. 읽을 수 없으면 false.
  */
 export function isFlatImage(img: ImageBitmap): boolean {
   const hit = flatByImage.get(img);
   if (hit !== undefined) return hit;
   let flat = false;
   try {
+    const k = Math.min(1, FLAT_SAMPLE / Math.max(1, img.width, img.height));
+    // 작은 그림은 그대로, 큰 그림은 긴 변 FLAT_SAMPLE로(작은 칸으로 뭉개 실루엣 경계가 사라지지 않게)
+    const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
     const c = document.createElement("canvas");
-    c.width = 8; c.height = 8;
+    c.width = w; c.height = h;
     const ctx = c.getContext("2d", { willReadFrequently: true });
     if (ctx) {
-      ctx.drawImage(img, 0, 0, 8, 8);
-      const px = ctx.getImageData(0, 0, 8, 8).data;
-      const lo = [255, 255, 255, 255], hi = [0, 0, 0, 0];
-      for (let i = 0; i < px.length; i += 4) {
-        for (let k = 0; k < 4; k++) {
-          lo[k] = Math.min(lo[k], px[i + k]);
-          hi[k] = Math.max(hi[k], px[i + k]);
-        }
-      }
-      flat = hi.every((v, k) => v - lo[k] <= 12);
+      ctx.drawImage(img, 0, 0, w, h);
+      flat = isFlatPixels(ctx.getImageData(0, 0, w, h).data, w, h);
     }
   } catch { /* 모름 */ }
   flatByImage.set(img, flat);

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
-  DEFAULT_SCREEN, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type StandGroup,
+  DEFAULT_SCREEN, pictureDraw, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type StandGroup,
 } from "@/core/addons/screenPictures";
 import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
@@ -79,9 +79,11 @@ function ScreenCanvas({ pictures, view, images, className }: {
         ctx.translate(p.x - view.left, p.y - view.top);
         if (p.angle) ctx.rotate((p.angle * Math.PI) / 180);
         ctx.scale(p.scaleX / 100, p.scaleY / 100);
-        const [ax, ay] = p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
+        // 화면 사각형(standView의 standViewOf)과 같은 크기 기준: 기록의 크기(없으면 그림 파일 크기)에 crop 부분 또는 그림 전체
+        const d = pictureDraw(p, { w: img.width, h: img.height });
+        if (!d) continue;
         const src = p.tone ? toned(img, p.tone) : img;
-        ctx.drawImage(src, -ax * img.width, -ay * img.height);
+        ctx.drawImage(src, d.sx, d.sy, d.sw, d.sh, d.dx, d.dy, d.dw, d.dh);
       } catch { /* 그 그림만 건너뛴다 */ } finally {
         ctx.restore();
       }

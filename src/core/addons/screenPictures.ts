@@ -19,8 +19,16 @@ export interface ScreenPicture {
   angle?: number;
   /** 기준점(0~1). 왼쪽 위(0,0)·가운데(0.5,0.5)가 아닐 때만(1.7.0+ 스프라이트 anchor) */
   anchor?: [number, number];
-  /** 그림 크기(px, 1.7.0+). 없으면 그림 파일에서 읽은 크기를 쓴다. */
+  /**
+   * 그리는 크기(px, 1.7.0+, 배율 전). 없으면 그림 파일에서 읽은 크기를 쓴다. crop이 없으면 그림 전체를 이 크기로 늘려 그린다
+   * (그림 파일 크기와 다르면 늘린 것으로 본다 — 원본을 자르지 않는다).
+   */
   w?: number; h?: number;
+  /**
+   * 1.18.1+: 그림 파일에서 보이는 부분 [x, y, 폭, 높이, 그림 폭, 그림 높이](기록 index 15, 그림 파일 px). 플러그인 캔버스의
+   * 일부(스프라이트 frame)만 보이거나 캔버스 일부에 그려진 그림. w·h에 이 부분을 늘려 그린다. 없으면 그림 전체.
+   */
+  crop?: [number, number, number, number, number, number];
   /**
    * 1.10.0+: "sprite" = 그림 명령이 아니라 다른 플러그인이 직접 띄운 그림(전투 컷인 등). id는 1000부터 그리는 순서로 붙인
    * 임시 번호라 그림 구분은 이름(spriteKeyOf)으로 고른다. 위치·크기·각도는 화면 기준(부모 변환을 모두 더한 것).
@@ -85,7 +93,19 @@ export function parsePic(e: unknown): ScreenPicture | null {
   if (e[13] === "sprite") p.kind = "sprite";
   const tag = parseTag(e[14]);
   if (tag) p.tag = tag;
+  const crop = parseCrop(e[15]);
+  if (crop) p.crop = crop;
   return p;
+}
+
+/** 기록 index 15 [x, y, 폭, 높이, 그림 폭, 그림 높이] → crop. 이상하면 null. */
+function parseCrop(v: unknown): [number, number, number, number, number, number] | null {
+  if (!Array.isArray(v) || v.length < 6) return null;
+  const n = v.slice(0, 6).map(x => fin(x, Number.NaN));
+  if (n.some(x => Number.isNaN(x))) return null;
+  const [x, y, w, h, iw, ih] = n;
+  if (!(w > 0 && h > 0 && iw > 0 && ih > 0)) return null;
+  return [x, y, w, h, iw, ih];
 }
 
 /** 기록의 `pics` 배열 → 그림 번호 순 묶음(최대 60개, 같은 번호는 뒤의 것, 투명도 0은 안 보이므로 뺀다). 배열이 아니면 null. */
@@ -206,6 +226,34 @@ export interface PictureContext {
  */
 export interface AlphaStats { opaque: number; box: [number, number, number, number] | null }
 
+/** 한 가지 색 그림 판정: 읽는 크기(긴 변 px 이상), 덮는 비율, 같은 색 비율, 같은 색으로 보는 채널 차이 */
+export const FLAT_SAMPLE = 64;
+const FLAT_COVER = 0.95, FLAT_SAME = 0.99, FLAT_DIST = 8, FLAT_ALPHA = 250;
+
+/**
+ * 화면을 한 가지 색으로 덮는 그림인가(Darkness 같은 전환용 칠): 불투명한(알파 250 이상) 픽셀이 95% 이상이고, 그중 99% 이상이
+ * 대표 색(채널별 중앙값)과 채널마다 8 이내. 투명한 부분이 있는 실루엣(투명 바탕 위 그림자 모양)은 절대 한 가지 색이 아니다.
+ * px: RGBA(FLAT_SAMPLE 이상으로 줄여 읽은 것). 읽을 수 없으면 false. 예외를 던지지 않는다.
+ */
+export function isFlatPixels(px: ArrayLike<number> | null | undefined, w: number, h: number): boolean {
+  try {
+    const n = w * h;
+    if (!px || !(n > 0) || px.length < n * 4) return false;
+    const opaque: number[] = [];
+    for (let i = 0; i < n; i++) if (px[i * 4 + 3] >= FLAT_ALPHA) opaque.push(i * 4);
+    if (opaque.length < n * FLAT_COVER) return false;
+    const ref = [0, 1, 2].map(k => {
+      const v = opaque.map(o => px[o + k]).sort((a, b) => a - b);
+      return v[v.length >> 1];
+    });
+    let same = 0;
+    for (const o of opaque) if (ref.every((r, k) => Math.abs(px[o + k] - r) <= FLAT_DIST)) same++;
+    return same >= opaque.length * FLAT_SAME;
+  } catch {
+    return false;
+  }
+}
+
 /** RGBA 픽셀(줄여 읽은 것이어도 된다) → 투명도 통계. 예외를 던지지 않는다. */
 export function alphaStatsOf(px: ArrayLike<number> | null | undefined, w: number, h: number): AlphaStats | null {
   try {
@@ -253,15 +301,65 @@ function sizeOfPic(p: ScreenPicture, sizeOf: SizeOf | null | undefined): PicSize
   }
 }
 
-/** 그림이 화면에서 차지하는 사각형(회전 포함). 크기를 모르면 null. */
+/** 그림의 기준점(0~1) */
+const anchorOf = (p: ScreenPicture): [number, number] => p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
+
+/**
+ * 그림 파일 안의 사각형(그림 크기에 대한 0~1 비율 [왼, 위, 오른, 아래]) → 그리는 크기 s(배율 전, 왼쪽 위 0) 안의 사각형.
+ * crop이 있으면 그 부분만 s로 늘린 것(밖은 잘린다), 없으면 그림 전체를 s로 늘린 것. 보이는 부분 밖이면 null.
+ */
+function boxInPicture(p: ScreenPicture, s: PicSize, box: [number, number, number, number]): [number, number, number, number] | null {
+  if (!p.crop) return [box[0] * s.w, box[1] * s.h, box[2] * s.w, box[3] * s.h];
+  const [cx, cy, cw, ch, iw, ih] = p.crop;
+  const x0 = Math.max(box[0] * iw, cx), y0 = Math.max(box[1] * ih, cy);
+  const x1 = Math.min(box[2] * iw, cx + cw), y1 = Math.min(box[3] * ih, cy + ch);
+  if (!(x1 > x0 && y1 > y0)) return null;
+  const kx = s.w / cw, ky = s.h / ch;
+  return [(x0 - cx) * kx, (y0 - cy) * ky, (x1 - cx) * kx, (y1 - cy) * ky];
+}
+
+/** 그림 한 장을 그리는 법: 그림 파일의 source 사각형(sx…sh)을 그림 자리 기준(배율·회전 전) dest 사각형(dx…dh)에 */
+export interface PictureDraw { sx: number; sy: number; sw: number; sh: number; dx: number; dy: number; dw: number; dh: number }
+
+/**
+ * 불러온 그림 파일(natural: 그 크기)을 그리는 사각형들. 화면 사각형(pictureRect)과 같은 크기 기준:
+ * 그리는 크기 = 기록의 w·h(없으면 그림 파일 크기), crop이 있으면 그 부분만(그림 파일 크기가 기록 때와 다르면 비율로 맞춘다),
+ * 없으면 그림 전체를 그 크기로 늘린다. 그릴 것이 없으면 null.
+ */
+export function pictureDraw(p: ScreenPicture, natural: PicSize): PictureDraw | null {
+  try {
+    if (!(natural.w > 0 && natural.h > 0)) return null;
+    const s = p.w && p.h ? { w: p.w, h: p.h } : natural;
+    const [ax, ay] = anchorOf(p);
+    const ox = ax ? -ax * s.w : 0, oy = ay ? -ay * s.h : 0;
+    if (!p.crop) return { sx: 0, sy: 0, sw: natural.w, sh: natural.h, dx: ox, dy: oy, dw: s.w, dh: s.h };
+    const [cx, cy, cw, ch, iw, ih] = p.crop;
+    const kx = natural.w / iw, ky = natural.h / ih;
+    // 그림 파일 밖은 잘라 낸다(dest도 같은 비율로)
+    const x0 = Math.max(0, cx), y0 = Math.max(0, cy), x1 = Math.min(iw, cx + cw), y1 = Math.min(ih, cy + ch);
+    if (!(x1 > x0 && y1 > y0)) return null;
+    const dkx = s.w / cw, dky = s.h / ch;
+    return {
+      sx: x0 * kx, sy: y0 * ky, sw: (x1 - x0) * kx, sh: (y1 - y0) * ky,
+      dx: ox + (x0 - cx) * dkx, dy: oy + (y0 - cy) * dky, dw: (x1 - x0) * dkx, dh: (y1 - y0) * dky,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 그림이 화면에서 차지하는 사각형(회전 포함). 크기를 모르면 null. box: 그림 파일 안의 보이는 부분(투명도 통계, 0~1 비율) —
+ * 그리는 크기 기준으로 옮겨 쓴다(crop 밖이면 그 그림 자리의 크기 0 사각형).
+ */
 export function pictureRect(p: ScreenPicture, sizeOf?: SizeOf | null, box?: [number, number, number, number] | null): Rect | null {
   const s = sizeOfPic(p, sizeOf);
   if (!s) return null;
-  const [ax, ay] = p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
+  const [ax, ay] = anchorOf(p);
   const sx = p.scaleX / 100, sy = p.scaleY / 100;
   const rad = ((p.angle ?? 0) * Math.PI) / 180;
   const cos = Math.cos(rad), sin = Math.sin(rad);
-  const [u0, v0, u1, v1] = box ? [box[0] * s.w, box[1] * s.h, box[2] * s.w, box[3] * s.h] : [0, 0, s.w, s.h];
+  const [u0, v0, u1, v1] = box ? boxInPicture(p, s, box) ?? [0, 0, 0, 0] : [0, 0, s.w, s.h];
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const [u, v] of [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]) {
     const dx = (u - ax * s.w) * sx, dy = (v - ay * s.h) * sy;
@@ -278,7 +376,46 @@ export function pictureRect(p: ScreenPicture, sizeOf?: SizeOf | null, box?: [num
 export function contentRect(p: ScreenPicture, ctx: PictureContext): Rect | null {
   const st = statsOfPic(p, ctx);
   if (st && !st.box) return null;
+  if (st?.box && p.crop && !boxInPicture(p, { w: 1, h: 1 }, st.box)) return null; // 보이는 부분이 다 투명
   return pictureRect(p, ctx.sizeOf, st?.box ?? null);
+}
+
+/** 그림들을 그릴 화면 부분(게임 화면 좌표) */
+export interface PictureView { left: number; top: number; width: number; height: number }
+
+/** 스탠딩을 잘라 보이는 부분의 최대 크기(px) */
+const STAND_VIEW_MAX = 8192;
+
+/**
+ * 스탠딩을 잘라 보일 부분: 그림들의 보이는(투명하지 않은) 부분을 합친 곳. 그리는 것(pictureDraw)과 같은 크기 기준 —
+ * naturalOf(이름) = 불러온 그림 파일 크기, 기록에 크기가 없으면 이것. statsOf = 그림 파일의 투명도 통계(box는 그림 파일 비율).
+ * 화면 왼쪽·위(0) 밖은 자르지만 오른쪽·아래는 화면 크기로 자르지 않는다 — 화면 크기는 게임 파일에서 짐작한 값이라
+ * 실제보다 작으면(해상도를 코드로 바꾼 게임) 화면 오른쪽의 스탠딩이 반쯤 잘린다. 그림 파일을 모르면 화면 전체.
+ */
+export function standViewOf(
+  pictures: ScreenPicture[], screen: ScreenSize,
+  naturalOf: (name: string) => PicSize | null | undefined, statsOf?: (name: string) => AlphaStats | null | undefined,
+): PictureView {
+  const full = { left: 0, top: 0, width: screen.width, height: screen.height };
+  try {
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const p of pictures) {
+      const nat = naturalOf(p.name);
+      if (!nat || !(nat.w > 0 && nat.h > 0)) return full;
+      const st = statsOf?.(p.name) ?? null;
+      if (st && !st.box) continue; // 다 투명한 겹
+      if (st?.box && p.crop && !boxInPicture(p, { w: 1, h: 1 }, st.box)) continue; // 보이는 부분이 다 투명
+      const r = pictureRect(p, () => nat, st?.box ?? null);
+      if (!r) return full;
+      left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+    }
+    left = Math.max(0, Math.floor(left)); top = Math.max(0, Math.floor(top));
+    right = Math.min(left + STAND_VIEW_MAX, Math.ceil(right)); bottom = Math.min(top + STAND_VIEW_MAX, Math.ceil(bottom));
+    if (!(right > left && bottom > top)) return full;
+    return { left, top, width: right - left, height: bottom - top };
+  } catch {
+    return full;
+  }
 }
 
 function clip(r: Rect, screen: ScreenSize): Rect | null {
