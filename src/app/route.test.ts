@@ -9,6 +9,7 @@ describe("route", () => {
   it("round-trips missing", () => { expect(parseRoute("#/missing")).toEqual({ kind: "missing" }); expect(formatRoute({ kind: "missing" })).toBe("#/missing"); });
   it("round-trips read", () => { expect(parseRoute("#/read")).toEqual({ kind: "read" }); expect(formatRoute({ kind: "read" })).toBe("#/read"); expect(parseRoute("#/read/")).toEqual({ kind: "read" }); expect(parseRoute("#/read/1")).toEqual({ kind: "home" }); });
   it("round-trips here", () => { expect(parseRoute("#/here")).toEqual({ kind: "here" }); expect(formatRoute({ kind: "here" })).toBe("#/here"); expect(parseRoute("#/here/")).toEqual({ kind: "here" }); expect(parseRoute("#/here/1")).toEqual({ kind: "home" }); });
+  it("round-trips play", () => { expect(parseRoute("#/play")).toEqual({ kind: "play" }); expect(formatRoute({ kind: "play" })).toBe("#/play"); expect(parseRoute("#/play/")).toEqual({ kind: "play" }); });
   it("trailing slash parses history/missing", () => { expect(parseRoute("#/history/")).toEqual({ kind: "history" }); expect(parseRoute("#/missing/")).toEqual({ kind: "missing" }); });
   it("history with extra segments is home", () => expect(parseRoute("#/history/1")).toEqual({ kind: "home" }));
   it("unknown is home", () => { expect(parseRoute("")).toEqual({ kind: "home" }); expect(parseRoute("#/map/x")).toEqual({ kind: "home" }); });

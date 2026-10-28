@@ -7,6 +7,7 @@ describe("viewOf", () => {
     expect(viewOf(parseRoute("#/"))).toBe("explore");
     expect(viewOf(parseRoute("#/map/1/event/2/page/1"))).toBe("explore");
     expect(viewOf(parseRoute("#/common/3"))).toBe("explore");
+    expect(viewOf(parseRoute("#/play"))).toBe("play");
     expect(viewOf(parseRoute("#/read"))).toBe("read");
     expect(viewOf(parseRoute("#/here"))).toBe("here");
     expect(viewOf(parseRoute("#/history"))).toBe("history");

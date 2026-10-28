@@ -111,6 +111,11 @@ export function pinGame(key: string, pinned: boolean): void {
   update((l) => setPinned(l, key, pinned));
 }
 
+/** key로 최근·고정 게임 하나. */
+export function findRecent(key: string): RecentItem | undefined {
+  return readList().find((it) => it.key === key);
+}
+
 /** 최근·고정 게임 목록(바뀌면 따라간다). */
 export function useRecentGames(): RecentItem[] {
   const [list, setList] = useState<RecentItem[]>(readList);
