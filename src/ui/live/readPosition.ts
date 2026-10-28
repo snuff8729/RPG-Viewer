@@ -31,3 +31,17 @@ export function saveReadSeq(gameKey: string, branch: number, seq: number, store:
     store.setItem(readKey(gameKey, branch), String(seq));
   } catch { /* 저장소 사용 불가 */ }
 }
+
+/**
+ * 갈래의 시작 읽은 위치. 갈래 경로에는 조상 갈래 기록이 앞에 붙어 있으므로,
+ * 조상 갈래에서 읽은 위치(그 갈래 몫의 마지막 seq까지)도 이어받는다.
+ */
+export function initialReadSeq(gameKey: string, branch: number, path: { seq: number; branch: number }[], store: StoreLike | null = defaultStore()): number {
+  let best = loadReadSeq(gameKey, branch, store);
+  const lastOf = new Map<number, number>();
+  for (const r of Array.isArray(path) ? path : []) {
+    if (r && typeof r.seq === "number" && r.branch !== branch) lastOf.set(r.branch, Math.max(lastOf.get(r.branch) ?? -1, r.seq));
+  }
+  for (const [b, last] of lastOf) best = Math.max(best, Math.min(loadReadSeq(gameKey, b, store), last));
+  return best;
+}

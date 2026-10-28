@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadReadSeq, readKey, saveReadSeq, type StoreLike } from "./readPosition";
+import { initialReadSeq, loadReadSeq, readKey, saveReadSeq, type StoreLike } from "./readPosition";
 
 function fake(): StoreLike & { map: Map<string, string> } {
   const map = new Map<string, string>();
@@ -44,4 +44,22 @@ describe("readPosition", () => {
     expect(loadReadSeq("g", 1, null)).toBe(-1);
     expect(() => saveReadSeq("g", 1, 4, null)).not.toThrow();
   });
+});
+
+describe("initialReadSeq", () => {
+  const path = [{ seq: 1, branch: 1 }, { seq: 5, branch: 1 }, { seq: 20, branch: 2 }, { seq: 22, branch: 2 }];
+  it("own saved value wins when larger", () => {
+    const s = fake();
+    saveReadSeq("g", 2, 21, s);
+    saveReadSeq("g", 1, 5, s);
+    expect(initialReadSeq("g", 2, path, s)).toBe(21);
+  });
+  it("inherits ancestor position, clamped to the ancestor's part of the path", () => {
+    const s = fake();
+    saveReadSeq("g", 1, 3, s);
+    expect(initialReadSeq("g", 2, path, s)).toBe(3);
+    saveReadSeq("g", 1, 40, s); // 조상 갈래에서 갈라진 뒤 더 읽은 부분은 이 경로에 없다
+    expect(initialReadSeq("g", 2, path, s)).toBe(5);
+  });
+  it("nothing saved → -1", () => expect(initialReadSeq("g", 2, path, fake())).toBe(-1));
 });

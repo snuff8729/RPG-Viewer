@@ -18,6 +18,7 @@ import { LiveProvider } from "@/app/LiveProvider";
 import { LiveTabs } from "@/ui/live/LiveTabs";
 import { ConnectionBadge } from "@/ui/live/ConnectionBadge";
 import { HistoryView } from "@/ui/live/HistoryView";
+import { ReaderView } from "@/ui/live/ReaderView";
 import { MissingView } from "@/ui/live/MissingView";
 
 function Shell() {
@@ -78,6 +79,7 @@ function Shell() {
           )}
           {route.kind === "home" && <p className="text-sm text-muted-foreground">왼쪽에서 이벤트를 선택하세요</p>}
           {route.kind === "page" && <EventView route={route} />}
+          {route.kind === "read" && <ReaderView />}
           {route.kind === "history" && <HistoryView />}
           {route.kind === "missing" && <MissingView />}
         </main>

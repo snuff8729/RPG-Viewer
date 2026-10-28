@@ -5,10 +5,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reachableCount } from "@/core/live/missingGroups";
 import { useMissingGroups } from "./useMissingGroups";
 
-type TabValue = "explorer" | "history" | "missing";
+type TabValue = "explorer" | "read" | "history" | "missing";
 
 function tabOf(route: Route): TabValue {
-  return route.kind === "history" || route.kind === "missing" ? route.kind : "explorer";
+  return route.kind === "history" || route.kind === "read" || route.kind === "missing" ? route.kind : "explorer";
 }
 
 /** 상단 탭(내비게이션). 탐색기 탭은 마지막으로 본 page 라우트(없으면 home)로 돌아간다. */
@@ -27,7 +27,7 @@ export function LiveTabs({ route }: { route: Route }) {
   }, [route]);
 
   const go = (v: string) => {
-    const next: Route = v === "history" ? { kind: "history" } : v === "missing" ? { kind: "missing" } : lastExplorer.current;
+    const next: Route = v === "history" ? { kind: "history" } : v === "read" ? { kind: "read" } : v === "missing" ? { kind: "missing" } : lastExplorer.current;
     window.location.hash = formatRoute(next);
   };
 
@@ -35,6 +35,7 @@ export function LiveTabs({ route }: { route: Route }) {
     <Tabs value={tabOf(route)} onValueChange={go}>
       <TabsList>
         <TabsTrigger value="explorer">탐색기</TabsTrigger>
+        <TabsTrigger value="read">읽기</TabsTrigger>
         <TabsTrigger value="history">기록</TabsTrigger>
         <TabsTrigger value="missing">못 본 것 ({missingCount})</TabsTrigger>
       </TabsList>
