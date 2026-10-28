@@ -1,6 +1,7 @@
 import type { GameFolder } from "@/core/fs/folder";
 import type { GameData } from "@/core/types";
 import { decodeImage } from "./decrypt";
+import { classifiedName } from "./pictureFolders";
 
 export type AssetKind = "faces" | "pictures" | "tilesets" | "characters";
 
@@ -104,6 +105,18 @@ export class AssetStore {
    * 그릴 수 있는 것을 못 찾았는데 어느 후보의 읽기 자체가 실패했으면 failed(없다고 단정하지 않는다).
    */
   private async read(kind: AssetKind, name: string): Promise<AssetResult> {
+    // 그림 하위 폴더 플러그인(BY_PictureClassify): 게임은 옮긴 경로에서 읽는다. 거기 없으면 이름 그대로도 본다.
+    const moved = classifiedName(name, this.data.pictureFolders);
+    let failed = false;
+    for (const n of moved !== null ? [moved, name] : [name]) {
+      const r = await this.readAt(kind, n);
+      if (r.status === "ok") return r;
+      if (r.status === "failed") failed = true;
+    }
+    return failed ? { status: "failed" } : { status: "missing" };
+  }
+
+  private async readAt(kind: AssetKind, name: string): Promise<AssetResult> {
     let failed = false;
     for (const ext of extensionsFor(this.data)) {
       const path = `${this.data.imgRoot}/${kind}/${name}${ext}`;

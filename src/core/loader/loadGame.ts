@@ -6,6 +6,7 @@ import { livePaths } from "@/core/live/installer";
 import { screenSizeOf } from "@/core/addons/screenPictures";
 import { noticePluginsOf } from "@/core/addons/notices";
 import { enabledPluginsOf } from "@/core/adapters/manifest";
+import { pictureFolderRulesFromPlugins } from "@/core/assets/pictureFolders";
 import { afterMenuCommonEventFromPlugins, menuCommonEventIdsFromPlugins } from "@/core/live/menuScenes";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
@@ -184,6 +185,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const enabledPlugins = enabledPluginsOf(pluginsText);
   const menuCommonEvents = menuCommonEventIdsFromPlugins(pluginsText);
   const afterMenuCommonEvent = afterMenuCommonEventFromPlugins(pluginsText);
+  const pictureFolders = pictureFolderRulesFromPlugins(pluginsText);
   return {
     ok: true,
     data: {
@@ -198,6 +200,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       ...(enabledPlugins.length > 0 ? { enabledPlugins } : {}),
       ...(menuCommonEvents.length > 0 ? { menuCommonEvents } : {}),
       ...(afterMenuCommonEvent !== null ? { afterMenuCommonEvent } : {}),
+      ...(pictureFolders.length > 0 ? { pictureFolders } : {}),
     },
   };
 }
