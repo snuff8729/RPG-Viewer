@@ -2,7 +2,7 @@ import { describePageConditions } from "../conditions/describe";
 import { testToReq, type Req } from "../deps/graph";
 import { locationKey } from "../index/locations";
 import { walk, walkAt } from "../interpret/interpret";
-import { flattenCalls } from "../interpret/teCall";
+import { flattenCalls, type CallCtx } from "../interpret/teCall";
 import { canReachEvent, reachableTiles } from "../map/reach";
 import type { MapTiles, TilesetInfo } from "../map/tiles";
 import { formatText } from "../text/escape";
@@ -185,14 +185,24 @@ function imageKind(pg: unknown): "npc" | "object" | "none" {
 /** 걸어서 실행하는 페이지(결정 키·접촉 트리거이고 명령이 있음) */
 const directPage = (pg: unknown): boolean => isObj(pg) && num(pg.trigger) <= 2 && realCommands(pg.list).length > 0;
 
-/** 걸어서 실행하는 페이지 중 장소 이동을 하는 것이 있으면 그 대상(지금 페이지 것이 먼저) */
+/** 페이지(TemplateEvent로 부른 목록 포함, 공통 이벤트 제외)에 대사 표시(101)·선택지(102)가 있는가 */
+function talks(list: unknown, ctx: CallCtx): boolean {
+  return flattenCalls(list, ctx).some(c => isObj(c) && (c.code === 101 || c.code === 102));
+}
+
+/**
+ * 출구 페이지(걸어서 실행하고 대사·선택지가 없음) 중 장소 이동을 하는 것이 있으면 그 대상(지금 페이지 것이 먼저).
+ * 대사·선택지가 있는 페이지는 이동하더라도 이야기할 거리라 출구로 보지 않는다(describe에 이동할 수 있다고만 쓴다).
+ */
 function exitOf(ev: MapEvent, mapId: number, data: GameData, activePage: number): { target: TransferTarget; now: boolean } | null {
   const pages = arr<MapEvent["pages"][number] | null>(ev.pages);
   let first: TransferTarget | null = null;
   for (let pi = 0; pi < pages.length; pi++) {
     const pg = pages[pi];
     if (!isObj(pg) || num(pg.trigger) > 2) continue;
-    const t = findTransfer(pg.list, { data, mapId, event: ev, page: pi }, data);
+    const ctx: CallCtx = { data, mapId, event: ev, page: pi };
+    if (talks(pg.list, ctx)) continue;
+    const t = findTransfer(pg.list, ctx, data);
     if (!t) continue;
     if (pi === activePage) return { target: t, now: true };
     first ??= t;
@@ -314,6 +324,9 @@ function checkEvent(
   else if (kind === "none") {
     describe = `보이지 않는 이벤트 — ${descTrigger === 0 ? "표시된 칸에서 확인 버튼" : descTrigger <= 2 ? "표시된 칸을 밟으면 시작" : "자동으로 시작"}${quoted}`;
   } else describe = `${kind === "npc" ? "사람·NPC" : "물건"} · ${trigText}${moves ? " · 돌아다님" : ""}${quoted}`;
+  // 출구가 아닌데 지금 페이지가 장소 이동을 하면(대사·선택지 뒤 이동 등) 알려 준다
+  const talkTransfer = !bg && !exitFound && activePg ? findTransfer(activePg.list, { data, mapId, event: ev, page: activePage }, data) : null;
+  if (talkTransfer) describe += ` · → ${mapNameOf(data, talkTransfer.mapId)}로 이동할 수 있음`;
   const item: ChecklistEvent = {
     eventId: ev.id, name: typeof ev.name === "string" ? ev.name : "", title: anyEntry?.title ?? (ev.name || `EV${ev.id}`),
     x: num(ev.x), y: num(ev.y), section, activePage,
