@@ -81,6 +81,70 @@ describe("storyCandidates", () => {
     expect(storyValue(cands[0].key, live({ switches: [1] }))).toBe(1);
   });
 
+  // 맵마다 이벤트를 차례로 쌓는 도우미
+  const builder = () => {
+    const evs = new Map<number, MapEvent[]>();
+    const put = (mapId: number, pages: EventPage[]) => {
+      const list = evs.get(mapId) ?? [];
+      list.push(ev(list.length + 1, pages));
+      evs.set(mapId, list);
+    };
+    const maps = (): [number, MapData][] => [...evs].map(([id, list]) => [id, map(list)]);
+    return { put, maps };
+  };
+  const talk3 = [...say("가"), ...say("나"), ...say("다")];
+  const ce = (id: number, list: EventCommand[]): CommonEvent => ({ id, name: `CE${id}`, trigger: 0, switchId: 1, list: [...list, c(0)] });
+
+  it("neutral names: the variable set 1..12 across 12 maps beats a counter bumped by a widely called common event", () => {
+    const b = builder();
+    for (let k = 1; k <= 12; k++) b.put(k, [page([...talk3, setVar(1, k)], k > 1 ? pv(k - 1, 1) : {})]);
+    for (let i = 0; i < 40; i++) b.put((i % 12) + 1, [page([...say("또"), c(117, [1])])]);
+    for (let i = 0; i < 20; i++) b.put((i % 10) + 1, [page(say("세었다"), pv(i + 1, 2))]);
+    const data = game(b.maps(), { variables: ["", "T_043798", "T_043799"], commonEvents: [ce(1, [addVar(2, 1)])] });
+    const cands = storyCandidates(data);
+    expect(cands[0].key).toEqual({ kind: "variable", id: 1 });
+    const counter = cands.find(x => x.key.kind === "variable" && x.key.id === 2);
+    if (counter) expect(counter.score).toBeLessThan(cands[0].score - 20);
+  });
+
+  // 실제 게임의 다섯 이름을 그럴듯한 쓰임새로 재현한다(1 淫乱レベル, 2 チャプター, 3 進行中ミッション, 4 捕獲起動イベント種別, 5 痴漢調査進行度)
+  const realGame = (names: string[]) => {
+    const b = builder();
+    // 1 淫乱レベル: 넓게 조건으로 쓰이고, 널리 불리는 공통 이벤트에서 더하며, 가끔 내려간다
+    for (let i = 0; i < 45; i++) b.put((i % 15) + 1, [page(say("음"), pv((i % 5) + 1, 1))]);
+    for (let i = 0; i < 30; i++) b.put((i % 15) + 1, [page([...say("H"), c(117, [1])])]);
+    for (let k = 1; k <= 5; k++) b.put(k + 2, [page([...talk3, setVar(1, k)], pv(k - 1, 1))]);
+    for (let i = 0; i < 3; i++) b.put(i + 1, [page([...say("벌"), subVar(1, 1)])]);
+    // 2 チャプター: 1..8을 여러 맵의 대사 이벤트에서 차례로 정한다
+    for (let k = 1; k <= 8; k++) b.put(k, [page([...talk3, setVar(2, k)], k > 1 ? pv(k - 1, 2) : {})]);
+    for (let i = 0; i < 10; i++) b.put((i % 8) + 1, [page(say("장"), pv((i % 8) + 1, 2))]);
+    // 3 進行中ミッション: 임무 번호를 정했다가 끝나면 0으로 되돌린다
+    for (let k = 1; k <= 6; k++) {
+      b.put(k, [page([...talk3, setVar(3, k)])]);
+      b.put(k + 1, [page([...say("완료"), setVar(3, 0)], pv(k, 3))]);
+    }
+    for (let i = 0; i < 12; i++) b.put((i % 8) + 1, [page(say("임무"), pv((i % 6) + 1, 3))]);
+    // 4 捕獲起動イベント種別: 공통 이벤트가 종류 번호를 정하고 분기로 나눈다
+    for (let i = 0; i < 10; i++) b.put((i % 5) + 1, [page([...say("잡혔다"), c(117, [2])])]);
+    for (let i = 0; i < 8; i++) b.put((i % 4) + 1, [page(say("종류"), pv((i % 8) + 1, 4))]);
+    // 5 痴漢調査進行度: 몇 맵에서 조사를 진행한다
+    for (let k = 1; k <= 5; k++) b.put((k % 3) + 1, [page([...talk3, setVar(5, k)], k > 1 ? pv(k - 1, 5) : {})]);
+    for (let i = 0; i < 6; i++) b.put((i % 3) + 1, [page(say("조사"), pv((i % 5) + 1, 5))]);
+    const kinds: EventCommand[] = [];
+    for (let k = 1; k <= 10; k++) kinds.push(setVar(4, k), c(111, [1, 4, 0, k, 0]));
+    return game(b.maps(), { variables: ["", ...names], commonEvents: [ce(1, [addVar(1, 1)]), ce(2, kinds)] });
+  };
+
+  it("real names: チャプター beats 淫乱レベル, 進行中ミッション, 捕獲起動イベント種別, 痴漢調査進行度", () => {
+    const cands = storyCandidates(realGame(["淫乱レベル", "チャプター", "進行中ミッション", "捕獲起動イベント種別", "痴漢調査進行度"]));
+    expect(cands[0].key).toEqual({ kind: "variable", id: 2 });
+    const score = (id: number) => cands.find(x => x.key.kind === "variable" && x.key.id === id)?.score ?? -Infinity;
+    for (const id of [1, 3, 4, 5]) expect(score(id)).toBeLessThan(score(2));
+    // 같은 쓰임새에 이름을 지워도 チャプター 자리가 이긴다
+    const neutral = storyCandidates(realGame(["T_1", "T_2", "T_3", "T_4", "T_5"]));
+    expect(neutral[0].key).toEqual({ kind: "variable", id: 2 });
+  });
+
   it("key text round-trips", () => {
     expect(parseKeyText(keyText({ kind: "variable", id: 12 }))).toEqual({ kind: "variable", id: 12 });
     expect(parseKeyText(keyText({ kind: "switches", ids: [3, 4] }))).toEqual({ kind: "switches", ids: [3, 4] });

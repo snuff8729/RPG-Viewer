@@ -12,10 +12,20 @@ const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "obj
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-/** 본편 진행으로 보이는 이름 */
-export const PROGRESS_NAME = /進行|進捗|ストーリー|シナリオ|本編|章|chapter|story|progress|scenario|main|메인|진행|스토리|시나리오|챕터/i;
-/** 진행 변수가 아닐 것 같은 이름(임시·좌표·횟수 등) */
-const NOT_PROGRESS_NAME = /一時|ワーク|work|temp|tmp|座標|x座標|y座標|乱数|random|カウント|count|選択|좌표|임시|횟수|선택|hp|mp|gold|所持|好感|호감/i;
+/** 본편 진행으로 보이는 이름 중 가장 확실한 것(장·본편·시나리오) */
+const TOP_NAME = /章|チャプター|chapter|本編|メインストーリー|main\s*story|ストーリー|story|シナリオ|scenario|메인\s*스토리|챕터|스토리|시나리오/i;
+/** 일반적인 진행 낱말(진행도·진척 등) */
+const GENERIC_NAME = /進行|進捗|progress|main|메인|진행/i;
+/** 본편 진행으로 보이는 이름(후보에 넣는 기준) */
+export const PROGRESS_NAME = new RegExp(`${TOP_NAME.source}|${GENERIC_NAME.source}`, "i");
+/** 곁가지(조사·임무·퀘스트·종류 번호)로 보이는 이름 */
+const SIDE_NAME = /調査|ミッション|クエスト|quest|mission|サブ|sub|種別|type|フラグ番号|依頼|퀘스트|미션|조사|서브|종류/i;
+/** 능력치·누적값으로 보이는 이름(레벨·호감도·경험·점수·횟수·돈 등) */
+const STAT_NAME = /レベル|\blv|level|好感|affection|経験|\bexp|ポイント|point|回数|count|カウント|\bhp\b|\bmp\b|金|money|gold|所持|ゴールド|레벨|호감|경험|포인트|횟수|카운트|돈/i;
+/** 진행 변수가 아닐 것 같은 이름(임시·좌표·난수·선택 등) */
+const NOT_PROGRESS_NAME = /一時|ワーク|work|temp|tmp|座標|乱数|random|選択|좌표|임시|선택|난수/i;
+/** 이만큼 넓게 불리는 공통 이벤트의 더하기는 능력치 누적으로 본다 */
+const WIDE_CALLERS = 5;
 /** 차례로 켜지는 진행 스위치로 보이는 이름 */
 const CLEAR_SWITCH_NAME = /クリア|clear|完了|終了|済|攻略|撃破|突破|클리어|완료|진행|進行|章|chapter|story|ストーリー|스토리/i;
 
@@ -102,35 +112,60 @@ function scoreVariable(data: GameData, g: DepGraph, scan: StoryScan, id: number)
   const rawName = data.system?.variables?.[id] ?? "";
   const reasons: string[] = [];
   let score = 0;
-  const strong = !!rawName && PROGRESS_NAME.test(rawName);
-  if (strong) { score += 35; reasons.push("이름이 진행 변수 같아요"); }
+  // ---- 이름: 장·본편 > 일반 진행 낱말, 곁가지·능력치 낱말은 깎는다 ----
+  const top = !!rawName && TOP_NAME.test(rawName);
+  const generic = !top && !!rawName && GENERIC_NAME.test(rawName);
+  const strong = top || generic;
+  if (top) { score += 45; reasons.push("이름이 본편 진행 변수 같아요"); }
+  else if (generic) { score += 25; reasons.push("이름이 진행 변수 같아요"); }
+  if (rawName && SIDE_NAME.test(rawName)) score -= 20;
+  if (rawName && !top && STAT_NAME.test(rawName)) score -= 40;
   if (rawName && NOT_PROGRESS_NAME.test(rawName)) score -= 25;
+  // ---- 조건으로 쓰이는 곳 ----
   const events = scan.varEvents.get(id)?.size ?? 0;
   const maps = scan.varMaps.get(id)?.size ?? 0;
   const branches = scan.varBranches.get(id) ?? 0;
   if (events > 0) {
-    score += Math.min(25, maps * 4) + Math.min(15, events * 1.5);
+    score += Math.min(20, maps * 3) + Math.min(10, events);
     reasons.push(`${maps}개 맵 ${events}개 이벤트의 출현 조건`);
   }
-  score += Math.min(10, branches * 0.5);
+  score += Math.min(8, branches * 0.4);
+  // ---- 쓰는 곳: 여러 맵에서 상수로 정해 올라가면 진행, 넓게 불리는 더하기·자주 내려가면 누적값 ----
   const writers = g.writersOf({ kind: "variable", id });
-  let mono = 0, sub = 0, traced = 0, talky = 0;
+  let traced = 0, setUp = 0, raise = 0, down = 0, reset = 0, wide = 0, talky = 0, advance = 0;
   const values = new Set<number>();
+  const writerMaps = new Set<number>();
   for (const w of writers) {
     const { op, value } = w.write;
     if (op === "script" || op === "other") continue;
     traced++;
-    if ((op === "set" && value !== undefined && value > 0) || (op === "add" && value !== undefined && value > 0)) {
-      mono++;
-      if (op === "set") values.add(value);
-      if ((scan.talkCount.get(w.ctx) ?? 0) >= 3) talky++;
-    } else if (op === "sub" || (op === "add" && value !== undefined && value < 0)) sub++;
+    const info = g.ctxs.get(w.ctx);
+    const callers = info?.callers ?? [];
+    const loc = info?.location;
+    const widely = loc?.source === "troop" || (loc?.source === "common" && (callers.length >= WIDE_CALLERS || info?.trigger === 2));
+    if (op === "set" && value !== undefined && value > 0) { setUp++; values.add(value); }
+    else if (op === "set" && value !== undefined && value <= 0) { reset++; continue; }
+    else if (op === "add" && value !== undefined && value > 0) { raise++; if (widely) { wide++; continue; } }
+    else { down++; continue; }
+    // 값을 올리는 쓰기만 여기로 온다
+    if (loc?.source === "map") writerMaps.add(loc.mapId);
+    else if (loc?.source === "common" && !widely) {
+      for (const c of callers) { const l = g.ctxs.get(c)?.location; if (l?.source === "map") writerMaps.add(l.mapId); }
+    }
+    const talks = (scan.talkCount.get(w.ctx) ?? 0) + (loc?.source === "common" && !widely ? Math.max(0, ...callers.map(c => scan.talkCount.get(c) ?? 0)) : 0);
+    if (talks >= 3) talky++;
+    const target = op === "set" ? (value ?? 0) : null;
+    if (w.reqs.some(r => r.test.kind === "variable" && r.test.id === id && (r.test.op === ">=" || r.test.op === "=" || r.test.op === ">")
+      && (target === null || r.test.value < target))) advance++;
   }
   if (traced === 0) return null;
-  score += (mono / traced) * 15 + Math.min(10, values.size * 1.5) - (sub / traced) * 10;
-  if (mono > 0) score += (talky / mono) * 10;
+  const up = setUp + raise - wide;
+  score += (setUp / traced) * 15 + Math.min(12, values.size * 1.2) + Math.min(15, writerMaps.size * 1.5);
+  if (up > 0) score += (talky / up) * 10 + (advance / up) * 10;
+  score -= ((down + reset * 0.5) / traced) * 25 + (wide / traced) * 30;
   if (values.size >= 3) reasons.push(`값을 ${values.size}단계로 정해요`);
-  if (mono > 0 && talky / mono >= 0.5) reasons.push("대사가 많은 곳에서 바뀌어요");
+  if (writerMaps.size >= 3) reasons.push(`${writerMaps.size}개 맵에서 올려요`);
+  if (up > 0 && talky / up >= 0.5) reasons.push("대사가 많은 곳에서 바뀌어요");
   if (!strong && events < 2) return null;
   if (score < 20) return null;
   return { key: { kind: "variable", id }, label: `변수 ${name}`, score: Math.round(score), reasons };
