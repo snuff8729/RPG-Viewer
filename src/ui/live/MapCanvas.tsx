@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Crosshair, Maximize, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
-import { fitZoom, MAX_ZOOM, MIN_ZOOM } from "./mapZoom";
+import { clampScroll, clampZoom, fitZoom, isDrag, pinchZoom, wheelFactor } from "./mapZoom";
 import { MapLegend } from "./MapLegend";
 import { eventStyle } from "./sectionStyle";
 import type { LoadedTiles } from "./useMapTiles";
@@ -300,8 +300,14 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   const scrollRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
   const overRef = useRef<HTMLCanvasElement>(null);
-  /** 다음 레이아웃 뒤 가운데로 둘 칸 좌표 */
-  const pendingCenter = useRef<{ x: number; y: number; zoom: number } | null>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
+  /** 다음 레이아웃 뒤 보이는 영역의 (ax, ay)px(없으면 가운데)에 둘 칸 좌표 */
+  const pendingCenter = useRef<{ x: number; y: number; zoom: number; ax?: number; ay?: number } | null>(null);
+  /** 이 맵에서 사용자가 직접 확대·축소·끌기를 했는지(했으면 크기가 바뀌어도 맞춤을 다시 하지 않는다) */
+  const manualZoom = useRef(false);
+  /** 직접 움직였으면 내 위치 따라가기를 멈춘다(내 위치로·맞춤·맵 바뀜에서 다시) */
+  const followPaused = useRef(false);
+  const markManual = () => { manualZoom.current = true; followPaused.current = true; };
   const [zoom, setZoom] = useState<number | null>(null);
   /** 이벤트 처리기·효과에서 읽는 최신 zoom */
   const zoomRef = useRef(zoom);
@@ -353,12 +359,61 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   const zoomAndCenter = (z: number, x: number, y: number) => {
     const el = scrollRef.current;
     if (el && z === zoomRef.current) {
+      pendingCenter.current = null;
       el.scrollLeft = x * z - el.clientWidth / 2;
       el.scrollTop = y * z - el.clientHeight / 2;
       return;
     }
     pendingCenter.current = { x, y, zoom: z };
     setZoom(z);
+  };
+
+  /** 다음 프레임에 확대 크기 반영(휠·핀치가 한 프레임에 여러 번 와도 한 번만 다시 그리게) */
+  const zoomFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(zoomFrame.current), []);
+  /** 확대 크기 z에서 (x, y)칸 좌표가 보이는 영역의 (ax, ay)px에 오게 한다 */
+  const place = (z: number, x: number, y: number, ax: number, ay: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (z === zoomRef.current && !pendingCenter.current) {
+      el.scrollLeft = x * z - ax;
+      el.scrollTop = y * z - ay;
+      return;
+    }
+    pendingCenter.current = { x, y, zoom: z, ax, ay };
+    cancelAnimationFrame(zoomFrame.current);
+    zoomFrame.current = requestAnimationFrame(() => {
+      const p = pendingCenter.current;
+      if (!p) return;
+      if (p.zoom === zoomRef.current) {
+        pendingCenter.current = null;
+        el.scrollLeft = p.x * p.zoom - (p.ax ?? el.clientWidth / 2);
+        el.scrollTop = p.y * p.zoom - (p.ay ?? el.clientHeight / 2);
+      } else setZoom(p.zoom);
+    });
+  };
+  /** 보이는 영역의 (ax, ay)px 아래 칸 좌표와 그때의 확대 크기(아직 반영 안 된 확대가 있으면 그것 기준) */
+  const under = (ax: number, ay: number): { x: number; y: number; zoom: number } | null => {
+    const el = scrollRef.current;
+    const p = pendingCenter.current;
+    if (!el) return null;
+    if (p) {
+      return {
+        x: p.x + (ax - (p.ax ?? el.clientWidth / 2)) / p.zoom,
+        y: p.y + (ay - (p.ay ?? el.clientHeight / 2)) / p.zoom,
+        zoom: p.zoom,
+      };
+    }
+    const z = zoomRef.current;
+    if (z == null) return null;
+    return { x: (el.scrollLeft + ax) / z, y: (el.scrollTop + ay) / z, zoom: z };
+  };
+  /** (ax, ay)px를 붙잡은 채 f배 확대·축소 */
+  const zoomAt = (f: number, ax: number, ay: number) => {
+    const u = under(ax, ay);
+    if (!u) return;
+    markManual();
+    place(clampZoom(u.zoom * f), u.x, u.y, ax, ay);
   };
 
   /** 맵 전체가 보이게(맞춤). 보이는 영역이 아직 0 크기면 false(크기가 잡히면 아래 ResizeObserver가 다시 부른다) */
@@ -372,8 +427,6 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   };
   const fitRef = useRef(fitNow);
   useLayoutEffect(() => { fitRef.current = fitNow; });
-  /** 이 맵에서 사용자가 직접 확대·축소했는지(했으면 크기가 바뀌어도 맞춤을 다시 하지 않는다) */
-  const manualZoom = useRef(false);
 
   // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때는 그대로 둔다.
   const initFor = useRef<LoadedTiles | null>(null);
@@ -381,6 +434,7 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     if (initFor.current === tiles) return;
     initFor.current = tiles;
     manualZoom.current = false;
+    followPaused.current = false;
     fitRef.current();
   }, [tiles]);
 
@@ -399,8 +453,8 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     const p = pendingCenter.current;
     if (!el || !p || zoom !== p.zoom) return;
     pendingCenter.current = null;
-    el.scrollLeft = p.x * zoom - el.clientWidth / 2;
-    el.scrollTop = p.y * zoom - el.clientHeight / 2;
+    el.scrollLeft = p.x * zoom - (p.ax ?? el.clientWidth / 2);
+    el.scrollTop = p.y * zoom - (p.ay ?? el.clientHeight / 2);
   });
 
   useEffect(() => {
@@ -415,7 +469,7 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   useEffect(() => {
     const el = scrollRef.current;
     const z = zoomRef.current;
-    if (!compact || !el || z == null || pendingCenter.current) return;
+    if (!compact || !el || z == null || pendingCenter.current || followPaused.current) return;
     const cx = (px + 0.5) * z, cy = (py + 0.5) * z;
     const mx = Math.min(el.clientWidth / 4, 2 * z), my = Math.min(el.clientHeight / 4, 2 * z);
     const inside = cx >= el.scrollLeft + mx && cx <= el.scrollLeft + el.clientWidth - mx
@@ -431,25 +485,142 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   const numbersKey = [...numbers].join(";");
   const [stableNumbers, setStableNumbers] = useState({ key: numbersKey, numbers });
   if (stableNumbers.key !== numbersKey) setStableNumbers({ key: numbersKey, numbers });
+  // 위 캔버스는 확대가 멈춘 뒤에 그 크기로 다시 그린다(휠·핀치 중에는 늘려 보여서 가볍게)
+  const [drawZoom, setDrawZoom] = useState<number | null>(null);
+  const drawnOnce = useRef(false);
+  useEffect(() => {
+    if (zoom == null) return;
+    const t = setTimeout(() => setDrawZoom(zoom), drawnOnce.current ? 150 : 0);
+    drawnOnce.current = true;
+    return () => clearTimeout(t);
+  }, [zoom]);
   useEffect(() => {
     const canvas = overRef.current;
-    if (!canvas || zoom == null) return;
-    renderOverlay(canvas, zoom, {
+    if (!canvas || drawZoom == null) return;
+    renderOverlay(canvas, drawZoom, {
       tiles, walls: showWalls ? walls : null, listed: markers, numbers: stableNumbers.numbers, mobile, chars: charsReady,
       player: { x: px, y: py }, route, selected,
       selectedEv: selected != null ? listed.find((e) => e.eventId === selected) : undefined,
     });
-  }, [tiles, zoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick]);
+  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick]);
 
   const zoomBy = (f: number) => {
     const el = scrollRef.current;
-    if (!el || zoom == null) return;
-    const cx = (el.scrollLeft + el.clientWidth / 2) / zoom, cy = (el.scrollTop + el.clientHeight / 2) / zoom;
-    manualZoom.current = true;
-    zoomAndCenter(clamp(zoom * f, MIN_ZOOM, MAX_ZOOM), cx, cy);
+    if (el) zoomAt(f, el.clientWidth / 2, el.clientHeight / 2);
   };
-  const fit = () => { if (fitNow()) manualZoom.current = false; };
-  const toPlayer = () => { if (zoom != null) zoomAndCenter(zoom, px + 0.5, py + 0.5); };
+  const fit = () => { if (fitNow()) { manualZoom.current = false; followPaused.current = false; } };
+  const toPlayer = () => {
+    const el = scrollRef.current;
+    const z = pendingCenter.current?.zoom ?? zoom;
+    if (!el || z == null) return;
+    followPaused.current = false;
+    place(z, px + 0.5, py + 0.5, el.clientWidth / 2, el.clientHeight / 2);
+  };
+
+  // 마우스 휠·트랙패드 핀치: 커서 자리를 붙잡고 확대·축소(페이지는 스크롤하지 않는다)
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => {});
+  useLayoutEffect(() => {
+    wheelRef.current = (e) => {
+      const el = scrollRef.current;
+      if (!el || e.deltaY === 0) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      zoomAt(wheelFactor(e.deltaY, e.deltaMode, e.ctrlKey), e.clientX - r.left - el.clientLeft, e.clientY - r.top - el.clientTop);
+    };
+  });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheelRef.current(e);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // 끌어서 옮기기(마우스 왼쪽·터치·펜), 두 손가락 벌리기. 거의 안 움직이고 떼면 표시 고르기.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const drag = useRef<{ sx: number; sy: number; sl: number; st: number; moved: boolean } | null>(null);
+  const pinch = useRef<{ dist: number; zoom: number; x: number; y: number } | null>(null);
+  /** 화면 좌표 → 보이는 영역 기준 px */
+  const local = (cx: number, cy: number) => {
+    const el = scrollRef.current!;
+    const r = el.getBoundingClientRect();
+    return { x: cx - r.left - el.clientLeft, y: cy - r.top - el.clientTop };
+  };
+  const twoFingers = () => {
+    const [a, b] = [...pointers.current.values()];
+    const m = local((a.x + b.x) / 2, (a.y + b.y) / 2);
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: m.x, my: m.y };
+  };
+  const startDrag = (x: number, y: number, moved: boolean) => {
+    const el = scrollRef.current!;
+    drag.current = { sx: x, sy: y, sl: el.scrollLeft, st: el.scrollTop, moved };
+  };
+  /** 화면 좌표 → 가장 가까운 이벤트 표시 */
+  const hitAt = (cx: number, cy: number): number | null => {
+    const r = stackRef.current?.getBoundingClientRect();
+    return r ? hit(cx - r.left, cy - r.top) : null;
+  };
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // 스크롤 막대를 누른 것은 그대로 둔다
+    const l = local(e.clientX, e.clientY);
+    if (l.x >= el.clientWidth || l.y >= el.clientHeight) return;
+    el.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 1) startDrag(e.clientX, e.clientY, false);
+    else if (pointers.current.size === 2) {
+      const t = twoFingers();
+      const u = under(t.mx, t.my);
+      if (u) pinch.current = { dist: t.dist, zoom: u.zoom, x: u.x, y: u.y };
+      if (drag.current) drag.current.moved = true;
+    }
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const p = pointers.current.get(e.pointerId);
+    if (!p) {
+      if (e.pointerType === "mouse") el.style.cursor = hitAt(e.clientX, e.clientY) != null ? "pointer" : "";
+      return;
+    }
+    p.x = e.clientX;
+    p.y = e.clientY;
+    const pc = pinch.current;
+    if (pc && pointers.current.size >= 2) {
+      const t = twoFingers();
+      markManual();
+      place(pinchZoom(pc.zoom, pc.dist, t.dist), pc.x, pc.y, t.mx, t.my);
+      return;
+    }
+    const d = drag.current;
+    if (!d) return;
+    const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    if (!d.moved && isDrag(dx, dy)) {
+      d.moved = true;
+      markManual();
+      el.style.cursor = "grabbing";
+    }
+    if (d.moved) {
+      el.scrollLeft = clampScroll(d.sl - dx, el.scrollWidth, el.clientWidth);
+      el.scrollTop = clampScroll(d.st - dy, el.scrollHeight, el.clientHeight);
+    }
+  };
+  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.delete(e.pointerId)) return;
+    const d = drag.current;
+    if (e.type === "pointerup" && d && !d.moved && pointers.current.size === 0) {
+      const id = hitAt(e.clientX, e.clientY);
+      if (id != null) onPick(id);
+    }
+    if (pointers.current.size < 2) pinch.current = null;
+    const rest = [...pointers.current.values()][0];
+    if (rest) startDrag(rest.x, rest.y, true);
+    else {
+      drag.current = null;
+      e.currentTarget.style.cursor = "";
+    }
+  };
 
   /** 화면 좌표(캔버스 기준) → 가장 가까운 이벤트 표시 */
   const hit = (ox: number, oy: number): number | null => {
@@ -511,18 +682,19 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
             {toggles}
           </div>
         )}
-        <div ref={scrollRef} className={`relative overflow-auto rounded-md border bg-muted ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}>
+        <div
+          ref={scrollRef}
+          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onDoubleClick={(e) => { const l = local(e.clientX, e.clientY); zoomAt(2, l.x, l.y); }}
+        >
           {loading && <Skeleton className="absolute inset-0 rounded-none" />}
-          <div className="relative" style={{ width: w, height: h }}>
+          <div ref={stackRef} className="relative" style={{ width: w, height: h }}>
             <canvas ref={baseRef} className="absolute inset-0 size-full" />
-            <canvas
-              ref={overRef}
-              className="absolute inset-0 size-full"
-              role="img"
-              aria-label="맵 그림"
-              onClick={(e) => { const id = hit(e.nativeEvent.offsetX, e.nativeEvent.offsetY); if (id != null) onPick(id); }}
-              onMouseMove={(e) => { e.currentTarget.style.cursor = hit(e.nativeEvent.offsetX, e.nativeEvent.offsetY) != null ? "pointer" : ""; }}
-            />
+            <canvas ref={overRef} className="absolute inset-0 size-full" role="img" aria-label="맵 그림" />
           </div>
         </div>
         {!compact && <MapLegend />}
