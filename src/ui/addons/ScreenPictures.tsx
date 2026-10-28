@@ -8,6 +8,7 @@ import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
+import { imageAlphaStats } from "./imageStats";
 
 type Status = "loading" | "ok" | "missing" | "failed";
 const NO_IMAGES = new Map<string, ImageBitmap>();
@@ -131,13 +132,20 @@ function ScreenCanvas({ pictures, view, images, className }: {
   return <canvas ref={ref} width={view.width} height={view.height} className={className} />;
 }
 
-/** 스탠딩: 그림들이 차지하는 부분(화면 안으로 자른 것). 크기를 아직 모르면 화면 전체. */
+/**
+ * 스탠딩: 그림들의 보이는 부분(투명하지 않은 부분)을 합친 곳(화면 안으로 자른 것). 화면 크기의 투명한 겹으로 그린 스탠딩도
+ * 캐릭터 부분만 잘린다. 크기를 아직 모르면 화면 전체.
+ */
 function standView(pictures: ScreenPicture[], size: ScreenSize, images: Map<string, ImageBitmap>): View {
   const full = { left: 0, top: 0, width: size.width, height: size.height };
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const p of pictures) {
     const img = images.get(p.name);
-    const r = pictureRect(p, () => (img ? { w: img.width, h: img.height } : null));
+    if (!img) return full;
+    const stats = imageAlphaStats(img);
+    if (stats && !stats.box) continue; // 다 투명한 겹
+    // 그리는 크기 그대로(불러온 그림의 원래 크기 — 기록에 크기가 없는 0x0 그림도)
+    const r = pictureRect({ ...p, w: img.width, h: img.height }, null, stats?.box ?? null);
     if (!r) return full;
     left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
   }

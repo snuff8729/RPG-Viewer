@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LogRecord } from "../live/types";
 import {
-  DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf,
-  screenSizeOf, seenPictures, snapshotCounts, type PictureRoles, type ScreenPicture,
+  alphaStatsOf, DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf,
+  screenSizeOf, seenPictures, snapshotCounts, type PictureContext, type PictureRoles, type ScreenPicture,
 } from "./screenPictures";
 
 const base = { v: 1, t: 0, run: 1, branch: 1 } as const;
@@ -131,10 +131,67 @@ describe("picture groups", () => {
     expect(s.cg.map(p => p.id)).toEqual([60]);
     expect(s.stand.map(p => p.id)).toEqual([111, 113]);
     const cover = P([150, "black", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768]);
-    expect(sceneOf([BODY, cover], { screen: SCREEN })).toEqual({ cg: [cover], stand: [] });
+    // occlusion only once the cover's file is known to be opaque
+    const statsOf = (n: string) => (n === "black" ? { opaque: 1, box: [0, 0, 1, 1] as [number, number, number, number] } : null);
+    expect(sceneOf([BODY, cover], { screen: SCREEN, statsOf })).toEqual({ cg: [cover], stand: [] });
+    expect(sceneOf([BODY, cover], { screen: SCREEN }).stand).toHaveLength(1);
     // a translucent or added cover does not hide what is under it
-    expect(sceneOf([BODY, { ...cover, opacity: 200 }], { screen: SCREEN }).stand).toHaveLength(1);
-    expect(sceneOf([BODY, { ...cover, blendMode: 1 }], { screen: SCREEN }).stand).toHaveLength(1);
+    expect(sceneOf([BODY, { ...cover, opacity: 200 }], { screen: SCREEN, statsOf }).stand).toHaveLength(1);
+    expect(sceneOf([BODY, { ...cover, blendMode: 1 }], { screen: SCREEN, statsOf }).stand).toHaveLength(1);
+  });
+
+  // T_043302 (816×624, bridge 1.13.0): every body part is a full-canvas transparent PNG at 0,0
+  describe("transparent full-screen layers (T_043302)", () => {
+    const S = { width: 816, height: 624 };
+    const names = [
+      "Reiri_Base(Cloth)", "Reiri_Arm1_Under(Cloth)", "Reiri_ShoulderArmor_Under", "Reiri_ShoulderArmor1", "Reiri_Bust(Armor)_0001",
+      "Reiri_Armor", "Reiri_Arm1_Front(Cloth)", "Reiri_Cheek1", "Reiri_Eyes1(Default)", "Reiri_Mouth3(Speak)",
+    ];
+    // some entries come without a size (bitmap not loaded yet) → the file size is used
+    const layer = (id: number, name: string, sized = true) => P([id, name, 0, 0, 0, 100, 100, 255, 0, 0, 0, sized ? 816 : 0, sized ? 624 : 0]);
+    const pics = (eyes = "Reiri_Eyes1(Default)", mouth = "Reiri_Mouth3(Speak)") =>
+      names.map((n, i) => layer(i + 2, n === "Reiri_Eyes1(Default)" ? eyes : n === "Reiri_Mouth3(Speak)" ? mouth : n, i % 3 !== 1));
+    // the character sits in the middle-right; small parts (eyes, mouth) are tiny boxes inside it
+    const box = (n: string): [number, number, number, number] =>
+      /Eyes|Mouth|Cheek/.test(n) ? [0.55, 0.15, 0.62, 0.2] : [0.4, 0.05, 0.8, 1];
+    const ctx: PictureContext = {
+      screen: S, sizeOf: () => ({ w: 816, h: 624 }),
+      statsOf: n => ({ opaque: /Eyes|Mouth|Cheek/.test(n) ? 0.003 : 0.25, box: box(n) }),
+    };
+
+    it("all layers are drawn as one stand composite (not CGs hiding each other)", () => {
+      const s = sceneOf(pics(), ctx);
+      expect(s.cg).toEqual([]);
+      expect(s.stand.map(p => p.id)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+      expect(roleOf(pics()[0], ctx)).toBe("stand");
+    });
+
+    it("changing only the eyes / mouth re-renders the full composite", () => {
+      const first = nextShot(null, sceneOf(pics(), ctx));
+      const next = nextShot(first.key, sceneOf(pics("Reiri_Eyes2(Close)", "Reiri_Mouth1"), ctx));
+      expect(next.shot?.kind).toBe("stand");
+      expect(next.shot?.pictures).toHaveLength(10);
+      expect(next.shot?.pictures.map(p => p.name)).toContain("Reiri_Base(Cloth)");
+    });
+
+    it("before the alpha stats are known nothing is hidden", () => {
+      const s = sceneOf(pics(), { screen: S, sizeOf: () => ({ w: 816, h: 624 }) });
+      expect([...s.cg, ...s.stand]).toHaveLength(10);
+    });
+
+    it("an opaque full-screen picture is still an event image", () => {
+      const cg = P([60, "eve_01", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
+      expect(roleOf(cg, { ...ctx, statsOf: () => ({ opaque: 1, box: [0, 0, 1, 1] }) })).toBe("cg");
+    });
+
+    it("alphaStatsOf: opaque share and content box", () => {
+      const w = 4, h = 2, px = new Uint8Array(w * h * 4);
+      px[(1 * w + 2) * 4 + 3] = 255; // one opaque pixel at (2,1)
+      px[(0 * w + 1) * 4 + 3] = 100; // one translucent pixel at (1,0)
+      expect(alphaStatsOf(px, w, h)).toEqual({ opaque: 1 / 8, box: [0.25, 0, 0.75, 1] });
+      expect(alphaStatsOf(new Uint8Array(32), w, h)).toEqual({ opaque: 0, box: null });
+      expect(alphaStatsOf(null, w, h)).toBeNull();
+    });
   });
 
   it("nextShot: CG with what is above it, stand only when its layers change", () => {

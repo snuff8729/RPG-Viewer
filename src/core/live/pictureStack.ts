@@ -1,6 +1,4 @@
-import {
-  pictureRect, roleOf, sceneOf, type PictureContext, type PictureRole, type ScreenPicture, type ScreenScene, type ScreenSize,
-} from "../addons/screenPictures";
+import { sceneOf, type PictureContext, type ScreenPicture, type ScreenScene, type ScreenSize } from "../addons/screenPictures";
 import type { GameData } from "../types";
 import { pageList } from "./mismatch";
 import type { LogRecord, RecordOf } from "./types";
@@ -146,29 +144,7 @@ export function stackPictures(stack: ReadonlyMap<number, StackPicture>): StackPi
  * 다른 그릴 그림과 겹치면 캐릭터의 한 부분으로 보고 함께 그린다.
  */
 export function composedScene(pics: StackPicture[], ctx: PictureContext): ScreenScene {
-  try {
-    const roles = new Map<StackPicture, PictureRole>();
-    for (const p of pics) roles.set(p, roleOf(p, ctx));
-    const rects = new Map(pics.map(p => [p, pictureRect(p, ctx.sizeOf)] as const));
-    const auto = (p: StackPicture) => {
-      if (ctx.roles?.[p.id] !== undefined || p.tag?.role) return false;
-      try { if (ctx.defaultRole?.(p)) return false; } catch { /* 기본값 없음 */ }
-      return true;
-    };
-    for (const p of pics) {
-      const r = rects.get(p);
-      if (roles.get(p) !== "hud" || !r || !auto(p)) continue;
-      const overlaps = pics.some(q => {
-        if (q === p) return false;
-        const role = roles.get(q), qr = rects.get(q);
-        return (role === "stand" || role === "cg") && !!qr && r.left < qr.right && qr.left < r.right && r.top < qr.bottom && qr.top < r.bottom;
-      });
-      if (overlaps) roles.set(p, "stand");
-    }
-    return sceneOf(pics, ctx, p => roles.get(p as StackPicture) ?? "stand");
-  } catch {
-    return { cg: [], stand: [] };
-  }
+  return sceneOf(pics, ctx);
 }
 
 /** 한 대사 사이에 그림 표시 기록이 이만큼 이상이면 그림을 겹쳐 그리는 게임으로 본다 */

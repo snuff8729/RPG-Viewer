@@ -185,7 +185,50 @@ export interface PictureContext {
   sizeOf?: SizeOf | null;
   /** 켜진 게임 전용 어댑터가 정한 기본 구분(직접 고른 구분 다음, 자동 판정 전). 없으면 null. */
   defaultRole?: ((p: ScreenPicture) => PictureRole | null | undefined) | null;
+  /** 그림 이름 → 투명도 통계(그림 파일을 읽은 뒤). 모르면 null — 그동안은 가림 판정을 하지 않는다. */
+  statsOf?: ((name: string) => AlphaStats | null | undefined) | null;
 }
+
+/**
+ * 그림 파일의 투명도 통계. opaque = 불투명한(알파 250 이상) 픽셀 비율(0~1),
+ * box = 투명하지 않은 픽셀이 있는 부분 [왼, 위, 오른, 아래](그림 크기에 대한 0~1 비율). 다 투명하면 null.
+ */
+export interface AlphaStats { opaque: number; box: [number, number, number, number] | null }
+
+/** RGBA 픽셀(줄여 읽은 것이어도 된다) → 투명도 통계. 예외를 던지지 않는다. */
+export function alphaStatsOf(px: ArrayLike<number> | null | undefined, w: number, h: number): AlphaStats | null {
+  try {
+    if (!px || !(w > 0) || !(h > 0) || px.length < w * h * 4) return null;
+    let opaque = 0, minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const a = px[(y * w + x) * 4 + 3];
+        if (a >= 250) opaque++;
+        if (a > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return { opaque: opaque / (w * h), box: maxX < 0 ? null : [minX / w, minY / h, (maxX + 1) / w, (maxY + 1) / h] };
+  } catch {
+    return null;
+  }
+}
+
+function statsOfPic(p: ScreenPicture, ctx: PictureContext): AlphaStats | null {
+  try {
+    const s = ctx.statsOf?.(p.name);
+    return s && typeof s.opaque === "number" ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 이벤트 그림으로 보는 불투명 비율, 아래 그림을 가린다고 보는 불투명 비율 */
+const CG_OPAQUE = 0.9, OCCLUDE_OPAQUE = 0.98;
 
 interface Rect { left: number; top: number; right: number; bottom: number }
 
@@ -200,20 +243,31 @@ function sizeOfPic(p: ScreenPicture, sizeOf: SizeOf | null | undefined): PicSize
 }
 
 /** 그림이 화면에서 차지하는 사각형(회전 포함). 크기를 모르면 null. */
-export function pictureRect(p: ScreenPicture, sizeOf?: SizeOf | null): Rect | null {
+export function pictureRect(p: ScreenPicture, sizeOf?: SizeOf | null, box?: [number, number, number, number] | null): Rect | null {
   const s = sizeOfPic(p, sizeOf);
   if (!s) return null;
   const [ax, ay] = p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
   const sx = p.scaleX / 100, sy = p.scaleY / 100;
   const rad = ((p.angle ?? 0) * Math.PI) / 180;
   const cos = Math.cos(rad), sin = Math.sin(rad);
+  const [u0, v0, u1, v1] = box ? [box[0] * s.w, box[1] * s.h, box[2] * s.w, box[3] * s.h] : [0, 0, s.w, s.h];
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-  for (const [u, v] of [[0, 0], [s.w, 0], [0, s.h], [s.w, s.h]]) {
+  for (const [u, v] of [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]) {
     const dx = (u - ax * s.w) * sx, dy = (v - ay * s.h) * sy;
     const X = p.x + dx * cos - dy * sin, Y = p.y + dx * sin + dy * cos;
     left = Math.min(left, X); right = Math.max(right, X); top = Math.min(top, Y); bottom = Math.max(bottom, Y);
   }
   return { left, top, right, bottom };
+}
+
+/**
+ * 그림에서 실제로 보이는 부분(투명하지 않은 부분)이 화면에서 차지하는 사각형. 투명도 통계를 모르면 그림 전체(pictureRect),
+ * 다 투명하면 null.
+ */
+export function contentRect(p: ScreenPicture, ctx: PictureContext): Rect | null {
+  const st = statsOfPic(p, ctx);
+  if (st && !st.box) return null;
+  return pictureRect(p, ctx.sizeOf, st?.box ?? null);
 }
 
 function clip(r: Rect, screen: ScreenSize): Rect | null {
@@ -287,6 +341,11 @@ export function hudKeys(counts: Map<ScreenPicture[], number>, screen: ScreenSize
  * → 나머지는 스탠딩(플러그인 컷인은 겹친 부분만 잘라 보인다)
  */
 export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
+  return chosenRole(p, ctx) ?? autoRole(p, ctx).role;
+}
+
+/** 직접 고른 구분 → 어댑터 기본 구분 → 확장이 붙인 구분 → 화면 장식으로 본 그림. 없으면 null(자동 판정). */
+function chosenRole(p: ScreenPicture, ctx: PictureContext): PictureRole | null {
   const o = p.kind === "sprite" ? ctx.spriteRoles?.[spriteKeyOf(p.name)] : ctx.roles?.[p.id];
   if (isPictureRole(o)) return o;
   try {
@@ -295,14 +354,45 @@ export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
   } catch { /* 기본값 없음 */ }
   if (p.tag?.role) return p.tag.role;
   if (ctx.hud?.has(hudKeyOf(p))) return "hud";
-  const r = pictureRect(p, ctx.sizeOf);
+  return null;
+}
+
+/** 크기로 정하는 구분. small = 작아서 화면 장식으로 본 것 */
+function autoRole(p: ScreenPicture, ctx: PictureContext): { role: PictureRole; small: boolean } {
+  // 크기는 실제로 보이는 부분으로 본다: 화면 크기의 투명한 그림 위에 몸 한 부분만 그린 겹(스탠딩 부품)은 이벤트 그림이 아니다
+  const r = contentRect(p, ctx);
   if (r) {
     const cover = coverage(r, ctx.screen);
-    if (cover >= CG_COVER) return "cg";
+    const st = statsOfPic(p, ctx);
+    if (cover >= CG_COVER && (!st || st.opaque >= CG_OPAQUE)) return { role: "cg", small: false };
     // 1.10.1: 작은 그림은 화면 장식(플러그인이 띄운 것은 화면의 5%, 그림 명령은 2%보다 작을 때 — 티커 배경 막대 등)
-    if (cover < (p.kind === "sprite" ? SMALL_SPRITE : SMALL_PICTURE)) return "hud";
+    if (cover < (p.kind === "sprite" ? SMALL_SPRITE : SMALL_PICTURE)) return { role: "hud", small: true };
   }
-  return "stand";
+  return { role: "stand", small: false };
+}
+
+const overlaps = (a: Rect, b: Rect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/**
+ * 그림들의 구분(roleOf). 다만 크기만으로 화면 장식으로 본 작은 그림(그림 명령으로 띄운 것)이 그릴 다른 그림과 겹치면
+ * 캐릭터의 한 부분(눈·입·볼 겹)으로 보고 스탠딩으로 함께 그린다.
+ */
+export function rolesOf(pics: ScreenPicture[], ctx: PictureContext): Map<ScreenPicture, PictureRole> {
+  const out = new Map<ScreenPicture, PictureRole>();
+  const small: ScreenPicture[] = [];
+  const drawnRects: Rect[] = [];
+  for (const p of pics) {
+    const chosen = chosenRole(p, ctx);
+    const a = chosen ? { role: chosen, small: false } : autoRole(p, ctx);
+    out.set(p, a.role);
+    if (a.small && p.kind !== "sprite") small.push(p);
+    else if (a.role === "cg" || a.role === "stand") { const r = contentRect(p, ctx); if (r) drawnRects.push(r); }
+  }
+  for (const p of small) {
+    const r = contentRect(p, ctx);
+    if (r && drawnRects.some(d => overlaps(r, d))) out.set(p, "stand");
+  }
+  return out;
 }
 
 /** 대사 하나의 보이는 화면: 이벤트 그림과 스탠딩(각각 그리는 순서) */
@@ -310,20 +400,25 @@ export interface ScreenScene { cg: ScreenPicture[]; stand: ScreenPicture[] }
 
 /**
  * 그림 묶음 → 보이는 화면. 화면 장식·숨김과 투명도 0은 빼고, 위에(뒤 번호로) 화면의 95% 이상을 덮는
- * 불투명(255·보통 합성) 그림 아래에 완전히 가려진 그림도 뺀다(덮는 그림의 투명한 부분은 알 수 없어 아래 그림만 가린다고 본다).
+ * 불투명(255·보통 합성) 그림 아래에 완전히 가려진 그림도 뺀다. 덮는 그림은 그림 파일이 거의 다 불투명하다고 알 때만(statsOf —
+ * 모르면 가리지 않는다). 구분은 rolesOf(겹친 작은 부품은 스탠딩).
  */
-export function sceneOf(
-  pics: ScreenPicture[] | null | undefined, ctx: PictureContext, roleFor?: ((p: ScreenPicture) => PictureRole) | null,
-): ScreenScene {
+export function sceneOf(pics: ScreenPicture[] | null | undefined, ctx: PictureContext): ScreenScene {
   const scene: ScreenScene = { cg: [], stand: [] };
   try {
     const drawn: { p: ScreenPicture; role: "cg" | "stand"; rect: Rect | null }[] = [];
-    for (const p of [...(pics ?? [])].sort((a, b) => a.id - b.id)) {
-      if (!p || p.opacity <= 0) continue;
-      const role = roleFor ? roleFor(p) : roleOf(p, ctx);
-      if (role === "cg" || role === "stand") drawn.push({ p, role, rect: pictureRect(p, ctx.sizeOf) });
+    const list = [...(pics ?? [])].filter(p => p && p.opacity > 0).sort((a, b) => a.id - b.id);
+    const roles = rolesOf(list, ctx);
+    for (const p of list) {
+      const role = roles.get(p);
+      if (role === "cg" || role === "stand") drawn.push({ p, role, rect: contentRect(p, ctx) });
     }
-    const covers = drawn.map(d => d.rect !== null && d.p.opacity >= 255 && d.p.blendMode === 0 && coverage(d.rect, ctx.screen) >= OCCLUDE_COVER);
+    // 가리는 그림: 그림 파일이 거의 다 불투명하다고 알 때만(투명도 통계를 모르면 가리지 않는다)
+    const covers = drawn.map(d => {
+      const st = statsOfPic(d.p, ctx);
+      return d.rect !== null && !!st && st.opaque >= OCCLUDE_OPAQUE && d.p.opacity >= 255 && d.p.blendMode === 0
+        && coverage(d.rect, ctx.screen) >= OCCLUDE_COVER;
+    });
     for (let i = 0; i < drawn.length; i++) {
       const own = drawn[i].rect ? clip(drawn[i].rect!, ctx.screen) : null;
       let hidden = false;

@@ -172,7 +172,8 @@ describe("readerItems screen pictures", () => {
   it("a CG under the stand keeps the stand composited; a CG on top hides the stand under it", () => {
     const under = run([msg(1, { pics: [CG("Cut_bath"), BODY] })]);
     expect(screens(under)).toEqual(["60+111"]);
-    const onTop = run([msg(1, { pics: [BODY, [150, "cover", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768]] })]);
+    const opaque: PictureContext = { ...ctx, statsOf: n => (n === "cover" ? { opaque: 1, box: [0, 0, 1, 1] } : null) };
+    const onTop = run([msg(1, { pics: [BODY, [150, "cover", 0, 0, 0, 100, 100, 255, 0, 0, 0, 1024, 768]] })], true, opaque);
     expect(screens(onTop)).toEqual(["150"]);
   });
 
