@@ -1,0 +1,13 @@
+{
+  "id": "by-work-element",
+  "label": "BY 스탠딩 (BYWorkElement)",
+  "description": "BYWorkElement·BY_Cosplay·BY_Scenes를 쓰는 게임에 맞춘 설정이에요. 맵과 전투 화면 옆에 서 있는 주인공 스탠딩(공격·피격 때 잠깐 밀려나며 다친 그림으로 바뀌는 것 포함)을 기록하도록 화면 그림 따라 그리기를 켜고, tachie 폴더 그림은 스탠딩, 전투 배경 장식(battle_bj)은 화면 장식으로 봐요. 기록 플러그인 1.18.0 이상이 필요해요.",
+  "match": { "plugins": ["BYWorkElement", "BY_Cosplay", "BY_Scenes"], "pluginsMode": "all" },
+  "defaults": {
+    "addons": { "screenPictures": true },
+    "spriteRoles": {
+      "tachie/": "stand",
+      "battle_bj": "decoration"
+    }
+  }
+}

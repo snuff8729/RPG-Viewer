@@ -85,12 +85,12 @@ describe("adapter manifest", () => {
 describe("bundled adapters", () => {
   it("bundles every adapters/ folder with valid manifests", () => {
     const ids = BUNDLED_ADAPTERS.map(a => a.manifest.id);
-    expect(ids).toEqual(["character-picture-manager", "ddaggeo-mode"]);
-    const cpm = BUNDLED_ADAPTERS[0];
+    expect(ids).toEqual(["by-work-element", "character-picture-manager", "ddaggeo-mode"]);
+    const cpm = BUNDLED_ADAPTERS.find(a => a.manifest.id === "character-picture-manager")!;
     expect(cpm.script).toContain("registerExtension");
     expect(cpm.viewer?.standGroupLabel?.({ key: "a1", actorId: 1, actorName: "아마네", pictures: [] })).toBe("아마네 스탠딩");
     expect(cpm.manifest.defaults?.addons).toEqual({ screenPictures: true });
-    expect(BUNDLED_ADAPTERS[1].script).toBeNull();
+    expect(BUNDLED_ADAPTERS.find(a => a.manifest.id === "ddaggeo-mode")!.script).toBeNull();
   });
 
   it("matches the two games", () => {
@@ -99,6 +99,9 @@ describe("bundled adapters", () => {
       .toEqual(["character-picture-manager"]);
     expect(matchingAdapters(list, { plugins: ["CallStand", "CallCutin", "Ticker", "X"] }).map(m => m.id)).toEqual(["ddaggeo-mode"]);
     expect(matchingAdapters(list, { plugins: ["CallStand", "Ticker"] })).toEqual([]);
+    expect(matchingAdapters(list, { plugins: ["YEP_CoreEngine", "BYWorkElement", "BY_Cosplay", "BY_Scenes", "BY_NPS"] }).map(m => m.id))
+      .toEqual(["by-work-element"]);
+    expect(matchingAdapters(list, { plugins: ["BYWorkElement", "BY_NPS"] })).toEqual([]);
   });
 
   it("ddaggeo-mode roles: gauge HUD, stands, cg, small cut-in layers stay stand", () => {
@@ -115,6 +118,17 @@ describe("bundled adapters", () => {
     // user choice still wins
     expect(roleOf(pic(102, "gauge"), { ...ctx, roles: { 102: "stand" } })).toBe("stand");
     expect(sceneOf([pic(102, "gauge"), pic(115, "s")], ctx).stand.map(p => p.id)).toEqual([115]);
+  });
+
+  it("by-work-element: picture capture on, tachie/ portraits stand, battle_bj decoration", () => {
+    const by = BUNDLED_ADAPTERS.find(a => a.manifest.id === "by-work-element")!;
+    expect(by.script).toBeNull();
+    expect(by.manifest.defaults?.addons).toEqual({ screenPictures: true });
+    const d = roleDefaultsOf([by.manifest]);
+    const ctx = { screen: { width: 1280, height: 720 }, defaultRole: (p: ScreenPicture) => defaultRoleOf(p, d) };
+    expect(roleOf(pic(1000, "tachie/tachie_02_01_05", { kind: "sprite", w: 800, h: 1200 }), ctx)).toBe("stand");
+    expect(roleOf(pic(1001, "tachie/Liquid_02_01_1", { kind: "sprite", w: 800, h: 1200 }), ctx)).toBe("stand");
+    expect(roleOf(pic(1002, "battle_bj", { kind: "sprite", w: 1280, h: 720 }), ctx)).toBe("hud");
   });
 
   it("buildAdapterBundle skips mismatched ids and missing scripts", () => {

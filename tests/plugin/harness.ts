@@ -429,6 +429,15 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     this._colorTone = [0, 0, 0, 0];
   }
   Object.setPrototypeOf(Scene_Map.prototype, Sprite.prototype);
+  Object.setPrototypeOf(Scene_Battle.prototype, Sprite.prototype);
+  // Bitmap drawn in memory (new Bitmap(w, h): no URL, like rpg_core.js / rmmz_core.js); blt / clear like MV
+  function Bitmap(this: any, w = 0, h = 0) { this._url = ""; this.width = w; this.height = h; this.drawn = [] as string[]; }
+  Bitmap.prototype.isReady = function () { return true; };
+  Bitmap.prototype.isError = function () { return false; };
+  Bitmap.prototype.addLoadListener = function (fn: any) { fn(this); };
+  Bitmap.prototype.blt = function (src: any) { this.drawn.push(src && src._url); };
+  Bitmap.prototype.clearRect = function () { this.drawn = []; };
+  Bitmap.prototype.clear = function () { this.clearRect(0, 0, this.width, this.height); };
   Object.defineProperty(Sprite.prototype, "opacity", {
     get(this: any) { return this.alpha * 255; },
     set(this: any, v: number) { this.alpha = Math.max(0, Math.min(255, v)) / 255; },
@@ -483,6 +492,16 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       const [w, h] = bitmapSizes[name] ?? [100, 100];
       const b = makeBitmap(url, w, h);
       pictureCache[url] = b;
+      pendingLoads.push(b);
+      return b;
+    },
+    // by path (BYWorkElement & co); sizes by the path's picture name ("img/pictures/a/b.png" -> "a/b")
+    loadNormalBitmap(path: string) {
+      if (pictureCache[path]) return pictureCache[path];
+      const key = decodeURIComponent(path.replace(/^.*img\/pictures\//, "").replace(/\.[A-Za-z0-9_]+$/, ""));
+      const [w, h] = bitmapSizes[key] ?? [100, 100];
+      const b = makeBitmap(path, w, h);
+      pictureCache[path] = b;
       pendingLoads.push(b);
       return b;
     },
@@ -559,7 +578,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Game_Actor, Game_Actors, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
-    SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture,
+    SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture, Bitmap,
     $dataCommonEvents: [null], $dataTroops: [null],
     $dataActors: [null], $dataItems: [null], $dataWeapons: [null], $dataArmors: [null], $dataSkills: [null], $dataStates: [null],
     $dataSystem: null,

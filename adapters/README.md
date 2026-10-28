@@ -39,3 +39,4 @@
 
 - `character-picture-manager`: CharacterPictureManager 스탠딩에 배우·겹 이름을 붙이고 움직임(나타나기·흔들림·흐려짐)을 무시, 읽기에서 배우별로 나란히.
 - `ddaggeo-mode`: CallStand·CallCutin·Ticker 게임의 그림 구분 기본값.
+- `by-work-element`: BYWorkElement·BY_Cosplay·BY_Scenes 게임 — 맵·전투 옆 주인공 스탠딩(`tachie/`)을 기록하도록 그림 따라 그리기를 켜고 구분 기본값을 줌(기록 플러그인 1.18.0+).
