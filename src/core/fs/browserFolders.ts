@@ -64,6 +64,11 @@ export class DirectoryHandleFolder implements WritableGameFolder {
         }
       })();
       this.dirs.set(key, p);
+      // 없던 디렉터리는 기억하지 않는다: 나중에 (게임이) 만든 rpg-viewer/ 등을 다시 찾을 수 있게.
+      const pending = p;
+      void pending.then((d) => {
+        if (d === null && this.dirs.get(key) === pending) this.dirs.delete(key);
+      });
     }
     return p;
   }

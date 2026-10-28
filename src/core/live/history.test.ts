@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureRecords } from "../../../tests/helpers/fixtureLog";
 import { branchLabel, branchPath, buildHistory, foldTimeline, noisyVariables } from "./history";
 import type { HistoryItem, LogRecord } from "./types";
@@ -131,4 +131,26 @@ describe("foldTimeline", () => {
     expect(kinds(items)).toEqual([1, 2, 3, 4]);
   });
   it("handles empty path",() => expect(foldTimeline([], buildHistory([]), {})).toEqual([]));
+});
+
+describe("seq order", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  it("does not sort records that are already in seq order", () => {
+    const recs = fixtureRecords();
+    const model0 = buildHistory(recs);
+    const spy = vi.spyOn(Array.prototype, "sort");
+    const model = buildHistory(recs);
+    const path = branchPath(recs, model, 2);
+    // 회차 목록(작은 배열) 정렬은 괜찮다 — 기록 배열은 정렬하지 않는다
+    const recordSorts = spy.mock.contexts.filter(c => Array.isArray(c) && c.some(x => x && typeof x === "object" && "seq" in x));
+    expect(recordSorts).toHaveLength(0);
+    spy.mockRestore();
+    expect(model.latestBranch).toBe(model0.latestBranch);
+    expect(path.map(r => r.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 28, 29, 30, 31]);
+  });
+  it("still sorts out-of-order records", () => {
+    const recs = [...fixtureRecords()].reverse();
+    const model = buildHistory(recs);
+    expect(branchPath(recs, model, 2).map(r => r.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 28, 29, 30, 31]);
+  });
 });

@@ -71,6 +71,16 @@ describe("DirectoryHandleFolder", () => {
     expect(((tree.js as Tree).plugins as Tree)["RPG-Viewer.js"]).toBe("def");
     expect(Object.keys((tree.js as Tree).plugins as Tree)).toEqual(["RPG-Viewer.js"]);
   });
+  it("finds a directory created externally after a failed lookup (no negative cache)", async () => {
+    const c = { lists: 0 };
+    const tree: Tree = { www: {} };
+    const f = new DirectoryHandleFolder(fakeDir(tree, c));
+    expect(await f.readText("www/rpg-viewer/live.json")).toBeNull();
+    expect(await f.list("www/rpg-viewer")).toEqual([]);
+    (tree.www as Tree)["rpg-viewer"] = { "live.json": "{}" }; // the game creates it
+    expect(await f.readText("www/rpg-viewer/live.json")).toBe("{}");
+    expect(await f.list("www/rpg-viewer")).toEqual(["live.json"]);
+  });
   it("name table learns new file after listing", async () => {
     const c = { lists: 0 };
     const f = new DirectoryHandleFolder(fakeDir({ d: { "A.txt": "1" } }, c));

@@ -9,8 +9,17 @@ function isValid(r: unknown): r is LogRecord {
   return typeof r === "object" && r !== null && typeof (r as LogRecord).seq === "number" && Number.isFinite((r as LogRecord).seq);
 }
 function num(x: unknown): number { return typeof x === "number" && Number.isFinite(x) ? x : 0; }
+/** 유효한 기록만 seq 순으로. 이미 순서대로면(O(n) 확인) 정렬을 건너뛰고, 모두 유효하면 복사도 하지 않는다. */
 function bySeq(records: LogRecord[]): LogRecord[] {
-  return records.filter(isValid).sort((a, b) => a.seq - b.seq);
+  let allValid = true, ordered = true, prev = -Infinity;
+  for (const r of records) {
+    if (!isValid(r)) { allValid = false; continue; }
+    if (r.seq < prev) ordered = false;
+    prev = r.seq;
+  }
+  const valid = allValid ? records : records.filter(isValid);
+  if (ordered) return valid;
+  return (allValid ? valid.slice() : valid).sort((a, b) => a.seq - b.seq);
 }
 
 /** 기록에서 회차·갈래 모델을 만든다. run/branch 0 기록은 무시. 예외를 던지지 않는다. */

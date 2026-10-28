@@ -57,3 +57,69 @@ describe("helpers", () => {
     expect(pageList(data, { source: "map", mapId: 2, eventId: 99, page: 0 })).toBeNull();
   });
 });
+
+describe("choice option verification", () => {
+  const reordered = (): GameData => {
+    const maps = new Map(data.maps);
+    const map = structuredClone(maps.get(2)!);
+    const cmd = map.events[1]!.pages[0].list[10];
+    cmd.parameters = [[...(cmd.parameters[0] as string[])].reverse(), ...cmd.parameters.slice(1)];
+    maps.set(2, map);
+    return { ...data, maps };
+  };
+  it("choices/choice whose option texts differ from the data are uncertain", () => {
+    const c = computeCoverage(fixtureRecords(), reordered());
+    expect(c.uncertainSeqs.has(7)).toBe(true);   // choices: options reordered in data
+    expect(c.uncertainSeqs.has(9)).toBe(true);   // choice: preceding choices in branch 1 mismatches
+    expect(c.uncertainSeqs.has(30)).toBe(false); // choice: no choices record in branch 2 → code alone
+    expect(c.picks.get("map:2:1:0#10")!.map(p => [p.picked, p.branch])).toEqual([[1, 2]]);
+  });
+  it("matching option texts stay verified", () => {
+    const c = computeCoverage(fixtureRecords(), data);
+    expect(c.uncertainSeqs.has(7)).toBe(false);
+    expect(c.uncertainSeqs.has(9)).toBe(false);
+  });
+});
+
+describe("empty message", () => {
+  it("a 101 with no following 401 verifies on the code when the record text is empty", () => {
+    const maps = new Map(data.maps);
+    const map = structuredClone(maps.get(2)!);
+    const list = map.events[1]!.pages[0].list;
+    list.splice(1, 2); // cmd 0 (101) is now followed by a 101, not a 401
+    maps.set(2, map);
+    const d = { ...data, maps };
+    const base = fixtureRecords()[1] as LogRecord;
+    const empty = { ...base, seq: 100, text: "" } as LogRecord;
+    const filled = { ...base, seq: 101, text: "왔구나" } as LogRecord;
+    const c = computeCoverage([empty, filled], d);
+    expect(c.seen.has("map:2:1:0#0")).toBe(true);
+    expect(c.uncertainSeqs.has(100)).toBe(false);
+    expect(c.uncertainSeqs.has(101)).toBe(true);
+  });
+});
+
+describe("performance", () => {
+  it("200k records with 1000 abandoned branches", () => {
+    const src = { source: "map", mapId: 2, eventId: 1, page: 0 } as const;
+    const recs: LogRecord[] = [];
+    let seq = 1;
+    const base = { v: 1 as const, t: 0, run: 1 };
+    for (let b = 1; b <= 1000; b++) {
+      recs.push({ ...base, seq: seq++, branch: b, type: "branchStart", reason: "load", parentBranch: b > 1 ? 1 : null, fromSeq: null });
+      for (let k = 0; k < 196; k++) {
+        recs.push({ ...base, seq: seq++, branch: b, type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 5, value: k }] });
+      }
+      recs.push({ ...base, seq: seq++, branch: b, type: "choices", src, cmd: 10, options: ["네, 도울게요", "생각해볼게요"] });
+      recs.push({ ...base, seq: seq++, branch: b, type: "choice", src, cmd: 10, picked: b % 2 });
+      recs.push({ ...base, seq: seq++, branch: b, type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 6, value: 1 }] });
+    }
+    expect(recs.length).toBe(200_000);
+    const t0 = performance.now();
+    const c = computeCoverage(recs, data);
+    const ms = performance.now() - t0;
+    console.log(`computeCoverage(200k records, 1000 abandoned branches): ${ms.toFixed(1)} ms`);
+    expect(c.picks.get("map:2:1:0#10")!.length).toBe(1000);
+    expect(ms).toBeLessThan(300);
+  });
+});

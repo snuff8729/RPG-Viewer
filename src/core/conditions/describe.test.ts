@@ -81,6 +81,11 @@ describe("describeBranchCondition", () => {
     expect(describeBranchCondition([9, 7, false], data).text).toBe("무기: #7 보유");
     expect(describeBranchCondition([10, 7, false], data).text).toBe("방어구: #7 보유");
   });
+  it("weapon/armor including equipment cannot be judged from inventory", () => {
+    expect(describeBranchCondition([9, 7, true], data)).toEqual({ text: "무기: #7 보유", refs: [{ type: "weapon", id: 7 }], test: { kind: "unknown" } });
+    expect(describeBranchCondition([10, 7, true], data)).toEqual({ text: "방어구: #7 보유", refs: [{ type: "armor", id: 7 }], test: { kind: "unknown" } });
+    expect(describeBranchCondition([9, 7, false], data).test).toEqual({ kind: "weapon", id: 7 });
+  });
   it("button/vehicle", () => {
     expect(describeBranchCondition([11, "ok"], data).text).toBe("버튼: ok 누름");
     expect(describeBranchCondition([13, 1], data).text).toBe("탈것 1 탑승 중");

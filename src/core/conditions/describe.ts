@@ -102,10 +102,11 @@ export function describeBranchCondition(params: any[], data: GameData): Conditio
         { kind: "gold", op: GOLD_TEST_OPS[p[2]] ?? ">=", value: n(p[1]) });
     case 8:
       return cond(`아이템: ${itemName(data, p[1])} 보유`, [{ type: "item", id: p[1] }], { kind: "item", id: n(p[1]) });
+    // p[2] = 장비 포함: 실시간 상태(소지품)만으로는 판정할 수 없다
     case 9:
-      return cond(`무기: ${weaponName(data, p[1])} 보유`, [{ type: "weapon", id: p[1] }], { kind: "weapon", id: n(p[1]) });
+      return cond(`무기: ${weaponName(data, p[1])} 보유`, [{ type: "weapon", id: p[1] }], p[2] ? UNKNOWN : { kind: "weapon", id: n(p[1]) });
     case 10:
-      return cond(`방어구: ${armorName(data, p[1])} 보유`, [{ type: "armor", id: p[1] }], { kind: "armor", id: n(p[1]) });
+      return cond(`방어구: ${armorName(data, p[1])} 보유`, [{ type: "armor", id: p[1] }], p[2] ? UNKNOWN : { kind: "armor", id: n(p[1]) });
     case 11:
       return cond(`버튼: ${p[1]} 누름`, [], UNKNOWN);
     case 12:
