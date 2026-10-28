@@ -21,7 +21,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.1",
+    VERSION: "1.0.2",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -217,7 +217,13 @@
     var map = G.$gameMap, player = G.$gamePlayer, sw = G.$gameSwitches, vars = G.$gameVariables;
     var ss = G.$gameSelfSwitches, party = G.$gameParty, msg = G.$gameMessage;
     if (run === null || !map || !player || !sw || !vars || !ss || !party) return null;
-    var interp = map._interpreter;
+    var inBattle = !!(party.inBattle && party.inBattle());
+    var inner = inBattle && G.$gameTroop ? G.$gameTroop._interpreter : map._interpreter;
+    var depth = 0;
+    while (inner && inner._childInterpreter && inner._childInterpreter.isRunning && inner._childInterpreter.isRunning() && depth < 32) {
+      inner = inner._childInterpreter; depth++;
+    }
+    var active = !!(inner && inner.isRunning && inner.isRunning());
     var events = [];
     var list = map.events();
     for (var i = 0; i < list.length; i++) {
@@ -244,7 +250,8 @@
       v: 1, t: 0, pluginVersion: bridge.VERSION,
       run: run, branch: branch, seq: meta.nextSeq - 1,
       mapId: map.mapId(), x: player.x, y: player.y,
-      running: interp && interp.isRunning() ? (interp._rpgvSrc || null) : null,
+      running: active ? (inner._rpgvSrc || null) : null,
+      runningCmd: active && typeof inner._index === "number" ? inner._index : null,
       events: events,
       switches: trueIds(sw._data),
       variables: variables,
@@ -253,7 +260,7 @@
       gold: typeof party._gold === "number" ? party._gold : 0,
       party: (party._actors || []).slice(),
       choice: choice,
-      inBattle: !!(party.inBattle && party.inBattle())
+      inBattle: inBattle
     };
   }
 
