@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureRecords } from "../../../tests/helpers/fixtureLog";
-import { branchLabel, branchPath, buildHistory, foldTimeline, noisyVariables, representative } from "./history";
+import { branchLabel, branchPath, buildHistory, foldTimeline, isContinuation, noisyVariables, representative } from "./history";
 import type { HistoryItem, LogRecord } from "./types";
 
 const base = { v: 1, run: 1, branch: 1 } as const;
@@ -259,6 +259,24 @@ describe("save-load continuations", () => {
       .toMatchObject({ atSeq: 20, branches: [1, 3] });
     expect(foldTimeline(branchPath(recs, model, 3), model, {}).find(i => i.kind === "fork"))
       .toMatchObject({ atSeq: 20, branches: [3, 1] });
+  });
+
+  it("story in a sibling continuation makes a later load a real branch", () => {
+    // R(1) 저장@10 → P(2) 이어짐, P 저장@20(이야기 없음) → 다시 10을 불러옴 Q(3) 이어짐, Q에서 이야기 30–40
+    // → P의 저장@20을 불러온 B(4)는 진짜 갈래
+    const q = { branch: 3 }, b = { branch: 4 };
+    const recs = [
+      bs(b1, 1, "newGame", null, null), m(b1, 2), save(b1, 10),
+      bs(b2, 11, "load", 1, 10), save(b2, 20), st(b2, 21),
+      bs(q, 22, "load", 1, 10), m(q, 30, 3), m(q, 40, 3),
+      bs(b, 41, "load", 2, 20), m(b, 42, 4),
+    ];
+    const model = buildHistory(recs);
+    expect(model.alias).toEqual(new Map([[2, 1], [3, 1]]));
+    expect(isContinuation(model, 3)).toBe(true);
+    expect(isContinuation(model, 4)).toBe(false);
+    expect(model.runs).toEqual([{ run: 1, branches: [1, 4] }]);
+    expect(branchPath(recs, model, 4).map(r => r.seq)).toEqual([1, 2, 10, 11, 20, 41, 42]);
   });
 
   it("only load starts in the same run can continue", () => {

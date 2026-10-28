@@ -1,6 +1,6 @@
 import { formatText } from "../text/escape";
 import type { GameData, Location } from "../types";
-import { branchLabel } from "./history";
+import { branchLabel, isContinuation } from "./history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "./types";
 
 export type ReaderItem =
@@ -45,6 +45,8 @@ function fromRecord(r: LogRecord, data: GameData, choiceText: Map<number, string
     case "transfer":
       return { kind: "chapter", key: `c${r.seq}`, text: `— ${data?.mapInfos?.[r.mapId]?.name || `#${r.mapId}`} —` };
     case "branchStart":
+      // 이어진 갈래(저장 → 종료 → 이어하기)의 시작은 새 갈래 시작이 아니다
+      if (isContinuation(model, r.branch)) return null;
       return { kind: "chapter", key: `c${r.seq}`, text: `— ${branchLabel(model, r.branch)} 시작 —` };
     case "battle": return r.phase === "start" ? { kind: "battle", key: `r${r.seq}`, seq: r.seq } : null;
     default: return null;
