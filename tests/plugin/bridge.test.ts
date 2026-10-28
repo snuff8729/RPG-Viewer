@@ -341,6 +341,35 @@ describe("RPGViewerBridge", () => {
     expect(h.readLog()[2]).toMatchObject({ seq: 3, run: 2, branch: 2 });
   });
 
+  it("reports runningCmd from the innermost interpreter", () => {
+    h = newGame();
+    h.g.$dataCommonEvents[1] = { id: 1, list: [cmd(121, [5, 5, 0]), cmd(121, [6, 6, 0]), cmd(0)] };
+    const list = [cmd(121, [1, 1, 0]), cmd(117, [1]), cmd(0)];
+    h.addMapEvent(1, [list]);
+    h.g.$gamePlayer.performTransfer();
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ running: null, runningCmd: null });
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 1);
+    interp._index = 1;
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ running: { source: "map", mapId: 1, eventId: 1, page: 0 }, runningCmd: 1 });
+    h.runCommand(interp, 1);
+    interp._childInterpreter._index = 1;
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ running: { source: "common", commonEventId: 1 }, runningCmd: 1 });
+  });
+
+  it("follows the troop interpreter in battle", () => {
+    h = newGame();
+    h.g.$gamePlayer.performTransfer();
+    h.g.$gameParty._inBattle = true;
+    h.g.$gameTroop._interpreter.setup([cmd(121, [1, 1, 0]), cmd(0)], 0);
+    h.g.$gameTroop._interpreter._index = 1;
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ runningCmd: 1, inBattle: true });
+  });
+
   it("writes live snapshot atomically", () => {
     h = newGame();
     const list = [cmd(102, [["Go", "Stay"], -1, 0, 2, 0]), cmd(0)];
@@ -359,8 +388,8 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.1", run: 1, branch: 1, seq: 4,
-      mapId: 1, x: 3, y: 4, running: src,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.2", run: 1, branch: 1, seq: 4,
+      mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
@@ -485,13 +514,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.1"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.2"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.1");
+    expect(h.bridge.VERSION).toBe("1.0.2");
   });
 
   it("uses ES2015-compatible syntax only", () => {

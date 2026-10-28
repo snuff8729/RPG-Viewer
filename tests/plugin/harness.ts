@@ -131,10 +131,20 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   // ---- Game_Interpreter
   function Game_Interpreter(this: any) { this.clear(); }
   Game_Interpreter.prototype.clear = function () {
-    this._mapId = 0; this._eventId = 0; this._list = null; this._index = 0; this._indent = 0; this._branch = {}; this._params = [];
+    this._childInterpreter = null; this._mapId = 0; this._eventId = 0; this._list = null; this._index = 0; this._indent = 0; this._branch = {}; this._params = [];
   };
   Game_Interpreter.prototype.setup = function (list: Cmd[], eventId: number) {
     this.clear(); this._mapId = g.$gameMap.mapId(); this._eventId = eventId || 0; this._list = list;
+  };
+  Game_Interpreter.prototype.setupChild = function (list: Cmd[], eventId: number) {
+    this._childInterpreter = new (Game_Interpreter as any)((this._depth || 0) + 1);
+    this._childInterpreter.setup(list, eventId);
+  };
+  Game_Interpreter.prototype.command117 = function (params?: any[]) {
+    const p = params ?? this._params;
+    const ce = g.$dataCommonEvents[p[0]];
+    if (ce) this.setupChild(ce.list, p[0]);
+    return true;
   };
   Game_Interpreter.prototype.isRunning = function () { return !!this._list; };
   Game_Interpreter.prototype.currentCommand = function () { return this._list[this._index]; };
@@ -206,6 +216,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       g.$gameSelfSwitches = new (Game_SelfSwitches as any)();
       g.$gameParty = new (Game_Party as any)();
       g.$gameTroop = new (Game_Troop as any)();
+      g.$gameTroop._interpreter = new (Game_Interpreter as any)();
       g.$gameMap = new (Game_Map as any)();
       g.$gamePlayer = new (Game_Player as any)();
     },
