@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { branchLabel } from "@/core/live/history";
+import { branchLabel, representative } from "@/core/live/history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live/types";
 import { formatText } from "@/core/text/escape";
 import type { GameData, Location } from "@/core/types";
@@ -84,6 +84,16 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
     case "load": return <Line ctx={ctx}>💾 불러오기 (슬롯 {r.slot})</Line>;
     case "branchStart":
+      // 이어진 갈래(저장 → 종료 → 이어하기)는 새 갈래가 아니라 같은 이야기의 이어하기
+      if (representative(ctx.model, r.branch) !== r.branch) {
+        return (
+          <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span>— 이어하기 —</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        );
+      }
       return (
         <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
           <div className="h-px flex-1 bg-border" />

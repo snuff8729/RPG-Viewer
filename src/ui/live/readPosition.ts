@@ -47,17 +47,34 @@ export function saveReadSeq(gameKey: string, branch: number, seq: number, store:
  * 기록을 끝까지 읽은 뒤(LiveProvider caughtUp)에만 부른다. 그래서 경로 끝보다 큰 저장값은 기록이 초기화된 뒤의
  * 낡은 값이다 — 버린다(초기화 때 clearReadPositions로 지우지만, 그 직후 이전 기록 기준으로 다시 저장되는 경우 대비).
  */
-export function initialReadSeq(gameKey: string, branch: number, path: { seq: number; branch: number }[], store: StoreLike | null = defaultStore()): number {
-  let best = loadReadSeq(gameKey, branch, store);
+export function initialReadSeq(
+  gameKey: string, branch: number, path: { seq: number; branch: number }[],
+  model: { alias?: Map<number, number> } | null = null, store: StoreLike | null = defaultStore(),
+): number {
+  // 읽은 위치는 대표 갈래 id로 저장한다(이어진 갈래 → 대표 갈래, history.representative와 같은 규칙).
+  const rep = (id: number) => model?.alias?.get(id) ?? id;
+  const self = rep(branch);
+  /** 대표 갈래 → 경로에 나온 원래 갈래 id들(예전에 이어진 갈래 id로 저장된 값도 읽는다) */
+  const raws = new Map<number, Set<number>>([[self, new Set([branch])]]);
   const lastOf = new Map<number, number>();
   let maxSeq = -1;
   for (const r of Array.isArray(path) ? path : []) {
-    if (!r || typeof r.seq !== "number") continue;
+    if (!r || typeof r.seq !== "number" || typeof r.branch !== "number") continue;
     maxSeq = Math.max(maxSeq, r.seq);
-    if (r.branch !== branch) lastOf.set(r.branch, Math.max(lastOf.get(r.branch) ?? -1, r.seq));
+    const b = rep(r.branch);
+    let set = raws.get(b);
+    if (!set) raws.set(b, set = new Set());
+    set.add(r.branch);
+    if (b !== self) lastOf.set(b, Math.max(lastOf.get(b) ?? -1, r.seq));
   }
+  const load = (b: number) => {
+    let v = loadReadSeq(gameKey, b, store);
+    for (const raw of raws.get(b) ?? []) if (raw !== b) v = Math.max(v, loadReadSeq(gameKey, raw, store));
+    return v;
+  };
+  let best = load(self);
   if (best > maxSeq) best = -1;
-  for (const [b, last] of lastOf) best = Math.max(best, Math.min(loadReadSeq(gameKey, b, store), last));
+  for (const [b, last] of lastOf) best = Math.max(best, Math.min(load(b), last));
   return best;
 }
 

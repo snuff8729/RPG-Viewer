@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
-import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
+import { branchLabel, branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,7 +98,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
-  const [readSeq, setReadSeq] = useState(() => (branch === null ? -1 : initialReadSeq(gameKey, branch, path)));
+  const [readSeq, setReadSeq] = useState(() => (branch === null ? -1 : initialReadSeq(gameKey, branch, path, model)));
   const markRead = useCallback((seq: number) => setReadSeq(p => (seq > p ? seq : p)), []);
   useEffect(() => {
     if (branch !== null && readSeq >= 0) saveReadSeq(gameKey, branch, readSeq);
@@ -443,7 +443,8 @@ export function ReaderView() {
   const { records, model, latestBranch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
   const [picked, setPicked] = useState<number | null>(null);
-  const selected = picked !== null && model.branches.has(picked) ? picked : latestBranch;
+  // 읽은 위치·갈래 고르기는 대표 갈래 id 기준(이어진 갈래 id가 들어와도 대표 갈래로)
+  const selected = picked !== null && model.branches.has(picked) ? representative(model, picked) : latestBranch;
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
   const onMode = (v: string) => {
     if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
