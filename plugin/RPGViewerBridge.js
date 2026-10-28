@@ -7,6 +7,8 @@
  * 게임 폴더의 rpg-viewer/ 아래에 플레이 기록(log.jsonl)과
  * 현재 상태(live.json)를 남깁니다. 게임 화면과 진행에는 영향을 주지 않습니다.
  * 플러그인 명령이나 파라미터는 없습니다.
+ * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
+ * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -19,7 +21,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.0",
+    VERSION: "1.0.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -56,12 +58,17 @@
   var meta = { nextRun: 1, nextBranch: 1, nextSeq: 1 };
   var run = null, branch = null;
   var buffer = [];            // serialized records not yet appended
-  var pendingState = null;    // { t, src, cmd, changes }
+  // State changes not yet written, grouped per src+cmd within the current flush window
+  // (closed at flush or before the next non-state record): [{ t, src, cmd, changes, at }].
+  var pendingGroups = [];
+  var groupByKey = {};
   var currentCtx = null;      // { src, cmd } of the command being executed
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
   var deferredNewGame = false;
-  var lastErrorT = -Infinity, lastErrorMessage = null;
+  var lastErrorT = -Infinity;
+  var errorTimes = {}, errorCount = 0; // message -> time it was last written
+  var ERROR_REPEAT_MS = 60000;
   var lastLiveBody = null, lastLiveT = 0;
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
@@ -106,13 +113,17 @@
   }
 
   function closeState() {
-    if (!pendingState) return;
-    var p = pendingState;
-    pendingState = null;
+    if (!pendingGroups.length) return;
+    var groups = pendingGroups;
+    pendingGroups = [];
+    groupByKey = {};
     if (run === null) return;
-    var rec = makeRecord("state", p.t);
-    rec.src = p.src; rec.cmd = p.cmd; rec.changes = p.changes;
-    pushLine(rec);
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var rec = makeRecord("state", g.t);
+      rec.src = g.src; rec.cmd = g.cmd; rec.changes = g.changes;
+      pushLine(rec);
+    }
   }
 
   function emit(type, fields) {
@@ -126,29 +137,38 @@
   function reportError(e) {
     try {
       var message = e && e.message ? String(e.message) : String(e);
-      if (message === lastErrorMessage) return; // a hook failing every frame: write it once
       var t = now();
+      var key = "m:" + message;
+      // a hook failing every frame: write the same message at most once a minute
+      if (Object.prototype.hasOwnProperty.call(errorTimes, key) && t - errorTimes[key] < ERROR_REPEAT_MS) return;
       if (t - lastErrorT < 1000) return;
       lastErrorT = t;
-      lastErrorMessage = message;
+      if (errorCount >= 100) { errorTimes = {}; errorCount = 0; }
+      if (!Object.prototype.hasOwnProperty.call(errorTimes, key)) errorCount++;
+      errorTimes[key] = t;
       emit("error", { message: message });
     } catch (ignore) { /* never throw */ }
   }
 
-  function sameSrc(a, b) {
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
-
+  // Parallel events changing variables every frame would otherwise produce a record per frame:
+  // within a flush window, one group per src+cmd and only the last value per (kind, id).
   function recordChange(kind, id, value) {
     if (run === null) return;
     var src = currentCtx ? currentCtx.src : null;
     var cmd = currentCtx ? currentCtx.cmd : null;
-    var change = { kind: kind, id: id, value: value };
-    if (pendingState && pendingState.cmd === cmd && sameSrc(pendingState.src, src)) {
-      pendingState.changes.push(change);
+    var gkey = JSON.stringify(src) + "#" + cmd;
+    var g = Object.prototype.hasOwnProperty.call(groupByKey, gkey) ? groupByKey[gkey] : null;
+    if (!g) {
+      g = { t: now(), src: src, cmd: cmd, changes: [], at: {} };
+      groupByKey[gkey] = g;
+      pendingGroups.push(g);
+    }
+    var ckey = kind + ":" + id;
+    if (Object.prototype.hasOwnProperty.call(g.at, ckey)) {
+      g.changes[g.at[ckey]].value = value;
     } else {
-      closeState();
-      pendingState = { t: now(), src: src, cmd: cmd, changes: [change] };
+      g.at[ckey] = g.changes.length;
+      g.changes.push({ kind: kind, id: id, value: value });
     }
   }
 
@@ -465,7 +485,9 @@
           if (ok) {
             try {
               var after = this.value(id);
-              if (after !== before) {
+              // variables can hold strings/arrays/objects (script calls): log only numbers and booleans, skip the rest
+              var loggable = kind !== "variable" || typeof after === "number" || typeof after === "boolean";
+              if (loggable && after !== before) {
                 var key = kind === "selfSwitch" ? (id && id.join ? id.join(",") : String(id)) : id;
                 recordChange(kind, key, after);
               }

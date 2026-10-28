@@ -176,6 +176,74 @@ describe("RPGViewerBridge", () => {
     ]);
   });
 
+  // A "set variable" command for the fake engine (MZ passes params, MV reads this._params).
+  function addCommand122(harness: Harness) {
+    harness.g.Game_Interpreter.prototype.command122 = function (this: any, params?: any[]) {
+      const p = params ?? this._params;
+      harness.g.$gameVariables.setValue(p[0], p[1]);
+      return true;
+    };
+  }
+
+  it("groups a flush window's state changes by src+cmd, last value per variable wins", () => {
+    h = newGame();
+    addCommand122(h);
+    const listA = [cmd(122, [1, 0]), cmd(0)];
+    const listB = [cmd(122, [2, 0]), cmd(0)];
+    h.addMapEvent(2, [listA]);
+    h.addMapEvent(3, [listB]);
+    const a = h.newInterpreter(), b = h.newInterpreter();
+    a.setup(listA, 2);
+    b.setup(listB, 3);
+    // two parallel events alternating every frame for 250ms (one flush window)
+    for (let f = 1; f <= 15; f++) {
+      listA[0].parameters[1] = f;
+      listB[0].parameters[1] = f * 10;
+      h.runCommand(a, 0);
+      h.runCommand(b, 0);
+      h.clock.t += 16;
+    }
+    const states = h.readLog().filter((r) => r.type === "state");
+    expect(states.length).toBeLessThanOrEqual(2);
+    expect(states).toEqual([
+      expect.objectContaining({ src: { source: "map", mapId: 1, eventId: 2, page: 0 }, cmd: 0, changes: [{ kind: "variable", id: 1, value: 15 }] }),
+      expect.objectContaining({ src: { source: "map", mapId: 1, eventId: 3, page: 0 }, cmd: 0, changes: [{ kind: "variable", id: 2, value: 150 }] }),
+    ]);
+  });
+
+  it("keeps grouped state ordered relative to other records", () => {
+    h = newGame();
+    addCommand122(h);
+    const list = [cmd(122, [1, 1]), cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["hi"]), cmd(122, [1, 2]), cmd(0)];
+    h.addMapEvent(2, [list]);
+    const interp = h.newInterpreter();
+    interp.setup(list, 2);
+    h.runCommand(interp, 0);
+    h.runCommand(interp, 1);
+    h.g.$gameMessage._busy = false;
+    h.runCommand(interp, 3);
+    h.g.$gameVariables.setValue(7, 1);
+    h.runCommand(interp, 0);
+    expect(h.readLog().slice(1).map((r) => [r.type, r.cmd ?? null, r.changes ?? null])).toEqual([
+      ["state", 0, [{ kind: "variable", id: 1, value: 1 }]],
+      ["message", 1, null],
+      ["state", 3, [{ kind: "variable", id: 1, value: 2 }]],
+      ["state", null, [{ kind: "variable", id: 7, value: 1 }]],
+      ["state", 0, [{ kind: "variable", id: 1, value: 1 }]],
+    ]);
+  });
+
+  it("logs only numeric or boolean variable values", () => {
+    h = newGame();
+    h.g.$gameVariables.setValue(1, "text");
+    h.g.$gameVariables.setValue(2, [1, 2]);
+    h.g.$gameVariables.setValue(3, true);
+    h.g.$gameVariables.setValue(4, 5);
+    expect(h.readLog().slice(1)).toEqual([
+      expect.objectContaining({ type: "state", changes: [{ kind: "variable", id: 3, value: true }, { kind: "variable", id: 4, value: 5 }] }),
+    ]);
+  });
+
   it("ignores setValue with unchanged value", () => {
     h = newGame();
     h.g.$gameSwitches.setValue(1, false);
@@ -291,7 +359,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.1", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -361,8 +429,21 @@ describe("RPGViewerBridge", () => {
     h.clock.t += 100; failWith("other");  // different, > 1s since last write: written
     h.clock.t += 100; failWith("third");  // < 1s since last write: rate-limited
     h.clock.t += 5000; failWith("other"); // repeat of the last written message: suppressed
+    h.clock.t += 2000; failWith("same");  // alternating repeat within 60s of its write: suppressed
     const errors = h.readLog().filter((r) => r.type === "error").map((r) => r.message);
     expect(errors).toEqual(["same", "other"]);
+  });
+
+  it("allows an identical error message again after 60 seconds", () => {
+    h = newGame();
+    const interp = h.newInterpreter();
+    const failWith = (m: string) => { h.g.$gameMap.event = () => { throw new Error(m); }; interp.setup([cmd(0)], 1); };
+    failWith("same");                     // t0: written
+    h.clock.t += 59_000; failWith("same");  // within 60s: suppressed
+    h.clock.t += 1_000; failWith("same");   // 60s after the write: written again
+    h.clock.t += 30_000; failWith("same");  // within 60s of the second write: suppressed
+    const errors = h.readLog().filter((r) => r.type === "error");
+    expect(errors.map((r) => r.t)).toEqual([1_000_000, 1_060_000]);
   });
 
   it("marks the install flag non-enumerable", () => {
@@ -404,13 +485,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.1"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.0");
+    expect(h.bridge.VERSION).toBe("1.0.1");
   });
 
   it("uses ES2015-compatible syntax only", () => {
