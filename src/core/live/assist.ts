@@ -13,7 +13,8 @@ export type HotkeyAction = "speed" | "skip" | "win" | "lose";
 /** 동작별 DOM keyCode. null = 끔. */
 export type Hotkeys = Record<HotkeyAction, number | null>;
 export type AssistCommandKind = "win" | "lose" | "escape";
-export interface AssistCommand { id: string; kind: AssistCommandKind }
+/** at = 사용자가 누른 시각(ms) */
+export interface AssistCommand { id: string; kind: AssistCommandKind; at: number }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
 
 export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122 };
@@ -40,7 +41,10 @@ const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "obj
 export const isSpeed = (v: unknown): v is AssistSettings["speed"] => v === 1 || v === 2 || v === 4 || v === 8;
 export const isAutoSpeed = (v: unknown): v is AssistSettings["autoSpeed"] => v === 2 || v === 4 || v === 8;
 
-const isKeyCode = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0 && v < 256;
+/** 플러그인과 같은 범위: 정수 8~255 */
+const isKeyCode = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 8 && v <= 255;
+/** 단축키로 쓸 수 없는 잠금 키(NumLock·ScrollLock) — 플러그인도 거절한다 */
+const LOCK_KEYCODES: ReadonlySet<number> = new Set([144, 145]);
 
 /** keyCode → 사람이 읽는 이름(F1~F12, 글자, 숫자, Num 0~9, 그 밖에는 `키 {code}`). */
 export function keyLabel(code: number): string {
@@ -56,6 +60,7 @@ export function validateHotkey(code: number | null, action: HotkeyAction, hotkey
   if (!isKeyCode(code)) return "쓸 수 없는 키예요";
   const name = keyLabel(code);
   if (RESERVED_KEYCODES.has(code)) return `${name}은(는) 게임이 이미 쓰는 키예요`;
+  if (LOCK_KEYCODES.has(code)) return `${name}은(는) 단축키로 쓸 수 없어요`;
   for (const a of HOTKEY_ACTIONS) {
     if (a.action !== action && isObj(hotkeys) && hotkeys[a.action] === code) return `${name}은(는) 이미 '${a.label}'에 쓰고 있어요`;
   }
@@ -161,7 +166,7 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
   const n = normalizeAssist(s);
   const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
   const cmd = isObj(command) && typeof command.id === "string" && (command.kind === "win" || command.kind === "lose" || command.kind === "escape")
-    ? { id: command.id, kind: command.kind }
+    ? { id: command.id, kind: command.kind, at: Number.isFinite(command.at) ? command.at : 0 }
     : null;
   return JSON.stringify({
     v: 1, t: Number.isFinite(now) ? now : 0,
@@ -169,4 +174,69 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
     command: cmd,
   });
+}
+
+/** 마지막으로 성공한 control.json 쓰기 */
+export interface WrittenControl { t: number; settings: AssistSettings }
+export type AdoptPatch = Partial<Pick<AssistSettings, "speed" | "skipSeen">>;
+
+/**
+ * live.json `assist`의 배속·본 대사 넘기기 중 게임 창 단축키로 바뀐 값(받아들일 것). 없으면 null.
+ * 게임이 우리가 마지막으로 쓴 파일을 적용한 뒤(controlT === written.t) 스스로 바꾼 값만 받는다 —
+ * 쓰는 중이거나(pending) controlT가 다르면 예전 파일의 메아리일 수 있으므로 무시한다. 예외를 던지지 않는다.
+ */
+export function adoptLiveAssist(assist: unknown, written: WrittenControl | null, current: AssistSettings, pending: boolean): AdoptPatch | null {
+  if (pending || !written || !isObj(assist)) return null;
+  if (typeof assist.controlT !== "number" || assist.controlT !== written.t) return null;
+  const patch: AdoptPatch = {};
+  if (isSpeed(assist.speed) && assist.speed !== written.settings.speed && assist.speed !== current.speed) patch.speed = assist.speed;
+  if (typeof assist.skipSeen === "boolean" && assist.skipSeen !== written.settings.skipSeen && assist.skipSeen !== current.skipSeen) {
+    patch.skipSeen = assist.skipSeen;
+  }
+  return Object.keys(patch).length === 0 ? null : patch;
+}
+
+/** 게임이 적용한 control.json이 우리가 마지막으로 쓴 것과 이만큼 오래 다르면 다시 쓴다. */
+export const RESYNC_AFTER_MS = 3000;
+/** 다시 쓰기는 이 간격보다 자주 하지 않는다. */
+export const RESYNC_MIN_INTERVAL_MS = 5000;
+
+/**
+ * 게임이 적용한 control.json(controlT)이 마지막으로 쓴 것(writtenT)과 다른가. controlT를 보고하지 않는 플러그인(필드 없음)은
+ * 판단할 수 없으므로 false. controlT가 null(아직 적용 안 함)이거나 아직 한 번도 못 썼으면(writtenT null) 다르다.
+ */
+export function controlMismatch(assist: unknown, writtenT: number | null): boolean {
+  if (!isObj(assist) || !("controlT" in assist)) return false;
+  const c: unknown = assist.controlT;
+  if (c !== null && typeof c !== "number") return false;
+  return writtenT === null || c !== writtenT;
+}
+
+/** 다시 쓸 때인가: 어긋난 지(mismatchSince) 3초를 넘었고 마지막 다시 쓰기에서 5초가 지났다. */
+export function resyncDue(mismatchSince: number | null, lastResyncAt: number | null, now: number): boolean {
+  if (mismatchSince === null || now - mismatchSince <= RESYNC_AFTER_MS) return false;
+  return lastResyncAt === null || now - lastResyncAt >= RESYNC_MIN_INTERVAL_MS;
+}
+
+/** 전투 명령 응답이 이 시간 안에 오지 않으면 게임이 응답하지 않는 것으로 본다. */
+export const COMMAND_RESPONSE_MS = 5000;
+export type CommandStatus = "sent" | "applied" | "ignored" | "failed" | "noResponse";
+export const COMMAND_STATUS_TEXT: Record<CommandStatus, string> = {
+  sent: "보냄…",
+  applied: "적용됐어요",
+  ignored: "게임에서 무시했어요 (전투 중이 아니거나 이미 끝나는 중)",
+  failed: "실행하지 못했어요",
+  noResponse: "게임이 응답하지 않아요",
+};
+
+/**
+ * 보낸 명령(sent)의 상태: live.json `assist.lastCommand`가 id·`id:ignored`·`id:failed`인지 보고,
+ * 아직 응답이 없으면 timedOut(보낸 지 COMMAND_RESPONSE_MS가 지났나)에 따라 noResponse·sent.
+ */
+export function commandStatus(sent: { id: string } | null, lastCommand: unknown, timedOut: boolean): CommandStatus | null {
+  if (!sent) return null;
+  if (lastCommand === sent.id) return "applied";
+  if (lastCommand === `${sent.id}:ignored`) return "ignored";
+  if (lastCommand === `${sent.id}:failed`) return "failed";
+  return timedOut ? "noResponse" : "sent";
 }

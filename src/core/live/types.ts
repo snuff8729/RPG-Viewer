@@ -50,6 +50,12 @@ export interface LiveAssist {
   lastCommand: string | null;
   /** 게임에 실제로 걸린 단축키 keyCode(null = 끔). 없으면 기본 단축키가 고정인 구버전 플러그인. */
   hotkeys?: { speed: number | null; skip: number | null; win: number | null; lose: number | null };
+  /** 게임이 적용한 control.json의 t(null = 아직 없음). 게임은 시작 뒤에 쓰인 파일만 적용한다. 없으면 구버전. */
+  controlT?: number | null;
+  /** 지금 전투에서 도망칠 수 있는가(전투 중일 때만 의미) */
+  canEscape?: boolean;
+  /** 지금 전투에서 져도 게임 오버가 아닌가(전투 중일 때만 의미) */
+  canLose?: boolean;
 }
 
 export interface BranchInfo {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import {
-  controlJson, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys, normalizeAssist, normalizeHotkeys,
-  seenSets, validateHotkey, versionAtLeast,
+  adoptLiveAssist, commandStatus, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys,
+  normalizeAssist, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
 import type { Coverage, PickInfo } from "./types";
@@ -70,11 +70,11 @@ describe("seenSets", () => {
 
 describe("controlJson", () => {
   it("writes the v1 contract", () => {
-    const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win" }, 123));
+    const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win", at: 100 }, 123));
     expect(j).toEqual({
       v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
       hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
-      seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win" },
+      seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win", at: 100 },
     });
   });
   it("sanitizes bad settings/commands", () => {
@@ -123,6 +123,12 @@ describe("hotkeys", () => {
     expect(validateHotkey(118, "speed", DEFAULT_HOTKEYS)).toBe("F7은(는) 이미 '본 대사 넘기기 켜고 끄기'에 쓰고 있어요");
     expect(validateHotkey(1.5, "speed", DEFAULT_HOTKEYS)).toBe("쓸 수 없는 키예요");
     expect(validateHotkey(300, "speed", DEFAULT_HOTKEYS)).toBe("쓸 수 없는 키예요");
+    expect(validateHotkey(7, "speed", DEFAULT_HOTKEYS)).toBe("쓸 수 없는 키예요");
+    expect(validateHotkey(8, "speed", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(255, "speed", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(144, "speed", DEFAULT_HOTKEYS)).toBe("키 144은(는) 단축키로 쓸 수 없어요");
+    expect(validateHotkey(145, "speed", DEFAULT_HOTKEYS)).toMatch(/단축키로 쓸 수 없어요/);
+    expect(normalizeHotkeys({ speed: 144, skip: 5 })).toEqual(DEFAULT_HOTKEYS);
   });
   it("normalizeHotkeys: old settings get defaults, bad/duplicate keys fall back", () => {
     expect(normalizeHotkeys(undefined)).toEqual(DEFAULT_HOTKEYS);
@@ -147,5 +153,55 @@ describe("hotkeys", () => {
   it("controlJson writes custom hotkeys", () => {
     const hotkeys = { speed: 65, skip: null, win: 121, lose: 122 };
     expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual(hotkeys);
+  });
+});
+
+describe("game sync", () => {
+  const written = { t: 500, settings: { ...DEFAULT_ASSIST, speed: 2 as const, skipSeen: true } };
+  const cur = written.settings;
+  it("adoptLiveAssist adopts hotkey changes only after the game applied our latest write", () => {
+    // 게임이 우리 파일(t 500)을 적용한 뒤 단축키로 4배속·넘기기 끔
+    expect(adoptLiveAssist({ controlT: 500, speed: 4, skipSeen: false }, written, cur, false)).toEqual({ speed: 4, skipSeen: false });
+    // 예전 파일의 메아리
+    expect(adoptLiveAssist({ controlT: 400, speed: 4, skipSeen: false }, written, cur, false)).toBeNull();
+    expect(adoptLiveAssist({ controlT: null, speed: 4 }, written, cur, false)).toBeNull();
+    // 구버전(controlT 없음)
+    expect(adoptLiveAssist({ speed: 4 }, written, cur, false)).toBeNull();
+    // 쓰는 중이면 받지 않는다
+    expect(adoptLiveAssist({ controlT: 500, speed: 4 }, written, cur, true)).toBeNull();
+    // 아직 못 썼으면 받지 않는다
+    expect(adoptLiveAssist({ controlT: 500, speed: 4 }, null, cur, false)).toBeNull();
+    // 쓴 값과 같으면 바뀐 게 없다
+    expect(adoptLiveAssist({ controlT: 500, speed: 2, skipSeen: true }, written, cur, false)).toBeNull();
+    // 이미 받아들인 값(현재 설정과 같음)은 다시 받지 않는다
+    expect(adoptLiveAssist({ controlT: 500, speed: 4 }, written, { ...cur, speed: 4 }, false)).toBeNull();
+    expect(adoptLiveAssist({ controlT: 500, speed: 3 }, written, cur, false)).toBeNull();
+    expect(adoptLiveAssist(null, written, cur, false)).toBeNull();
+  });
+  it("controlMismatch compares the applied t with our latest write", () => {
+    expect(controlMismatch({ controlT: 500 }, 500)).toBe(false);
+    expect(controlMismatch({ controlT: 400 }, 500)).toBe(true);
+    expect(controlMismatch({ controlT: null }, 500)).toBe(true);
+    expect(controlMismatch({ controlT: null }, null)).toBe(true);
+    expect(controlMismatch({ controlT: 500 }, null)).toBe(true);
+    expect(controlMismatch({ speed: 1 }, 500)).toBe(false);
+    expect(controlMismatch({ controlT: "x" }, 500)).toBe(false);
+    expect(controlMismatch(undefined, 500)).toBe(false);
+  });
+  it("resyncDue waits 3 s of mismatch and throttles to 5 s", () => {
+    expect(resyncDue(null, null, 10_000)).toBe(false);
+    expect(resyncDue(7_000, null, 10_000)).toBe(false);
+    expect(resyncDue(6_999, null, 10_000)).toBe(true);
+    expect(resyncDue(1_000, 6_000, 10_000)).toBe(false);
+    expect(resyncDue(1_000, 5_000, 10_000)).toBe(true);
+  });
+  it("commandStatus follows the game's echo", () => {
+    const sent = { id: "c-1" };
+    expect(commandStatus(null, "c-1", false)).toBeNull();
+    expect(commandStatus(sent, null, false)).toBe("sent");
+    expect(commandStatus(sent, "c-0", true)).toBe("noResponse");
+    expect(commandStatus(sent, "c-1", true)).toBe("applied");
+    expect(commandStatus(sent, "c-1:ignored", false)).toBe("ignored");
+    expect(commandStatus(sent, "c-1:failed", false)).toBe("failed");
   });
 });
