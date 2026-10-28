@@ -360,6 +360,54 @@ describe("RPGViewerBridge", () => {
     expect(h.readLive()).toMatchObject({ running: { source: "common", commonEventId: 1 }, runningCmd: 1 });
   });
 
+  it("reports the innermost of common events nested two levels deep", () => {
+    h = newGame();
+    h.g.$dataCommonEvents[2] = { id: 2, list: [cmd(121, [7, 7, 0]), cmd(121, [8, 8, 0]), cmd(121, [9, 9, 0]), cmd(0)] };
+    h.g.$dataCommonEvents[1] = { id: 1, list: [cmd(121, [5, 5, 0]), cmd(117, [2]), cmd(0)] };
+    const list = [cmd(121, [1, 1, 0]), cmd(117, [1]), cmd(0)];
+    h.addMapEvent(1, [list]);
+    h.g.$gamePlayer.performTransfer();
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 1);
+    h.runCommand(interp, 1);                 // map → CE1
+    const ce1 = interp._childInterpreter;
+    h.runCommand(ce1, 1);                    // CE1 → CE2
+    const ce2 = ce1._childInterpreter;
+    ce2._index = 2;
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ running: { source: "common", commonEventId: 2 }, runningCmd: 2 });
+  });
+
+  it("a finished child still attached reports the parent", () => {
+    h = newGame();
+    h.g.$dataCommonEvents[1] = { id: 1, list: [cmd(121, [5, 5, 0]), cmd(0)] };
+    const list = [cmd(121, [1, 1, 0]), cmd(117, [1]), cmd(121, [2, 2, 0]), cmd(0)];
+    h.addMapEvent(1, [list]);
+    h.g.$gamePlayer.performTransfer();
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 1);
+    h.runCommand(interp, 1);                 // _index → 2, child attached
+    const child = interp._childInterpreter;
+    child._list = null;                      // child finished, not yet detached
+    h.bridge._snapshotNow();
+    expect(interp._childInterpreter).toBe(child);
+    expect(h.readLive()).toMatchObject({ running: { source: "map", mapId: 1, eventId: 1, page: 0 }, runningCmd: 2 });
+  });
+
+  it("in battle, running is the troop page source", () => {
+    h = newGame();
+    h.g.$gamePlayer.performTransfer();
+    const list = [cmd(121, [1, 1, 0]), cmd(121, [2, 2, 0]), cmd(0)];
+    h.g.$dataTroops[4] = { id: 4, pages: [{ list: [] }, { list }] };
+    h.g.$gameTroop._troopId = 4;
+    h.g.$gameParty._inBattle = true;
+    const troopInterp = h.g.$gameTroop._interpreter;
+    troopInterp.setup(list, 0);
+    h.runCommand(troopInterp, 0);
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ running: { source: "troop", troopId: 4, page: 1 }, runningCmd: 1, inBattle: true });
+  });
+
   it("follows the troop interpreter in battle", () => {
     h = newGame();
     h.g.$gamePlayer.performTransfer();
