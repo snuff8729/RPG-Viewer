@@ -96,7 +96,8 @@ describe("enemy detection", () => {
     expect(enemyOf(evOf(3), 1, data, 0)?.troops).toEqual(["맵 랜덤 적"]);
     expect(enemyOf(evOf(4), 1, data, 0)?.troops).toEqual(["늑대"]);
     expect(enemyOf(evOf(5), 1, data, 0)).toBeNull();
-    expect(enemyOf(evOf(7), 1, data, 0)).toBeNull();
+    // 많이 불리는 공통 이벤트라도 전투 처리가 들어 있으면 본다(전투 처리용 공통 이벤트)
+    expect(enemyOf(evOf(7), 1, data, 0)?.troops).toEqual(["적 그룹 4"]);
     expect(enemyOf(evOf(10), 1, data, 0)).toBeNull();
   });
 
@@ -104,6 +105,12 @@ describe("enemy detection", () => {
     expect(enemyOf(evOf(6), 1, data, 0)).toMatchObject({ maybe: true, troops: [], chase: true, touch: true });
     expect(findBattles([c(356, ["ShowPicture 1"])], null, data)).toEqual([]);
     expect(findBattles([c(356, ["エンカウント 開始"])], null, data)).toEqual([{ troop: null, canEscape: false, canLose: false, maybe: true }]);
+    // 전투 시스템 설정은 전투를 시작하지 않는다
+    expect(findBattles([c(356, ["setBattleSys DTB"])], null, data)).toEqual([]);
+    expect(findBattles([c(356, ["BattleSpeed 2"])], null, data)).toEqual([]);
+    expect(findBattles([c(356, ["Battle_Start 3"])], null, data)).toHaveLength(1);
+    expect(findBattles([c(357, ["NRP_X", "setBattleSystem", "", { battle: "start" }])], null, data)).toEqual([]);
+    expect(findBattles([c(357, ["BattleCore", "StartBattle", "", {}])], null, data)).toHaveLength(1);
   });
 
   it("marks whether the current page is the battle page", () => {
@@ -123,6 +130,48 @@ describe("enemy detection", () => {
     expect(describeEnemy(enemyOf(evOf(1), 1, data, 0)!)).toBe("적 · 슬라임*2 · 부딪히면 전투 · 쫓아옴 · 도망 가능");
     expect(describeEnemy(enemyOf(evOf(2), 1, data, 0)!)).toBe("적 · 변수로 정해짐 · 말 걸면 전투 · 도망 못 감 · 져도 계속");
     expect(describeEnemy(enemyOf(evOf(6), 1, data, 0)!)).toBe("적일 수 있음 · 플러그인으로 전투 · 부딪히면 전투 · 쫓아옴");
+  });
+});
+
+describe("battles through widely-shared battle common events", () => {
+  /** 122 변수 조작: 변수 하나에 상수 대입 */
+  const setVar = (id: number, value: number) => c(122, [id, id, 0, 0, value]);
+  const ces: (CommonEvent | null)[] = [];
+  // 戦闘処理一般: 변수 7번 적 그룹으로 전투(기본값 3을 먼저 넣음)
+  ces[150] = ce(150, [setVar(7, 3), battle(1, 7, true)]);
+  // 戦闘処理Event・BOSS: 변수 8번 적 그룹(공통 이벤트 안에서 정하지 않음)
+  ces[151] = ce(151, [battle(1, 8, false, true)]);
+  // 많이 불리는 시스템 처리(전투 없음, 플러그인 전투 짐작만)
+  ces[152] = ce(152, [c(356, ["StartBattle 1"])]);
+  const callers = Array.from({ length: 52 }, (_, i) =>
+    ev(i + 1, `적${i + 1}`, [page([setVar(7, (i % 2) + 1), c(117, [150]), c(117, [151]), c(117, [152])], { trigger: 1 })]));
+  const map: MapData = { ...field, encounterList: [], events: [null, ...callers,
+    ev(53, "상수 없음", [page([c(117, [150])], { trigger: 1 })]),
+    ev(54, "다른 변수", [page([setVar(9, 2), c(117, [150]), setVar(7, 2)], { trigger: 2 })]),
+    ev(55, "보스", [page([setVar(8, 2), c(117, [151])], { trigger: 0 })]),
+    ev(56, "범위", [page([c(122, [6, 8, 0, 0, 1]), c(117, [151])], { trigger: 1 })]),
+    ev(57, "NPC", [page([c(356, ["setBattleSys DTB"]), ...msg("안녕")])]),
+  ] };
+  const d: GameData = { ...data, maps: new Map([[1, map]]), commonEvents: ces };
+  const evAt = (id: number) => map.events[id]!;
+
+  it("follows the shared battle common event and resolves the troop from the caller's variable", () => {
+    expect(enemyOf(evAt(1), 1, d, 0)).toMatchObject({ troops: ["슬라임*2", "변수로 정해짐"], maybe: false, canEscape: true, canLose: false });
+    expect(enemyOf(evAt(2), 1, d, 0)?.troops).toEqual(["박쥐", "변수로 정해짐"]);
+  });
+
+  it("falls back to the variable set inside the common event, then to 변수로 정해짐", () => {
+    expect(enemyOf(evAt(53), 1, d, 0)?.troops).toEqual(["늑대"]);
+    // 다른 변수를 바꾸거나 117 뒤에서 바꾸면 쓰지 않는다
+    expect(enemyOf(evAt(54), 1, d, 0)?.troops).toEqual(["늑대"]);
+    expect(enemyOf(evAt(55), 1, d, 0)).toMatchObject({ troops: ["박쥐"], canLose: true, touch: false });
+    // 여러 변수를 한꺼번에 바꾸는 조작은 상수로 보지 않는다
+    expect(enemyOf(evAt(56), 1, d, 0)?.troops).toEqual(["변수로 정해짐"]);
+  });
+
+  it("drops plugin guesses inside shared common events and setting commands", () => {
+    expect(findBattles([c(117, [152])], null, d)).toEqual([]);
+    expect(enemyOf(evAt(57), 1, d, 0)).toBeNull();
   });
 });
 

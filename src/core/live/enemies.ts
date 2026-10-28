@@ -9,8 +9,10 @@ const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v)
 
 /** 공통 이벤트를 따라 들어가는 깊이 */
 const CE_DEPTH = 2;
-/** 플러그인 명령 글이 전투를 거는 것처럼 보이는가 */
-const BATTLE_WORD = /battle|戦闘|バトル|encounter|エンカウント/i;
+/** 플러그인 명령이 전투를 "시작"하는 것처럼 보이는가(명령 이름이나 인수) */
+const BATTLE_START = /^(start|call|begin|force)?_?battle\b|battle_?start|戦闘開始|バトル開始|エンカウント|encounter/i;
+/** 설정처럼 보이는 플러그인 명령 이름(setBattleSys 등): 전투를 시작하지 않는다 */
+const SETTING_NAME = /^set|config|sys|mode|speed|bgm|bgs|se\b/i;
 /** 쫓아오는 이벤트 표시(EventChasePlayer 등): 메모·주석·스크립트 */
 const CHASE_WORD = /<\s*chase|chase\s*player|_chaseRange|chaseRange|追跡|追いかけ|追尾/i;
 
@@ -33,38 +35,99 @@ export function battleTroop(data: GameData, params: unknown): string {
   return troopName(data, num(p[1]));
 }
 
-function pluginText(c: EventCommand): string {
-  const p = arr<unknown>(c.parameters);
-  if (c.code === 356) return typeof p[0] === "string" ? p[0] : "";
-  if (c.code === 357) { try { return JSON.stringify(p); } catch { return ""; } }
-  return "";
+/** 플러그인 명령이 전투를 시작하는 것처럼 보이는가. 설정 명령(setBattleSys 등)은 아니다. */
+export function pluginStartsBattle(c: EventCommand): boolean {
+  try {
+    const p = arr<unknown>(c.parameters);
+    let name = "";
+    let words: string[] = [];
+    if (c.code === 356) {
+      words = (typeof p[0] === "string" ? p[0] : "").split(/\s+/).filter(Boolean);
+      name = words[0] ?? "";
+    } else if (c.code === 357) {
+      name = typeof p[1] === "string" ? p[1] : "";
+      words = [name, typeof p[2] === "string" ? p[2] : ""];
+      if (isObj(p[3])) for (const v of Object.values(p[3])) if (typeof v === "string") words.push(v);
+    } else return false;
+    if (!name || SETTING_NAME.test(name)) return false;
+    return words.some(w => w !== "" && BATTLE_START.test(w));
+  } catch {
+    return false;
+  }
+}
+
+/** 목록에서 at 앞쪽으로 가장 가까운, 변수 varId를 바꾸는 변수 조작(122). 그 변수 하나에 상수 대입이면 그 값, 아니면 null. */
+function constantBefore(list: readonly EventCommand[], at: number, varId: number): number | null {
+  for (let i = Math.min(at, list.length) - 1; i >= 0; i--) {
+    const c = list[i];
+    if (!isObj(c) || c.code !== 122) continue;
+    const p = arr<unknown>(c.parameters);
+    const from = num(p[0]), to = num(p[1]);
+    if (varId < Math.min(from, to) || varId > Math.max(from, to)) continue;
+    if (from === to && num(p[2]) === 0 && num(p[3]) === 0 && typeof p[4] === "number") return p[4];
+    return null;
+  }
+  return null;
+}
+
+/** 보고 있는 목록과 위치(바깥 호출부터 안쪽으로) */
+interface Frame { list: EventCommand[]; at: number }
+
+/**
+ * 변수로 지정한 적 그룹(301 params[0] === 1): 부르는 쪽(가까운 호출부터) 117 앞의 상수 대입,
+ * 없으면 전투 처리가 있는 목록 안 301 앞의 상수 대입. 못 찾으면 `변수로 정해짐`.
+ */
+function variableTroop(data: GameData, varId: number, frames: readonly Frame[]): string {
+  for (let i = frames.length - 2; i >= 0; i--) {
+    const v = constantBefore(frames[i]!.list, frames[i]!.at, varId);
+    if (v !== null) return troopName(data, v);
+  }
+  const own = frames.at(-1);
+  const v = own ? constantBefore(own.list, own.at, varId) : null;
+  return v !== null ? troopName(data, v) : "변수로 정해짐";
 }
 
 /**
- * 명령 목록이 전투를 거는가: 목록 안의 전투 처리(301), TemplateEvent 호출로 불린 목록, 공통 이벤트(117, 깊이 2까지,
- * 게임 전체에서 MANY_CALLERS 곳 이상 불리는 공통 이벤트는 건너뜀). 전투 처리를 모두 모은다(같은 적 그룹은 한 번).
- * 전투 처리가 없고 플러그인 명령(356/357) 글이 전투처럼 보이면 maybe 하나.
+ * 명령 목록이 전투를 거는가: 목록 안의 전투 처리(301), TemplateEvent 호출로 불린 목록, 공통 이벤트(117, 깊이 2까지).
+ * 게임 전체에서 MANY_CALLERS 곳 이상 불리는 공통 이벤트는 그 안(깊이 안)에 전투 처리(301)가 있을 때만 본다
+ * (전투 처리용 공통 이벤트). 변수로 지정한 적 그룹은 부르는 쪽의 변수 조작으로 찾아본다.
+ * 전투 처리를 모두 모은다(같은 적 그룹은 한 번). 전투 처리가 없고 플러그인 명령(356/357)이 전투를 시작하는 것처럼
+ * 보이면 maybe 하나.
  */
 export function findBattles(list: unknown, ctx: CallCtx | null, data: GameData): BattleFound[] {
   const found: BattleFound[] = [];
   let maybe = false;
-  const go = (l: unknown, cx: CallCtx | null, depth: number, stack: number[]) => {
-    for (const c of flattenCalls(l, cx)) {
+  const add = (out: BattleFound[], b: BattleFound) => { if (!out.some(f => f.troop === b.troop)) out.push(b); };
+  /** 돌려주는 값: 플러그인 짐작을 봤는가 */
+  const go = (l: unknown, cx: CallCtx | null, depth: number, stack: number[], frames: Frame[], out: BattleFound[]): boolean => {
+    let sawMaybe = false;
+    const flat = flattenCalls(l, cx);
+    for (let i = 0; i < flat.length; i++) {
+      const c = flat[i];
       if (!isObj(c)) continue;
       const p = arr<unknown>(c.parameters);
       if (c.code === 301) {
-        const troop = battleTroop(data, p);
-        if (!found.some(f => f.troop === troop)) found.push({ troop, canEscape: p[2] === true, canLose: p[3] === true, maybe: false });
-      } else if ((c.code === 356 || c.code === 357) && BATTLE_WORD.test(pluginText(c))) maybe = true;
-      else if (c.code === 117 && depth < CE_DEPTH) {
+        const troop = num(p[0]) === 1 ? variableTroop(data, num(p[1]), [...frames, { list: flat, at: i }]) : battleTroop(data, p);
+        add(out, { troop, canEscape: p[2] === true, canLose: p[3] === true, maybe: false });
+      } else if (c.code === 356 || c.code === 357) {
+        if (pluginStartsBattle(c)) sawMaybe = true;
+      } else if (c.code === 117 && depth < CE_DEPTH) {
         const id = num(p[0]);
-        if (stack.includes(id) || commonEventCallCount(data, id) >= MANY_CALLERS) continue;
+        if (stack.includes(id)) continue;
         const ce = arr<{ list?: unknown } | null>(data.commonEvents)[id];
-        if (isObj(ce)) go(ce.list, null, depth + 1, [...stack, id]);
+        if (!isObj(ce)) continue;
+        const here = [...frames, { list: flat, at: i }];
+        if (commonEventCallCount(data, id) >= MANY_CALLERS) {
+          // 많이 불리는 공통 이벤트: 전투 처리(301)만 받는다(플러그인 짐작은 버린다)
+          const inner: BattleFound[] = [];
+          go(ce.list, null, depth + 1, [...stack, id], here, inner);
+          for (const b of inner) add(out, b);
+        } else if (go(ce.list, null, depth + 1, [...stack, id], here, out)) sawMaybe = true;
       }
     }
+    return sawMaybe;
   };
-  try { go(list, ctx, 0, []); } catch { /* 지금까지 */ }
+  try { maybe = go(list, ctx, 0, [], [], found); } catch { /* 지금까지 */ }
   if (found.length === 0 && maybe) return [{ troop: null, canEscape: false, canLose: false, maybe: true }];
   return found;
 }
