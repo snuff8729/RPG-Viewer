@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLive } from "@/app/LiveProvider";
 import { useGame } from "@/app/GameProvider";
 import { locationKey } from "@/core/index/locations";
-import { findNodePathByCmd } from "@/core/interpret/interpret";
+import { walk } from "@/core/interpret/interpret";
 import { pickKey } from "@/core/live/coverage";
 import { branchLabel } from "@/core/live/history";
 import { firstMessage } from "@/core/live/remaining";
@@ -26,30 +26,27 @@ export function ChoiceNowCard() {
     if (!choice || !srcKey) return null;
     const nodes = index?.pages.find(p => locationKey(p.location) === srcKey)?.nodes;
     if (!nodes) return null;
-    const path = findNodePathByCmd(nodes, choice.cmd);
-    if (!path) return null;
-    // 경로를 따라 내려가 노드를 얻는다(walk의 경로 규칙을 모르므로 cmd로 직접 찾는다)
-    const find = (l: ScriptNode[]): ScriptNode | null => {
-      for (const n of l) {
-        if (n.kind === "choices" && n.cmd === choice.cmd) return n;
-        const subs: ScriptNode[][] = n.kind === "choices" ? [...n.branches.map(b => b.body), n.cancelBranch ?? []]
-          : n.kind === "conditional" ? [n.then, n.else ?? []] : n.kind === "loop" ? [n.body] : [];
-        for (const s of subs) { const r = find(s); if (r) return r; }
-      }
-      return null;
-    };
-    return find(nodes);
+    const found: { n: ScriptNode | null } = { n: null };
+    try {
+      walk(nodes, [], n => { if (!found.n && n.kind === "choices" && n.cmd === choice.cmd) found.n = n; });
+    } catch { /* 깨진 노드 → 미리보기 없음 */ }
+    return found.n;
   }, [index, srcKey, choice]);
   if (!choice || !data) return null;
   const picks = choice.src ? coverage.picks.get(pickKey(choice.src, choice.cmd)) ?? [] : [];
   const open = expanded && expanded.key === choiceKey ? expanded.row : null;
 
   const preview = (body: ScriptNode[] | undefined): string | null => {
-    const m = body ? firstMessage(body) : null;
-    if (!m || m.kind !== "message") return null;
-    const text = formatText(m.lines.join(" "), data);
-    const who = m.speaker ? formatText(m.speaker, data) : "";
-    return who ? `${who}: ${text}` : text;
+    try {
+      const m = body ? firstMessage(body) : null;
+      if (!m || m.kind !== "message" || typeof m.lines?.[0] !== "string") return null;
+      const raw = formatText(m.lines[0], data);
+      const text = raw.length > 40 ? `${raw.slice(0, 40)}…` : raw;
+      const who = typeof m.speaker === "string" && m.speaker ? formatText(m.speaker, data) : "";
+      return who ? `${who}: "${text}"` : `"${text}"`;
+    } catch {
+      return null;
+    }
   };
 
   const row = (key: number, label: string, mine: PickInfo[], body: ScriptNode[] | undefined) => {

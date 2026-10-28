@@ -75,7 +75,7 @@ export function NowNextCard() {
   const stopText = stop?.node.kind === "choices"
     ? `⤷ 여기서 선택지 (${stop.node.branches.length}개)`
     : stop?.node.kind === "transfer"
-      ? `⤷ 여기서 이동: ${stop.node.mapId === null ? "(변수로 지정한 맵)" : data?.mapInfos[stop.node.mapId]?.name || `#${stop.node.mapId}`}`
+      ? `⤷ 여기서 이동: ${stop.node.mapId === null ? "(변수로 지정한 맵)" : data?.mapInfos?.[stop.node.mapId]?.name || `#${stop.node.mapId}`}`
       : null;
   const stopLabel = stop?.kind === "choices" ? "다음 선택지까지" : stop?.kind === "transfer" ? "다음 이동까지" : "페이지 끝까지";
   const visible: ScriptNode[] = more ? upto.nodes : shown;
