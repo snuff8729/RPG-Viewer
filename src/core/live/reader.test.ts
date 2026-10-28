@@ -108,3 +108,27 @@ describe("readerItems", () => {
     expect(lastSeqOf(items[1])).toBe(2);
   });
 });
+
+describe("readerItems text pictures", () => {
+  const src = { source: "map", mapId: 1, eventId: 2, page: 0 } as const;
+  const plugin = (seq: number, cmd: number, text: string) =>
+    item({ ...rec, seq, type: "plugin", src, cmd, code: 356, text } as LogRecord);
+  const pic = (seq: number, cmd: number, name: string) =>
+    item({ ...rec, seq, type: "picture", src, cmd, pictureId: 5, name } as LogRecord);
+
+  it("captions an empty-name picture with the D_TEXT records right before it", () => {
+    const out = readerItems([plugin(1, 0, "D_TEXT 안녕하세요 24"), plugin(2, 1, "D_TEXT 또 만나요"), pic(3, 2, "")], data, new Map(), model);
+    expect(out.at(-1)).toEqual({ kind: "picture", key: "r3", seq: 3, pictureId: 5, name: "", caption: "안녕하세요 / 또 만나요" });
+  });
+
+  it("leaves the caption off when the plugin text is not right before", () => {
+    const out = readerItems([plugin(1, 0, "D_TEXT 안녕 24"), pic(2, 3, "")], data, new Map(), model);
+    expect(out.at(-1)).toEqual({ kind: "picture", key: "r2", seq: 2, pictureId: 5, name: "" });
+  });
+
+  it("never captions a named picture", () => {
+    const out = readerItems([plugin(1, 0, "D_TEXT 안녕"), pic(2, 1, "village_map")], data, new Map(), model);
+    expect(out.at(-1)).toMatchObject({ name: "village_map" });
+    expect(out.at(-1)).not.toHaveProperty("caption");
+  });
+});

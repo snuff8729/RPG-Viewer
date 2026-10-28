@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FaceImage } from "../script/FaceImage";
-import { AssetPlaceholder } from "../script/AssetPlaceholder";
+import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
 import { useAsset } from "../script/useAssetUrl";
 import { PluginLine } from "./PluginLine";
 import { usePluginShowAll } from "./pluginDisplay";
@@ -21,10 +21,14 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
   );
 }
 
-function Picture({ name }: { name: string }) {
+function Picture({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
+  const { name } = item;
   const a = useAsset("pictures", name);
+  if (!name) return <TextPictureNote caption={item.caption} className="text-center" />;
   if (a.status === "loading") return <Skeleton className="h-40 w-full" />;
-  if (a.status !== "ok") return <AssetPlaceholder view={a} name={name} className="mx-auto w-fit max-w-full" />;
+  if (a.status !== "ok") {
+    return <AssetPlaceholder view={a} kind="pictures" name={name} pictureId={item.pictureId} className="mx-auto w-fit max-w-full" />;
+  }
   return <img src={a.url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
 }
 
@@ -59,7 +63,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
         </div>
       );
     case "picture":
-      return <Picture name={item.name} />;
+      return <Picture item={item} />;
     case "plugin":
       return <ReaderPlugin item={item} />;
     case "choice":
@@ -87,7 +91,10 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
       return a.repeat === m.repeat && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines);
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
-    case "picture": return a.name === (b as typeof a).name;
+    case "picture": {
+      const p = b as typeof a;
+      return a.name === p.name && a.caption === p.caption && a.pictureId === p.pictureId;
+    }
     case "plugin": {
       const p = b as typeof a;
       return a.text === p.text && a.tech === p.tech && a.name === p.name;

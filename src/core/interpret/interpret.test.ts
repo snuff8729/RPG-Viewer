@@ -84,7 +84,19 @@ describe("interpret robustness", () => {
   it("survives garbage parameters", () => expect(() => interpret([
     cmd(101, 0, []), cmd(102, 0, [null]), cmd(402, 0, []), cmd(121, 0, []), cmd(122, 0, [1, 1, 9, 9]),
     cmd(126, 0, []), cmd(129, 0, []), cmd(231, 0, []), cmd(111, 0, []), { code: 117 } as any], data)).not.toThrow());
-  it("empty picture name becomes other", () => expect(interpret([cmd(231, 0, [1, "", 0])], data)[0].kind).toBe("other"));
+  it("empty picture name is a text/plugin picture, not other", () =>
+    expect(interpret([cmd(231, 0, [1, "", 0])], data)[0]).toEqual({ kind: "picture", cmd: 0, pictureId: 1, name: "" }));
+  it("empty picture name takes the preceding D_TEXT text as caption", () => {
+    const out = interpret([
+      cmd(356, 0, ["D_TEXT_SETTING ALIGN 0"]), cmd(356, 0, ["D_TEXT 안녕하세요 24"]), cmd(356, 0, ["D_TEXT 반가워요"]),
+      cmd(231, 0, [3, "", 0]),
+    ], data);
+    expect(out.at(-1)).toEqual({ kind: "picture", cmd: 3, pictureId: 3, name: "", caption: "안녕하세요 / 반가워요" });
+  });
+  it("D_TEXT not directly before the picture is ignored", () => {
+    const out = interpret([cmd(356, 0, ["D_TEXT 안녕 24"]), cmd(121, 0, [1, 1, 0]), cmd(231, 0, [1, "", 0])], data);
+    expect(out.at(-1)).toEqual({ kind: "picture", cmd: 2, pictureId: 1, name: "" });
+  });
   it("cancel branch and loop", () => {
     const out = interpret([
       cmd(102, 0, [["a", "b"], 2, 0, 2, 0]), cmd(402, 0, [0, "a"]), cmd(0, 1, []),
