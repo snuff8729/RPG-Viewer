@@ -139,8 +139,16 @@
   // Dialogue-flow records reach disk at the end of the current frame instead of the next 250ms tick.
   var IMMEDIATE = { message: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
   var flushScheduled = false;
+  var MIN_FLUSH_GAP_MS = 50, lastFlushT = 0;
   function runScheduled() {
     if (!flushScheduled) return;
+    var wait = MIN_FLUSH_GAP_MS - (now() - lastFlushT);
+    if (wait > 0) { // too soon after the previous flush: keep the single pending flush for later
+      if (!T) {
+        try { setTimeout(runScheduled, wait); } catch (e0) { flushScheduled = false; }
+      }
+      return;
+    }
     flushScheduled = false;
     try { flush(); } catch (e) { reportError(e); }
   }
@@ -149,7 +157,8 @@
     flushScheduled = true;
     if (T) return; // tests run it through bridge._runScheduled()
     try {
-      setTimeout(runScheduled, 0);
+      var wait = MIN_FLUSH_GAP_MS - (now() - lastFlushT);
+      setTimeout(runScheduled, wait > 0 ? wait : 0);
     } catch (e) { flushScheduled = false; /* the 250ms tick still flushes */ }
   }
 
@@ -276,6 +285,7 @@
     releasePending(false);
     closeState();
     if (!buffer.length) return;
+    lastFlushT = now();
     var lines = buffer;
     buffer = [];
     try {

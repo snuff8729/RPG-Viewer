@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { noisyVariables } from "../../src/core/live/history";
 import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
 
@@ -704,6 +704,39 @@ describe("RPGViewerBridge", () => {
     h.g.$gameMap._interpreter._index = 0;
     h.bridge._tick();
     expect(live()).toMatchObject({ t: 1_000_030, runningCmd: 0 });
+  });
+
+  it("coalesces scheduled flushes: one append per frame, 50ms minimum gap, seq order kept", () => {
+    h = newGame();
+    const raw = () => h.fs.files.get(LOG_PATH) ?? "";
+    const lines = () => raw().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    h.bridge._flushNow();
+    h.clock.t += 100;
+    const append = vi.spyOn(h.fs, "appendFileSync");
+    h.g.$gameVariables.setValue(5, 7); // state change before the message
+    const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["a"]), cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["b"]), cmd(0)];
+    h.addMapEvent(3, [list], 0);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 3);
+    h.runCommand(interp, 0);
+    h.g.$gameMessage._texts = []; // free the window for the second message
+    h.runCommand(interp, 2);
+    h.bridge._runScheduled();
+    expect(append).toHaveBeenCalledTimes(1);
+    const recs = lines();
+    const st = recs.find((r) => r.type === "state");
+    const msg = recs.find((r) => r.type === "message");
+    if (st) expect(st.seq).toBeLessThan(msg.seq);
+    expect(JSON.parse(h.fs.files.get(META_PATH)!).nextSeq).toBeGreaterThan(msg.seq);
+    // a new message within 50ms of the flush stays pending until the gap passes
+    h.clock.t += 10;
+    h.g.$gamePlayer.reserveTransfer(1, 5, 6);
+    h.g.$gamePlayer.performTransfer();
+    h.bridge._runScheduled();
+    expect(append).toHaveBeenCalledTimes(1);
+    h.clock.t += 40;
+    h.bridge._runScheduled();
+    expect(append).toHaveBeenCalledTimes(2);
   });
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
