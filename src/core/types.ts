@@ -8,7 +8,7 @@ export interface PageConditions {
 }
 export interface EventPage { conditions: PageConditions; trigger: number; list: EventCommand[] }
 export interface MapEvent { id: number; name: string; note?: string; x: number; y: number; pages: EventPage[] }
-export interface MapData { displayName: string; events: (MapEvent | null)[] }
+export interface MapData { displayName: string; width: number; height: number; events: (MapEvent | null)[] }
 export interface MapInfo { id: number; name: string; parentId: number; order: number }
 export interface CommonEvent { id: number; name: string; trigger: number; switchId: number; list: EventCommand[] }
 export interface TroopPageConditions {

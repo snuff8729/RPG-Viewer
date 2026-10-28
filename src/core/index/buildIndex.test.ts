@@ -61,7 +61,7 @@ describe("buildIndex robustness", () => {
   function broken(): GameData {
     const maps = new Map(data.maps);
     maps.set(2, {
-      displayName: "",
+      displayName: "", width: 0, height: 0,
       events: [
         null,
         { id: 1, name: "noPages", x: 0, y: 0 } as any,
