@@ -40,7 +40,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.10.1",
+    VERSION: "1.12.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -98,12 +98,15 @@
   // game assist (control.json from the viewer, hotkeys in game)
   var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
   var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
-  var COMMAND_KINDS = { win: true, lose: true, escape: true };
+  var COMMAND_KINDS = { win: true, lose: true, escape: true, hpFull: true, hpLow: true };
+  // party HP commands (1.12.0): work on the map and in battle
+  var PARTY_COMMANDS = { hpFull: true, hpLow: true };
   var CONTROL_POLL_MS = 1000, COMMAND_MAX_AGE_MS = 10000, AUTO_ADVANCE_UPDATES = 6, MAX_SPEED = 8;
   var KEY_SPEED = "rpgvSpeed", KEY_SKIP = "rpgvSkip", KEY_WIN = "rpgvWin", KEY_LOSE = "rpgvLose";
-  var HOTKEY_NAMES = ["speed", "skip", "win", "lose"];
-  var HOTKEY_BUTTONS = { speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE };
-  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122 }; // F6 F7 F10 F11
+  var KEY_HP_FULL = "rpgvHpFull", KEY_HP_LOW = "rpgvHpLow";
+  var HOTKEY_NAMES = ["speed", "skip", "win", "lose", "hpFull", "hpLow"];
+  var HOTKEY_BUTTONS = { speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW };
+  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null }; // F6 F7 F10 F11, HP keys off
   // keyCodes the engine itself uses (default Input.keyMapper, F2-F5, F8, F9): never offered as hotkeys
   var RESERVED_KEYS = {
     9: true, 13: true, 16: true, 17: true, 18: true, 27: true, 32: true, 33: true, 34: true,
@@ -111,7 +114,7 @@
     96: true, 98: true, 100: true, 102: true, 104: true,
     113: true, 114: true, 115: true, 116: true, 119: true, 120: true
   };
-  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122 }; // wanted bindings (null = disabled)
+  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null }; // wanted bindings (null = disabled)
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
   var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
   var seenMessages = Object.create(null), seenPages = Object.create(null);
@@ -655,8 +658,9 @@
     for (var i = 0; i < HOTKEY_NAMES.length; i++) {
       var name = HOTKEY_NAMES[i];
       var v = has(obj, name) ? obj[name] : undefined;
-      if (v !== null && !validHotkey(v)) v = HOTKEY_DEFAULTS[name];
-      if (v !== null && used[v] === true) v = used[HOTKEY_DEFAULTS[name]] === true ? null : HOTKEY_DEFAULTS[name];
+      var def = HOTKEY_DEFAULTS[name];
+      if (v !== null && !validHotkey(v)) v = def;
+      if (v !== null && used[v] === true) v = def === null || used[def] === true ? null : def;
       if (v !== null) used[v] = true;
       out[name] = v;
     }
@@ -730,7 +734,7 @@
       lastCommandId = cmd.id; // at most once, even when stale
       // issue time of the command itself (older viewers: the control file's t)
       var at = typeof cmd.at === "number" && isFinite(cmd.at) ? cmd.at : c.t;
-      if (commandFresh(at)) {
+      if (commandFresh(at, cmd.kind)) {
         pendingCommand = { id: cmd.id, kind: cmd.kind, t: at };
       } else {
         lastCommand = cmd.id + ":ignored";
@@ -738,9 +742,10 @@
     }
   }
 
-  // Issued within the last 10 s and not before the current battle started.
-  function commandFresh(at) {
-    return typeof at === "number" && isFinite(at) && now() - at <= COMMAND_MAX_AGE_MS && at >= battleStartT;
+  // Issued within the last 10 s and (battle commands) not before the current battle started.
+  function commandFresh(at, kind) {
+    if (typeof at !== "number" || !isFinite(at) || now() - at > COMMAND_MAX_AGE_MS) return false;
+    return PARTY_COMMANDS[kind] === true || at >= battleStartT;
   }
 
   // mtime:size of control.json (null when stat gives no usable mtime).
@@ -850,12 +855,70 @@
     } catch (e) { reportError(e); return false; }
   }
 
+  function partyMembers() {
+    var p = G.$gameParty;
+    if (!p || typeof p.members !== "function") return [];
+    var m = p.members();
+    return m && m.length ? m : [];
+  }
+
+  function isDeadActor(a) {
+    if (typeof a.isDeathStateAffected === "function") return !!a.isDeathStateAffected();
+    return typeof a.isAlive === "function" ? !a.isAlive() : false;
+  }
+
+  // hpFull: revive the dead and set every member's HP to max. hpLow: alive members to 1% (at least 1).
+  // In battle the status window is redrawn; on the map nothing else is needed.
+  function runPartyCommand(kind) {
+    var members = partyMembers();
+    for (var i = 0; i < members.length; i++) {
+      var a = members[i];
+      if (!a || typeof a.setHp !== "function") continue;
+      var mhp = typeof a.mhp === "number" && isFinite(a.mhp) ? a.mhp : 1;
+      if (kind === "hpFull") {
+        if (isDeadActor(a) && typeof a.removeState === "function" && typeof a.deathStateId === "function") a.removeState(a.deathStateId());
+        a.setHp(mhp);
+      } else if (!isDeadActor(a)) {
+        a.setHp(Math.max(1, Math.floor(mhp * 0.01)));
+      }
+    }
+    if (inBattleNow()) refreshBattleStatus();
+  }
+
+  function refreshBattleStatus() {
+    var BM = G.BattleManager;
+    try {
+      if (BM && typeof BM.refreshStatus === "function") BM.refreshStatus();
+      else if (BM && BM._statusWindow && typeof BM._statusWindow.refresh === "function") BM._statusWindow.refresh();
+    } catch (e) { reportError(e); }
+    try {
+      var tmp = G.$gameTemp; // MZ redraws the battle status on request
+      if (tmp && typeof tmp.requestBattleRefresh === "function") tmp.requestBattleRefresh();
+    } catch (e2) { reportError(e2); }
+  }
+
+  function runPendingPartyCommand(c) {
+    pendingCommand = null;
+    if (!commandFresh(c.t, c.kind) || partyMembers().length === 0) {
+      lastCommand = c.id + ":ignored";
+      return;
+    }
+    try {
+      runPartyCommand(c.kind);
+      lastCommand = c.id;
+    } catch (e) {
+      lastCommand = c.id + ":failed";
+      reportError(e);
+    }
+  }
+
   // Runs at the start of a frame; waits while a message is open (the battle end adds its own messages).
   function runPendingCommand() {
     var c = pendingCommand;
     if (!c) return;
+    if (PARTY_COMMANDS[c.kind] === true) { runPendingPartyCommand(c); return; }
     var BM = G.BattleManager;
-    if (!commandFresh(c.t) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
+    if (!commandFresh(c.t, c.kind) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
       pendingCommand = null;
       lastCommand = c.id + ":ignored";
       return;
@@ -873,7 +936,8 @@
 
   function hotkeyCommand(kind) {
     var BM = G.BattleManager;
-    if (!inBattleNow() || !BM || battleEnding(BM) || pendingCommand) return;
+    if (pendingCommand) return;
+    if (PARTY_COMMANDS[kind] !== true && (!inBattleNow() || !BM || battleEnding(BM))) return;
     var t = now();
     pendingCommand = { id: "key-" + kind + "-" + t, kind: kind, t: t };
   }
@@ -885,6 +949,8 @@
     if (I.isTriggered(KEY_SKIP)) assist.skipSeen = !assist.skipSeen;
     if (I.isTriggered(KEY_WIN)) hotkeyCommand("win");
     if (I.isTriggered(KEY_LOSE)) hotkeyCommand("lose");
+    if (I.isTriggered(KEY_HP_FULL)) hotkeyCommand("hpFull");
+    if (I.isTriggered(KEY_HP_LOW)) hotkeyCommand("hpLow");
   }
 
   // Extra scene updates only on the map / in battle (menus stay at normal speed) and never

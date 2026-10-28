@@ -10,15 +10,16 @@ import type { Coverage } from "./types";
  */
 export interface AssistSettings { speed: 1 | 2 | 4 | 8; skipSeen: boolean; autoFast: boolean; autoSpeed: 2 | 4 | 8; hotkeys: Hotkeys }
 /** 게임 창 단축키 동작 */
-export type HotkeyAction = "speed" | "skip" | "win" | "lose";
+export type HotkeyAction = "speed" | "skip" | "win" | "lose" | "hpFull" | "hpLow";
 /** 동작별 DOM keyCode. null = 끔. */
 export type Hotkeys = Record<HotkeyAction, number | null>;
-export type AssistCommandKind = "win" | "lose" | "escape";
+/** win·lose·escape: 전투 중만. hpFull·hpLow(플러그인 1.12.0): 파티 체력 100%(쓰러진 동료도 살림)·1%, 맵과 전투 모두. */
+export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow";
 /** at = 사용자가 누른 시각(ms) */
 export interface AssistCommand { id: string; kind: AssistCommandKind; at: number }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
 
-export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122 };
+export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null };
 export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS };
 /** 단축키 동작(표시 순서)과 이름. short는 하단 안내 줄에 쓴다. */
 export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; label: string; short: string }[] = [
@@ -26,6 +27,8 @@ export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; label: string; sho
   { action: "skip", label: "본 대사 넘기기 켜고 끄기", short: "본 대사 넘기기" },
   { action: "win", label: "전투 이기기", short: "전투 중 이기기" },
   { action: "lose", label: "전투 지기", short: "전투 중 지기" },
+  { action: "hpFull", label: "내 체력 100%", short: "체력 100%" },
+  { action: "hpLow", label: "내 체력 1%", short: "체력 1%" },
 ];
 /** 게임이 이미 쓰는 keyCode(Tab·Enter·Shift·Ctrl·Alt·Esc·Space·PgUp/Dn·방향키·Ins·Q·W·X·Z·숫자패드 방향·F2~F5·F8·F9) */
 export const RESERVED_KEYCODES: ReadonlySet<number> = new Set([
@@ -35,6 +38,11 @@ export const SPEEDS = [1, 2, 4, 8] as const;
 export const AUTO_SPEEDS = [2, 4, 8] as const;
 /** control.json 지원 플러그인 최소 버전 */
 export const ASSIST_MIN_VERSION = "1.1.0";
+/** 체력 명령(hpFull·hpLow) 지원 플러그인 최소 버전 */
+export const HP_COMMAND_MIN_VERSION = "1.12.0";
+const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>(["win", "lose", "escape", "hpFull", "hpLow"]);
+/** 파티 체력 명령인가(맵·전투 모두에서 쓴다) */
+export const isHpCommand = (kind: unknown): boolean => kind === "hpFull" || kind === "hpLow";
 
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
@@ -71,12 +79,12 @@ export function validateHotkey(code: number | null, action: HotkeyAction, hotkey
 /** 저장된 단축키(무엇이든) → 올바른 단축키. 없는 필드는 기본값, 잘못됐거나 겹치는 키는 기본값(그것도 겹치면 끔). */
 export function normalizeHotkeys(v: unknown): Hotkeys {
   const o = isObj(v) ? v : {};
-  const out: Hotkeys = { speed: null, skip: null, win: null, lose: null };
+  const out: Hotkeys = { speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null };
   for (const { action } of HOTKEY_ACTIONS) {
     const raw: unknown = o[action];
     const want = raw === null ? null : isKeyCode(raw) ? raw : DEFAULT_HOTKEYS[action];
     if (validateHotkey(want, action, out) === null) out[action] = want;
-    else if (validateHotkey(DEFAULT_HOTKEYS[action], action, out) === null) out[action] = DEFAULT_HOTKEYS[action];
+    else if (DEFAULT_HOTKEYS[action] !== null && validateHotkey(DEFAULT_HOTKEYS[action], action, out) === null) out[action] = DEFAULT_HOTKEYS[action];
   }
   return out;
 }
@@ -89,7 +97,7 @@ export function liveHotkeys(assist: unknown): Hotkeys {
   const h = isObj(assist) && isObj(assist.hotkeys) ? assist.hotkeys : null;
   if (!h) return DEFAULT_HOTKEYS;
   const pick = (a: HotkeyAction): number | null => (h[a] === null ? null : isKeyCode(h[a]) ? h[a] : DEFAULT_HOTKEYS[a]);
-  return { speed: pick("speed"), skip: pick("skip"), win: pick("win"), lose: pick("lose") };
+  return { speed: pick("speed"), skip: pick("skip"), win: pick("win"), lose: pick("lose"), hpFull: pick("hpFull"), hpLow: pick("hpLow") };
 }
 
 /** 하단 안내 줄: "게임 창 단축키: F6 배속, F7 본 대사 넘기기, …". 모두 끄면 그렇게 말한다. */
@@ -173,7 +181,7 @@ export function seenSets(coverage: Coverage, index: GameIndex): SeenSets {
 export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCommand | null, now: number, flags: Record<string, unknown> = {}): string {
   const n = normalizeAssist(s);
   const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
-  const cmd = isObj(command) && typeof command.id === "string" && (command.kind === "win" || command.kind === "lose" || command.kind === "escape")
+  const cmd = isObj(command) && typeof command.id === "string" && COMMAND_KINDS.has(command.kind)
     ? { id: command.id, kind: command.kind, at: Number.isFinite(command.at) ? command.at : 0 }
     : null;
   return JSON.stringify({
@@ -237,6 +245,12 @@ export const COMMAND_STATUS_TEXT: Record<CommandStatus, string> = {
   failed: "실행하지 못했어요",
   noResponse: "게임이 응답하지 않아요",
 };
+
+/** 명령 종류에 맞춘 상태 문구: 체력 명령의 무시는 전투와 상관없다. */
+export function commandStatusText(status: CommandStatus, kind: unknown): string {
+  if (status === "ignored" && isHpCommand(kind)) return "게임에서 무시했어요 (파티가 없어요)";
+  return COMMAND_STATUS_TEXT[status];
+}
 
 /**
  * 보낸 명령(sent)의 상태: live.json `assist.lastCommand`가 id·`id:ignored`·`id:failed`인지 보고,

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Gauge } from "lucide-react";
+import { Gauge, Heart, HeartCrack } from "lucide-react";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
-  AUTO_SPEEDS, COMMAND_RESPONSE_MS, COMMAND_STATUS_TEXT, commandStatus, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, hotkeySummary, isAutoSpeed,
-  isSpeed, keyLabel, liveHotkeys, sameHotkeys, SPEEDS, validateHotkey, type HotkeyAction,
+  AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HP_COMMAND_MIN_VERSION, hotkeySummary,
+  isAutoSpeed, isHpCommand, isSpeed, keyLabel, liveHotkeys, sameHotkeys, SPEEDS, validateHotkey, versionAtLeast, type HotkeyAction,
 } from "@/core/live/assist";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -29,6 +29,8 @@ export function AssistPanel() {
   const { settings, setSettings, sendCommand, sentCommand, supported } = useAssist();
   const { live } = useLive();
   const inBattle = supported && live?.inBattle === true;
+  /** 체력 명령은 플러그인 1.12.0부터(맵·전투 모두) */
+  const hpSupported = supported && versionAtLeast(live?.pluginVersion, HP_COMMAND_MIN_VERSION);
   const hotkeys = settings.hotkeys;
   // 전투 안전장치: 플러그인이 false라고 알려 줄 때만 막는다(구버전은 필드가 없다).
   const canEscape = live?.assist?.canEscape !== false;
@@ -43,6 +45,9 @@ export function AssistPanel() {
     return () => clearTimeout(id);
   }, [sentCommand]);
   const status = commandStatus(sentCommand, live?.assist?.lastCommand, sentCommand !== null && timedOutId === sentCommand.id);
+  const statusText = status === null ? null : commandStatusText(status, sentCommand?.kind);
+  /** 마지막 명령이 체력 명령이면 응답을 체력 칸에 보인다 */
+  const hpSent = isHpCommand(sentCommand?.kind);
 
   // 단축키 바꾸기: 고른 동작의 다음 keydown을 잡는다(Escape는 취소).
   const [capturing, setCapturing] = useState<HotkeyAction | null>(null);
@@ -145,7 +150,7 @@ export function AssistPanel() {
           {inBattle && !canLose && loseKey !== null && (
             <p className="text-xs text-muted-foreground">지금 {withObjectParticle(keyLabel(loseKey))} 누르면 게임 오버가 돼요</p>
           )}
-          {status !== null && <p className="text-xs text-muted-foreground">{COMMAND_STATUS_TEXT[status]}</p>}
+          {statusText !== null && !hpSent && <p className="text-xs text-muted-foreground">{statusText}</p>}
           <AlertDialog open={confirmLose} onOpenChange={setConfirmLose}>
             <AlertDialogContent size="sm">
               <AlertDialogHeader>
@@ -158,6 +163,17 @@ export function AssistPanel() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+        </div>
+        <Separator />
+        <div className="flex flex-col gap-2">
+          <Label>내 체력</Label>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={!hpSupported} onClick={() => sendCommand("hpFull")}><Heart />체력 100%</Button>
+            <Button variant="outline" size="sm" disabled={!hpSupported} onClick={() => sendCommand("hpLow")}><HeartCrack />체력 1%</Button>
+          </div>
+          {supported && !hpSupported && <p className="text-xs text-muted-foreground">플러그인을 1.12.0으로 업데이트하면 쓸 수 있어요</p>}
+          {hpSupported && <p className="text-xs text-muted-foreground">파티 전원에게 적용돼요. 100%는 쓰러진 동료도 살려요</p>}
+          {statusText !== null && hpSent && <p className="text-xs text-muted-foreground">{statusText}</p>}
         </div>
         <Separator />
         <div className="flex flex-col gap-2">
