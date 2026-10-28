@@ -25,6 +25,27 @@ export interface ScreenPicture {
    * 임시 번호라 그림 구분은 이름(spriteKeyOf)으로 고른다. 위치·크기·각도는 화면 기준(부모 변환을 모두 더한 것).
    */
   kind?: "sprite";
+  /** 1.13.0+: 게임 전용 확장이 붙인 정보(예: CharacterPictureManager 스탠딩의 배우·겹 이름). 없으면 없음. */
+  tag?: PictureTag;
+}
+
+/** 게임 전용 확장이 그림에 붙인 정보(기록 index 14). role = 확장이 정한 기본 구분. */
+export interface PictureTag {
+  adapter?: string; actorId?: number; actorName?: string; layer?: string; role?: PictureRole;
+}
+
+function parseTag(v: unknown): PictureTag | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const tag: PictureTag = {};
+  const text = (x: unknown) => (typeof x === "string" && x.trim() !== "" ? x.slice(0, 60) : null);
+  const adapter = text(o.adapter), actorName = text(o.actorName), layer = text(o.layer);
+  if (adapter) tag.adapter = adapter;
+  if (typeof o.actorId === "number" && Number.isInteger(o.actorId) && o.actorId > 0) tag.actorId = o.actorId;
+  if (actorName) tag.actorName = actorName;
+  if (layer) tag.layer = layer;
+  if (isPictureRole(o.role)) tag.role = o.role;
+  return Object.keys(tag).length > 0 ? tag : null;
 }
 
 const MAX_PICS = 60;
@@ -61,6 +82,8 @@ export function parsePic(e: unknown): ScreenPicture | null {
   const w = fin(e[11], 0), h = fin(e[12], 0);
   if (w > 0 && h > 0) { p.w = w; p.h = h; }
   if (e[13] === "sprite") p.kind = "sprite";
+  const tag = parseTag(e[14]);
+  if (tag) p.tag = tag;
   return p;
 }
 
@@ -160,6 +183,8 @@ export interface PictureContext {
   spriteRoles?: SpriteRoles | null;
   hud?: ReadonlySet<string> | null;
   sizeOf?: SizeOf | null;
+  /** 켜진 게임 전용 어댑터가 정한 기본 구분(직접 고른 구분 다음, 자동 판정 전). 없으면 null. */
+  defaultRole?: ((p: ScreenPicture) => PictureRole | null | undefined) | null;
 }
 
 interface Rect { left: number; top: number; right: number; bottom: number }
@@ -258,12 +283,17 @@ export function hudKeys(counts: Map<ScreenPicture[], number>, screen: ScreenSize
 }
 
 /**
- * 그림 하나의 구분: 직접 고른 구분(플러그인이 띄운 그림은 이름 열쇠로) → 화면 장식 → 화면의 80% 이상을 덮으면 이벤트 그림
+ * 그림 하나의 구분: 직접 고른 구분(플러그인이 띄운 그림은 이름 열쇠로) → 게임 전용 어댑터의 기본 구분 → 확장이 붙인 구분 → 화면 장식 → 화면의 80% 이상을 덮으면 이벤트 그림
  * → 나머지는 스탠딩(플러그인 컷인은 겹친 부분만 잘라 보인다)
  */
 export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
   const o = p.kind === "sprite" ? ctx.spriteRoles?.[spriteKeyOf(p.name)] : ctx.roles?.[p.id];
   if (isPictureRole(o)) return o;
+  try {
+    const d = ctx.defaultRole?.(p);
+    if (isPictureRole(d)) return d;
+  } catch { /* 기본값 없음 */ }
+  if (p.tag?.role) return p.tag.role;
   if (ctx.hud?.has(hudKeyOf(p))) return "hud";
   const r = pictureRect(p, ctx.sizeOf);
   if (r) {
@@ -342,6 +372,42 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
     }
   } catch { /* 없음으로 */ }
   return { shot: null, key: "" };
+}
+
+/** 스탠딩 묶음 하나: 배우별(확장이 배우를 붙인 그림) 또는 나머지 */
+export interface StandGroup { key: string; actorId?: number; actorName?: string; pictures: ScreenPicture[] }
+
+/**
+ * 스탠딩 그림을 배우별로 나눈다(1.13.0 확장이 붙인 actorId 기준, 처음 나온 순서). 배우가 없는 그림은 한 묶음("").
+ * 배우가 붙은 그림이 없으면 전체가 한 묶음. 각 묶음 안은 그리는 순서 그대로.
+ */
+export function standGroups(pictures: ScreenPicture[] | null | undefined): StandGroup[] {
+  const out: StandGroup[] = [];
+  const byKey = new Map<string, StandGroup>();
+  try {
+    for (const p of Array.isArray(pictures) ? pictures : []) {
+      if (!p) continue;
+      const id = p.tag?.actorId;
+      const key = typeof id === "number" ? `a${id}` : "";
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key, pictures: [] };
+        if (typeof id === "number") g.actorId = id;
+        byKey.set(key, g);
+        out.push(g);
+      }
+      if (!g.actorName && p.tag?.actorName) g.actorName = p.tag.actorName;
+      g.pictures.push(p);
+    }
+  } catch { /* 모은 데까지 */ }
+  return out;
+}
+
+/** 스탠딩 묶음의 이름: "아마네 스탠딩", 이름 모르는 배우는 "배우 3 스탠딩", 배우 없음은 "스탠딩" */
+export function standGroupLabel(g: StandGroup): string {
+  if (g.actorName) return `${g.actorName} 스탠딩`;
+  if (typeof g.actorId === "number") return `배우 ${g.actorId} 스탠딩`;
+  return "스탠딩";
 }
 
 /** 보이는 그림으로 치는 투명도(255의 10% 초과)와 위치 비교 칸(px) — 1.10.1 화면 기록 겹침 거르기 */

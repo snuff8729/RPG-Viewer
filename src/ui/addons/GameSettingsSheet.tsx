@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { Switch } from "@/components/ui/switch";
 import { PictureRolesSection } from "./PictureRolesSection";
 import { NoticeHooksSection } from "./NoticeHooksSection";
+import { AdapterCard } from "./AdapterCard";
 import { useGame } from "@/app/GameProvider";
 import { Badge } from "@/components/ui/badge";
 import type { GameData } from "@/core/types";
@@ -58,7 +59,7 @@ function availableHere(addon: AddonDef, data: GameData | null | undefined): bool
 
 /** 상단 `게임 설정` Sheet: 이 게임에서만 켜는 부가 기능(애드온) 목록. */
 export function GameSettingsSheet() {
-  const { isOn, setOn, savedInFolder } = useAddons();
+  const { isOn, setOn, savedInFolder, adapters } = useAddons();
   const { data } = useGame();
   return (
     <Sheet>
@@ -73,6 +74,7 @@ export function GameSettingsSheet() {
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-4 px-4 pb-4">
+          {adapters.map((a) => <AdapterCard key={a.manifest.id} adapter={a} />)}
           {ADDONS.map((a) => {
             const id = `addon-${a.id}`;
             const on = isOn(a.id);

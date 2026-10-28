@@ -7,6 +7,10 @@ import type { AddonFile } from "@/core/addons/settings";
 import { cleanNoticeHooks } from "@/core/addons/notices";
 import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
+import { BUNDLED_ADAPTERS } from "./adapterBundle";
+import type { BundledAdapter } from "@/core/adapters/bundle";
+import { applyAddonDefaults, defaultRoleOf, matchesGame, roleDefaultsOf } from "@/core/adapters/manifest";
+import type { ScreenPicture } from "@/core/addons/screenPictures";
 
 /** 게임별 애드온(부가 기능) 켜짐 상태와 화면 그림 구분. */
 export interface AddonsValue {
@@ -31,6 +35,15 @@ export interface AddonsValue {
   controlFlags: Record<string, unknown>;
   /** 설정이 게임 폴더(rpg-viewer/addons.json)에 저장되는가(아니면 이 브라우저에만) */
   savedInFolder: boolean;
+  /** 이 게임에 맞는 게임 전용 어댑터(뷰어에 들어 있는 것 중) */
+  adapters: readonly BundledAdapter[];
+  /** 이 게임에서 켠 어댑터(맞는 것 중) */
+  enabledAdapters: readonly BundledAdapter[];
+  isAdapterOn(id: string): boolean;
+  /** 어댑터를 켜고 끈다(켤 때 기본 애드온도 켠다). 클릭 핸들러 안에서 부를 것. 게임 쪽 확장 설치는 부르는 쪽이 한다. */
+  setAdapterOn(id: string, on: boolean): void;
+  /** 켠 어댑터들이 정한 그림 기본 구분(없으면 null) */
+  defaultRole: ((p: ScreenPicture) => PictureRole | null) | null;
 }
 
 const EMPTY: AddonState = {};
@@ -41,6 +54,7 @@ const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
   state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {},
   spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
+  adapters: [], enabledAdapters: [], isAdapterOn: () => false, setAdapterOn: () => {}, defaultRole: null,
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
 
@@ -69,6 +83,19 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const pictureRoles = current?.file.pictureRoles ?? NO_ROLES;
   const noticeHooks = current?.file.noticeHooks ?? NO_HOOKS;
   const spriteRoles = current?.file.spriteRoles ?? NO_SPRITE_ROLES;
+  const adapterState = current?.file.adapters;
+  const enabledPlugins = data?.enabledPlugins;
+  const gameTitle = data?.system.gameTitle;
+  const adapters = useMemo(
+    () => BUNDLED_ADAPTERS.filter((a) => matchesGame(a.manifest, { plugins: enabledPlugins ?? [], gameTitle })),
+    [enabledPlugins, gameTitle],
+  );
+  const enabledAdapters = useMemo(() => adapters.filter((a) => adapterState?.[a.manifest.id] === true), [adapters, adapterState]);
+  const defaultRole = useMemo(() => {
+    const d = roleDefaultsOf(enabledAdapters.map((a) => a.manifest));
+    if (d.pictureRoles.length === 0 && d.spriteRoles.length === 0) return null;
+    return (p: ScreenPicture) => defaultRoleOf(p, d);
+  }, [enabledAdapters]);
 
   /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
@@ -114,6 +141,15 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setAdapterOn = useCallback((id: string, on: boolean) => {
+    const manifest = BUNDLED_ADAPTERS.find((a) => a.manifest.id === id)?.manifest ?? null;
+    update((prev) => ({
+      ...prev,
+      state: on ? applyAddonDefaults(prev.state, manifest) : prev.state,
+      adapters: { ...(prev.adapters ?? {}), [id]: on },
+    }));
+  }, [update]);
+
   const setNoticeHooks = useCallback((paths: string[]) => {
     update((prev) => {
       const hooks = cleanNoticeHooks(paths);
@@ -135,7 +171,13 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     setNoticeHooks,
     controlFlags: addonControlFlags(state, { noticeHooks }),
     savedInFolder: current?.inFolder ?? false,
-  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, current?.inFolder]);
+    adapters,
+    enabledAdapters,
+    isAdapterOn: (id) => enabledAdapters.some((a) => a.manifest.id === id),
+    setAdapterOn,
+    defaultRole,
+  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, current?.inFolder,
+    adapters, enabledAdapters, setAdapterOn, defaultRole]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

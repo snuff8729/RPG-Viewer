@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
-import { DEFAULT_SCREEN, pictureRect, type ScreenPicture, type ScreenShot, type ScreenSize } from "@/core/addons/screenPictures";
+import {
+  DEFAULT_SCREEN, pictureRect, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type ScreenSize, type StandGroup,
+} from "@/core/addons/screenPictures";
+import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
@@ -144,10 +147,47 @@ function standView(pictures: ScreenPicture[], size: ScreenSize, images: Map<stri
   return { left, top, width: right - left, height: bottom - top };
 }
 
+/** 스탠딩 묶음 이름·설명: 그림에 붙은 어댑터의 뷰어 도움 → 기본("아마네 스탠딩") */
+function groupText(g: StandGroup): { label: string; title: string | null } {
+  const adapterId = g.pictures.find((p) => p.tag?.adapter)?.tag?.adapter;
+  const viewer = adapterId ? BUNDLED_ADAPTERS.find((a) => a.manifest.id === adapterId)?.viewer : null;
+  let label: string | null = null, title: string | null = null;
+  try { label = viewer?.standGroupLabel?.(g) ?? null; title = viewer?.standGroupTitle?.(g) ?? null; } catch { /* 기본 이름 */ }
+  return { label: label ?? standGroupLabel(g), title };
+}
+
+/** 그림 한 장(누르면 크게 보기) */
+function ShotButton({ pictures, view, images, stand, title, names, caption }: {
+  pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; stand: boolean; title: string; names: string[]; caption?: string;
+}) {
+  const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className={stand ? "block w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted" : "block w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted"}
+          aria-label={`${label} — 크게 보기`} title={caption ?? names.join(", ")}
+        >
+          <ScreenCanvas pictures={pictures} view={view} images={images} className={stand ? "block h-auto max-h-64 w-auto max-w-full" : "block h-auto w-full"} />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[min(90vw,1200px)]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className="break-all">{caption ? `${caption} — ` : ""}{names.join(", ")}</DialogDescription>
+        </DialogHeader>
+        <ScreenCanvas pictures={pictures} view={view} images={images} className="mx-auto block h-auto max-h-[75vh] w-auto max-w-full rounded-md border bg-muted" />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * 화면 그림 따라 그리기: 대사가 나올 때 게임 화면에 보이던 그림을 그린다.
  * - 이벤트 그림(cg): 게임 화면 비율 그대로(그 위에 보이던 스탠딩 포함).
- * - 스탠딩(stand): 스탠딩 겹만, 차지하는 부분으로 잘라 작게.
+ * - 스탠딩(stand): 스탠딩 겹만, 차지하는 부분으로 잘라 작게. 게임 전용 확장이 배우를 붙인 스탠딩(1.13.0)은
+ *   배우마다 따로 잘라 나란히("아마네 스탠딩").
  * 누르면 크게 본다. 게임 폴더에 없는 그림은 아래에 이름을 적는다.
  */
 export function ScreenPictures({ shot }: { shot: ScreenShot }) {
@@ -159,29 +199,29 @@ export function ScreenPictures({ shot }: { shot: ScreenShot }) {
   const missing = names.filter((n) => status(n) === "missing");
   const failed = names.some((n) => status(n) === "failed");
   const stand = shot.kind === "stand";
-  const view = stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height };
-  const title = stand ? "스탠딩" : "이벤트 그림";
-  const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
+  const groups = stand ? standGroups(pictures) : [];
+  const byActor = groups.some((g) => typeof g.actorId === "number");
   return (
     <div className="space-y-1">
-      <Dialog>
-        <DialogTrigger asChild>
-          <button
-            type="button"
-            className={stand ? "block w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted" : "block w-full cursor-zoom-in overflow-hidden rounded-md border bg-muted"}
-            aria-label={`${label} — 크게 보기`} title={names.join(", ")}
-          >
-            <ScreenCanvas pictures={pictures} view={view} images={images} className={stand ? "block h-auto max-h-64 w-auto max-w-full" : "block h-auto w-full"} />
-          </button>
-        </DialogTrigger>
-        <DialogContent className="sm:max-w-[min(90vw,1200px)]">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className="break-all">{names.join(", ")}</DialogDescription>
-          </DialogHeader>
-          <ScreenCanvas pictures={pictures} view={view} images={images} className="mx-auto block h-auto max-h-[75vh] w-auto max-w-full rounded-md border bg-muted" />
-        </DialogContent>
-      </Dialog>
+      {byActor ? (
+        <div className="flex flex-wrap items-end gap-2">
+          {groups.map((g) => {
+            const { label, title } = groupText(g);
+            const gNames = [...new Set(g.pictures.map((p) => p.name))];
+            return (
+              <figure key={g.key} className="flex min-w-0 max-w-full flex-col gap-1">
+                <ShotButton pictures={g.pictures} view={standView(g.pictures, size, images)} images={images} stand title={label} names={gNames} caption={title ?? undefined} />
+                <figcaption className="text-xs text-muted-foreground">{label}</figcaption>
+              </figure>
+            );
+          })}
+        </div>
+      ) : (
+        <ShotButton
+          pictures={pictures} images={images} stand={stand} title={stand ? "스탠딩" : "이벤트 그림"} names={names}
+          view={stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height }}
+        />
+      )}
       {(missing.length > 0 || failed) && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {missing.map((n) => (

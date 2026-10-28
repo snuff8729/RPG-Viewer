@@ -50,7 +50,7 @@ export type LogRecord = RecordBase & (
    * 1.10.0+, 화면 그림 따라 그리기가 켜진 게임만: 기록 사이에 화면 그림이 바뀌었을 때(다른 플러그인이 잠깐 띄운 컷인 등)
    * 그때 화면 그림 전체. 이야기 기록이 아니고 반복 대화·전투 묶음·갈래 판정에 영향을 주지 않는다. scene = 맵/전투 화면.
    */
-  | { type: "screen"; scene?: "battle" | "map"; pics?: unknown[] }
+  | { type: "screen"; scene?: "battle" | "map" | "menu"; pics?: unknown[] }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
   | { type: "save"; slot: number }
   | { type: "load"; slot: number }
@@ -95,6 +95,8 @@ export interface LiveAssist {
   captureNotices?: boolean;
   /** 게임이 감싼 알림 함수 경로들(플러그인 1.9.0+) */
   notices?: string[];
+  /** 게임에 붙은 게임 전용 확장 id들(플러그인 1.13.0+) */
+  extensions?: string[];
   /** 지금 전투에서 도망칠 수 있는가(전투 중일 때만 의미) */
   canEscape?: boolean;
   /** 지금 전투에서 져도 게임 오버가 아닌가(전투 중일 때만 의미) */

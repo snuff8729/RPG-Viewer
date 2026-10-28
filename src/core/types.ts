@@ -73,6 +73,8 @@ export interface GameData {
   templateKeepEventId?: boolean;
   /** plugins.js에서 켜진, 알림 문구를 띄우는 것으로 아는 플러그인 이름(알림 문구 기록 애드온 안내용). 없으면 없음. */
   noticePlugins?: string[];
+  /** plugins.js에서 켜진 플러그인 이름(게임 전용 어댑터 찾기용). 없으면 없음. */
+  enabledPlugins?: string[];
 }
 
 // ---- 해석 결과 ----
