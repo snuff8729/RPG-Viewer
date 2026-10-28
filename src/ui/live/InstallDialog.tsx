@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLive } from "@/app/LiveProvider";
 import type { InstallResult, InstallStatus } from "@/core/live/installer";
+import { fsAccessSupport, type FsAccessWindow } from "../fsAccess";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ type Outcome = { action: "install" | "uninstall"; result: InstallResult };
 
 export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion } = useLive();
+  const access = fsAccessSupport(window as unknown as FsAccessWindow);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
@@ -50,7 +52,7 @@ export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         </DialogHeader>
         {!supported ? (
           <Alert>
-            <AlertDescription>크롬이나 엣지에서 폴더 열기로 연 게임만 지원해요</AlertDescription>
+            <AlertDescription>{access.message ?? "크롬이나 엣지에서 폴더 열기로 연 게임만 지원해요"}</AlertDescription>
           </Alert>
         ) : (
           <div className="flex flex-col gap-3 text-sm">

@@ -4,6 +4,8 @@ import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live
 import { formatText } from "@/core/text/escape";
 import type { GameData, Location } from "@/core/types";
 import { Badge } from "@/components/ui/badge";
+import { explainRecord, reasonLabel } from "@/core/live/mismatch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -19,8 +21,9 @@ export interface TimelineCtx {
   onJump(src: Location, cmd: number): void;
 }
 
-function Line({ ctx, src, cmd, uncertain, children }: { ctx: TimelineCtx; src?: Location | null; cmd?: number | null; uncertain?: boolean; children: ReactNode }) {
+function Line({ ctx, src, cmd, uncertain, changed, rec, children }: { ctx: TimelineCtx; src?: Location | null; cmd?: number | null; uncertain?: boolean; changed?: boolean; rec?: LogRecord; children: ReactNode }) {
   const link = !uncertain && src && typeof cmd === "number";
+  const m = (uncertain || changed) && rec ? explainRecord(rec, ctx.data) : null;
   return (
     <div className="flex items-start gap-2">
       <div
@@ -29,14 +32,33 @@ function Line({ ctx, src, cmd, uncertain, children }: { ctx: TimelineCtx; src?: 
       >
         {children}
       </div>
-      {uncertain && <Badge variant="outline" className="mt-1 shrink-0">위치 불확실</Badge>}
+      {(uncertain || changed) && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button type="button" className="mt-1 shrink-0">
+              <Badge variant={uncertain ? "outline" : "secondary"}>{uncertain ? "위치 불확실" : "실행 중 변경됨"}</Badge>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 text-sm">
+            {m ? (
+              <div className="flex flex-col gap-2">
+                <div className="font-medium">{reasonLabel(m.reason)}</div>
+                <div><div className="text-xs text-muted-foreground">기록</div><div className="whitespace-pre-line">{m.recorded}</div></div>
+                <div><div className="text-xs text-muted-foreground">데이터</div><div className="whitespace-pre-line">{m.expected}</div></div>
+              </div>
+            ) : (
+              <div>자세한 이유를 알 수 없어요</div>
+            )}
+          </PopoverContent>
+        </Popover>
+      )}
     </div>
   );
 }
 
-function MessageLine({ r, ctx, uncertain }: { r: RecordOf<"message">; ctx: TimelineCtx; uncertain?: boolean }) {
+function MessageLine({ r, ctx, uncertain, changed }: { r: RecordOf<"message">; ctx: TimelineCtx; uncertain?: boolean; changed?: boolean }) {
   return (
-    <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>
+    <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>
       <div className="flex gap-3">
         <div className="size-10 shrink-0">{r.face && <FaceImage name={r.face} index={r.faceIndex} />}</div>
         <div className="min-w-0 flex-1">
@@ -48,15 +70,15 @@ function MessageLine({ r, ctx, uncertain }: { r: RecordOf<"message">; ctx: Timel
   );
 }
 
-function RecordLine({ r, ctx, uncertain }: { r: LogRecord; ctx: TimelineCtx; uncertain: boolean }) {
+function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: TimelineCtx; uncertain: boolean; changed: boolean }) {
   switch (r.type) {
-    case "message": return <MessageLine r={r} ctx={ctx} uncertain={uncertain} />;
+    case "message": return <MessageLine r={r} ctx={ctx} uncertain={uncertain} changed={changed} />;
     case "scroll":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}><div className="whitespace-pre-line text-muted-foreground">{formatText(r.text, ctx.data)}</div></Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><div className="whitespace-pre-line text-muted-foreground">{formatText(r.text, ctx.data)}</div></Line>;
     case "choices": case "error": return null;
     case "choice":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
-    case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}>🖼 {r.name}</Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
+    case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>🖼 {r.name}</Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
@@ -70,14 +92,14 @@ function RecordLine({ r, ctx, uncertain }: { r: LogRecord; ctx: TimelineCtx; unc
         </div>
       );
     case "state":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain}><span className="text-muted-foreground">⚙ {r.changes.map(c => stateChangeText(c, ctx.data)).join(", ")}</span></Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><span className="text-muted-foreground">⚙ {r.changes.map(c => stateChangeText(c, ctx.data)).join(", ")}</span></Line>;
     default: return null;
   }
 }
 
 export function TimelineItem({ item, ctx }: { item: HistoryItem; ctx: TimelineCtx }) {
   switch (item.kind) {
-    case "record": return <RecordLine r={item.record} ctx={ctx} uncertain={item.uncertain} />;
+    case "record": return <RecordLine r={item.record} ctx={ctx} uncertain={item.uncertain} changed={item.changed} />;
     case "repeat":
       return (
         <Collapsible>
