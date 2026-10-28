@@ -83,6 +83,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   };
   Game_Message.prototype.isBusy = function () { return this._busy; };
   Game_Message.prototype.add = function (t: string) { this._texts.push(t); };
+  Game_Message.prototype.hasText = function () { return this._texts.length > 0; };
   Game_Message.prototype.setFaceImage = function (n: string, i: number) { this._faceName = n; this._faceIndex = i; };
   Game_Message.prototype.setSpeakerName = function (n: string) { this._speakerName = n; };
   Game_Message.prototype.setChoices = function (c: string[]) { this._choices = c; };
@@ -224,20 +225,75 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Scene_Title(this: any) {}
   function Scene_Map(this: any) {}
   function Scene_Battle(this: any) {}
-  // Input: keyMapper like the engine's default (subset), one triggered button per frame.
+  // Input: keyMapper like the engine's default (subset); update / isTriggered / isRepeated /
+  // isLongPressed follow rpg_core.js (latest button + _pressedTime, repeat wait 24, interval 6).
   const Input = {
     keyMapper: { 9: "tab", 13: "ok", 16: "shift", 27: "escape", 32: "ok", 37: "left", 38: "up", 39: "right", 40: "down", 90: "ok", 88: "escape" } as Record<number, string>,
-    _triggered: null as string | null,
+    keyRepeatWait: 24,
+    keyRepeatInterval: 6,
+    _currentState: {} as Record<string, boolean>,
+    _previousState: {} as Record<string, boolean>,
+    _latestButton: null as string | null,
+    _pressedTime: 0,
+    _tap: null as string | null,
     updates: 0,
-    isTriggered(name: string) { return this._triggered === name; },
-    update() { this._triggered = null; this.updates++; },
-    press(keyCode: number) { this._triggered = this.keyMapper[keyCode] ?? null; },
+    isPressed(name: string) { return !!this._currentState[name]; },
+    isTriggered(name: string) { return this._latestButton === name && this._pressedTime === 0; },
+    isRepeated(name: string) {
+      return this._latestButton === name &&
+        (this._pressedTime === 0 || (this._pressedTime >= this.keyRepeatWait && this._pressedTime % this.keyRepeatInterval === 0));
+    },
+    isLongPressed(name: string) { return this._latestButton === name && this._pressedTime >= this.keyRepeatWait; },
+    update() {
+      this.updates++;
+      if (this._tap !== null) { this._currentState[this._tap] = false; this._tap = null; }
+      if (this._latestButton !== null && this._currentState[this._latestButton]) this._pressedTime++;
+      else this._latestButton = null;
+      for (const name of Object.keys(this._currentState)) {
+        if (this._currentState[name] && !this._previousState[name]) { this._latestButton = name; this._pressedTime = 0; }
+        this._previousState[name] = this._currentState[name];
+      }
+    },
+    keyDown(keyCode: number) { const n = this.keyMapper[keyCode]; if (n) this._currentState[n] = true; },
+    keyUp(keyCode: number) { const n = this.keyMapper[keyCode]; if (n) this._currentState[n] = false; },
+    // a tap already seen by this frame's update: triggered until the next update releases it
+    press(keyCode: number) {
+      const n = this.keyMapper[keyCode];
+      if (!n) return;
+      this._currentState[n] = true; this._previousState[n] = true;
+      this._latestButton = n; this._pressedTime = 0; this._tap = n;
+    },
+  };
+  // TouchInput like rpg_core.js: a touch triggers on the next update, _pressedTime counts held updates.
+  const TouchInput = {
+    keyRepeatWait: 24,
+    keyRepeatInterval: 6,
+    _screenPressed: false,
+    _triggered: false,
+    _cancelled: false,
+    _events: { triggered: false, cancelled: false },
+    _pressedTime: 0,
+    isPressed() { return this._screenPressed; },
+    isTriggered() { return this._triggered; },
+    isCancelled() { return this._cancelled; },
+    isRepeated() {
+      return this.isPressed() &&
+        (this._triggered || (this._pressedTime >= this.keyRepeatWait && this._pressedTime % this.keyRepeatInterval === 0));
+    },
+    isLongPressed() { return this.isPressed() && this._pressedTime >= this.keyRepeatWait; },
+    update() {
+      this._triggered = this._events.triggered; this._cancelled = this._events.cancelled;
+      this._events = { triggered: false, cancelled: false };
+      if (this.isPressed()) this._pressedTime++;
+    },
+    touchDown() { this._screenPressed = true; this._pressedTime = 0; this._events.triggered = true; },
+    touchUp() { this._screenPressed = false; },
   };
   const SceneManager = {
     _scene: null as any, _sceneStarted: true, _nextScene: null as any, _exiting: false,
     sceneUpdates: 0,
     onSceneUpdate: null as null | (() => void),
-    updateInputData() { Input.update(); },
+    updateInputData() { Input.update(); TouchInput.update(); },
     updateScene() { this.sceneUpdates++; if (this.onSceneUpdate) this.onSceneUpdate(); },
   };
   // Window_Message: the flag/pause/input surface the plugin hooks (shared names in MV and MZ).
@@ -254,9 +310,12 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     return false;
   };
   const BattleManager = {
-    _phase: null as string | null, _canEscape: true, _escapeRatio: 0.5, _escaped: false,
+    _phase: null as string | null, _canEscape: true, _canLose: false, _escapeRatio: 0.5, _escaped: false,
     calls: [] as string[],
-    setup(troopId: number) { g.$gameTroop._troopId = troopId; g.$gameParty._inBattle = true; this._phase = "init"; this._escaped = false; },
+    setup(troopId: number, canEscape = true, canLose = false) {
+      g.$gameTroop._troopId = troopId; g.$gameParty._inBattle = true; this._phase = "init"; this._escaped = false;
+      this._canEscape = canEscape; this._canLose = canLose;
+    },
     endBattle(_result: number) { g.$gameParty._inBattle = false; this._phase = "battleEnd"; },
     canEscape() { return this._canEscape; },
     checkBattleEnd() {
@@ -317,7 +376,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
-    SceneManager, BattleManager, DataManager, Input, Window_Message,
+    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
