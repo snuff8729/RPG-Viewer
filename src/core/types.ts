@@ -71,6 +71,8 @@ export interface GameData {
   templateMapId?: number;
   /** TemplateEvent KeepEventId: 맵 이벤트 호출(TE_CALL_MAP_EVENT)이 부른 이벤트 id를 유지(셀프 스위치가 부른 이벤트에). 없으면 false. */
   templateKeepEventId?: boolean;
+  /** plugins.js에서 켜진, 알림 문구를 띄우는 것으로 아는 플러그인 이름(알림 문구 기록 애드온 안내용). 없으면 없음. */
+  noticePlugins?: string[];
 }
 
 // ---- 해석 결과 ----

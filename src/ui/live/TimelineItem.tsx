@@ -8,6 +8,8 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { troopName } from "@/core/live/reader";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
+import { NoticeLine } from "./NoticeLine";
+import { noticeSourceLabel } from "@/core/addons/notices";
 import { battleActionOf, battleLogText } from "@/core/live/battleLine";
 import { explainRecord, reasonLabel } from "@/core/live/mismatch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -104,6 +106,10 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
       const action = battleActionOf(r, ctx.data);
       return <div className="px-2 text-xs leading-snug text-muted-foreground">{action ? <BattleActionLine action={action} /> : battleLogText(r.text, ctx.data)}</div>;
     }
+    case "notice": {
+      const text = formatText(typeof r.text === "string" && r.text ? r.text : typeof r.raw === "string" ? r.raw : "", ctx.data).trim();
+      return text ? <NoticeLine text={text} source={noticeSourceLabel(r.source)} className="px-2 py-0.5" /> : null;
+    }
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
     case "load": return <Line ctx={ctx}>💾 불러오기 (슬롯 {r.slot})</Line>;
     case "branchStart":
@@ -160,7 +166,7 @@ function sameItem(a: HistoryItem, b: HistoryItem): boolean {
 
 type BattleHistoryItem = Extract<HistoryItem, { kind: "battle" }>;
 
-/** 전투 묶음 안: 대사·상태 변경 등은 늘 보이고, 전투 로그 줄은 `전투 기록 N줄`을 펼쳤을 때만. */
+/** 전투 묶음 안: 대사·상태 변경·알림 문구 등은 늘 보이고, 전투 로그 줄은 `전투 기록 N줄`을 펼쳤을 때만. */
 function BattleTimelineBody({ item, ctx }: { item: BattleHistoryItem; ctx: TimelineCtx }) {
   const [logOpen, setLogOpen] = useState(false);
   const shown = logOpen ? item.items : item.items.filter(it => !(it.kind === "record" && it.record.type === "battlelog"));

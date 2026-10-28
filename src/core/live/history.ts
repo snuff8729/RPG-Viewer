@@ -216,6 +216,9 @@ function battleSignature(start: RecordOf<"battle">, end: RecordOf<"battle"> | nu
       // 1.8.1 사용 줄: 같은 글이어도 쓴 쪽·기술이 다르면 다른 전투
       const who = r.type === "battlelog" && r.kind === "action" ? `${String(r.by ?? "")}>${String(r.item ?? "")}>` : "";
       parts.push(`${r.type}:${who}${typeof r.text === "string" ? r.text : ""}`);
+    } else if (r.type === "notice") {
+      // 1.9.0 알림 문구(캐릭터 대사 등)도 같은 전투인지 보는 데 넣는다
+      parts.push(`notice:${typeof r.text === "string" ? r.text : ""}`);
     }
   }
   return `${num(start.troopId)}|${String(end.result ?? "")}|${JSON.stringify(parts)}`;
@@ -316,7 +319,8 @@ function fold(
       flushEpisode();
       flushGroup();
       const sub = fold(inner, model, { ...opts, noisy }, true);
-      const logLines = inner.reduce((n, x) => n + (x.type === "battlelog" ? 1 : 0), 0);
+      // 전투 로그 줄과 알림 문구(1.9.0)를 함께 센다
+      const logLines = inner.reduce((n, x) => n + (x.type === "battlelog" || x.type === "notice" ? 1 : 0), 0);
       const signature = inner.some(x => uncertain(x.seq)) ? null : battleSignature(r, end, inner);
       const last = items[items.length - 1];
       if (signature !== null && seenBattles.has(signature)) {

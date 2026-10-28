@@ -4,6 +4,7 @@ import type {
 } from "@/core/types";
 import { livePaths } from "@/core/live/installer";
 import { screenSizeOf } from "@/core/addons/screenPictures";
+import { noticePluginsOf } from "@/core/addons/notices";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
@@ -149,6 +150,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
     /* 템플릿을 풀지 못하면 그대로 둔다 */
   }
 
+  const noticePlugins = noticePluginsOf(pluginsText);
   return {
     ok: true,
     data: {
@@ -159,6 +161,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       screenSize: screenSizeOf(system, pluginsText),
       ...(templateMapId !== undefined ? { templateMapId } : {}),
       ...(templateKeepEventId ? { templateKeepEventId } : {}),
+      ...(noticePlugins.length > 0 ? { noticePlugins } : {}),
     },
   };
 }

@@ -40,6 +40,12 @@ export type LogRecord = RecordBase & (
     type: "battlelog"; text: string; pics?: unknown[];
     kind?: "action"; by?: string; isEnemy?: boolean; item?: string; itemKind?: "skill" | "item"; targets?: string[];
   }
+  /**
+   * 1.9.0+, 알림 문구 기록이 켜진 게임만: 다른 플러그인이 화면에 잠깐 띄운 문구(이야기 기록이 아니다).
+   * source = "ticker"(TickerManager.show)·"livecomment"·"notify"·"info" 또는 직접 추가한 함수 경로,
+   * text = 게임이 \n[]·\v[] 등을 풀어 쓴 글(\c[]·\i[] 등은 그대로), raw = 원문
+   */
+  | { type: "notice"; source: string; text: string; raw?: string }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
   | { type: "save"; slot: number }
   | { type: "load"; slot: number }
@@ -80,6 +86,10 @@ export interface LiveAssist {
   controlT?: number | null;
   /** 게임이 화면 그림을 기록하고 있는가(플러그인 1.6.0+, 없으면 구버전) */
   capturePictures?: boolean;
+  /** 게임이 알림 문구를 기록하고 있는가(플러그인 1.9.0+) */
+  captureNotices?: boolean;
+  /** 게임이 감싼 알림 함수 경로들(플러그인 1.9.0+) */
+  notices?: string[];
   /** 지금 전투에서 도망칠 수 있는가(전투 중일 때만 의미) */
   canEscape?: boolean;
   /** 지금 전투에서 져도 게임 오버가 아닌가(전투 중일 때만 의미) */
@@ -111,7 +121,7 @@ export type HistoryItem =
   | { kind: "fork"; atSeq: number; branches: number[] }
   /**
    * 전투 한 번: 시작 기록부터 끝 기록(없으면 진행 중이거나 끊김)까지. items = 그 사이 기록을 접은 것(전투 로그·대사·상태 변경…),
-   * logLines = 전투 로그 줄 수, repeat = 앞에서 본 것과 같은 전투(적 무리·결과·로그·대사가 같음)를 이어서 다시 본 횟수(0 = 처음).
+   * logLines = 전투 로그 줄 수(알림 문구 포함), repeat = 앞에서 본 것과 같은 전투(적 무리·결과·로그·대사가 같음)를 이어서 다시 본 횟수(0 = 처음).
    */
   | { kind: "battle"; start: RecordOf<"battle">; end: RecordOf<"battle"> | null; items: HistoryItem[]; logLines: number; repeat: number };
 

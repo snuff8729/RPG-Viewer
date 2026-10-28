@@ -259,6 +259,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Scene_Boot(this: any) {}
   function Scene_Title(this: any) {}
   function Scene_Map(this: any) {}
+  Scene_Map.prototype.start = function () { this.started = true; };
   function Scene_Battle(this: any) {}
   Scene_Battle.prototype.start = function () { this.started = true; };
   // Window_BattleLog: addText is where every displayed log line ends up (push('addText') calls it later)

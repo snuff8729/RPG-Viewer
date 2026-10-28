@@ -20,8 +20,8 @@ describe("add-on registry", () => {
 
 describe("addons.json", () => {
   it("round-trips and ignores unknown or bad values", () => {
-    expect(parseAddons(addonsJson({ screenPictures: true }))).toEqual({ screenPictures: true });
-    expect(JSON.parse(addonsJson({}))).toEqual({ v: 1, enabled: { screenPictures: false } });
+    expect(parseAddons(addonsJson({ screenPictures: true }))).toEqual({ screenPictures: true, notices: false });
+    expect(JSON.parse(addonsJson({}))).toEqual({ v: 1, enabled: { screenPictures: false, notices: false } });
     expect(parseAddons("﻿" + JSON.stringify({ v: 1, enabled: { screenPictures: true, other: true } }))).toEqual({ screenPictures: true });
     expect(parseAddons(JSON.stringify({ v: 1, enabled: { screenPictures: "yes" } }))).toEqual({});
     expect(parseAddons("{bad")).toBeNull();
@@ -31,7 +31,7 @@ describe("addons.json", () => {
   it("keeps per-game picture groups; bad ids or groups are dropped", () => {
     const body = addonsJson({ screenPictures: true }, { 60: "cg", 102: "hud" });
     expect(JSON.parse(body).pictureRoles).toEqual({ 60: "cg", 102: "hud" });
-    expect(parseAddonFile(body)).toEqual({ state: { screenPictures: true }, pictureRoles: { 60: "cg", 102: "hud" } });
+    expect(parseAddonFile(body)).toEqual({ state: { screenPictures: true, notices: false }, pictureRoles: { 60: "cg", 102: "hud" } });
     const bad = JSON.stringify({ v: 1, enabled: {}, pictureRoles: { 0: "cg", x: "cg", 5: "auto", 6: "stand" } });
     expect(parseAddonFile(bad)!.pictureRoles).toEqual({ 6: "stand" });
     expect(parseAddonFile(JSON.stringify({ v: 1, enabled: {} }))!.pictureRoles).toEqual({});
