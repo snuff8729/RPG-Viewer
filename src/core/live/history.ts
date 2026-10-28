@@ -2,9 +2,11 @@ import { locationKey } from "../index/locations";
 import type { Location } from "../types";
 import type { BranchInfo, HistoryItem, HistoryModel, LogRecord, RecordOf, StateChange } from "./types";
 
-const NOISY_WINDOW_MS = 60_000;
-const NOISY_MAX_CHANGES = 10;
+export const NOISY_WINDOW_MS = 60_000;
+export const NOISY_MAX_CHANGES = 10;
 
+/** seq가 유한한 숫자인 객체 기록인가(buildHistory·noisyVariables가 받는 기록). */
+export const isValidRecord = (r: unknown): r is LogRecord => isValid(r);
 function isValid(r: unknown): r is LogRecord {
   return typeof r === "object" && r !== null && typeof (r as LogRecord).seq === "number" && Number.isFinite((r as LogRecord).seq);
 }
@@ -22,39 +24,49 @@ function bySeq(records: LogRecord[]): LogRecord[] {
   return (allValid ? valid.slice() : valid).sort((a, b) => a.seq - b.seq);
 }
 
+/** buildHistory의 진행 상태. 증분 누적기와 공유한다. */
+export interface HistoryState { branches: Map<number, BranchInfo>; runBranches: Map<number, number[]>; latestBranch: number | null }
+export const newHistoryState = (): HistoryState => ({ branches: new Map(), runBranches: new Map(), latestBranch: null });
+
+/** 유효한 기록(isValidRecord) 하나를 seq 순으로 반영한다. run/branch 0 기록은 무시. */
+export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
+  const run = num(r.run), id = num(r.branch);
+  if (run <= 0 || id <= 0) return;
+  const t = num(r.t);
+  let b = st.branches.get(id);
+  if (!b) {
+    const start = r.type === "branchStart" ? r : null;
+    const reason = start && (start.reason === "newGame" || start.reason === "load") ? start.reason : "unknownSave";
+    b = {
+      id, run,
+      parent: start && typeof start.parentBranch === "number" ? start.parentBranch : null,
+      fromSeq: start && typeof start.fromSeq === "number" ? start.fromSeq : null,
+      reason, startSeq: r.seq, startT: t, lastSeq: r.seq, lastT: t, children: [],
+    };
+    st.branches.set(id, b);
+    const list = st.runBranches.get(run) ?? [];
+    list.push(id);
+    st.runBranches.set(run, list);
+    const parent = b.parent !== null ? st.branches.get(b.parent) : undefined;
+    if (parent && parent.id !== id && parent.run === run) parent.children.push(id);
+  } else {
+    b.lastSeq = Math.max(b.lastSeq, r.seq);
+    b.lastT = Math.max(b.lastT, t);
+  }
+  st.latestBranch = id;
+}
+
+/** 진행 상태에서 모델을 만든다(내부 Map·배열을 그대로 쓴다). */
+export function historyModelOf(st: HistoryState): HistoryModel {
+  const runs = [...st.runBranches.entries()].sort((a, b) => a[0] - b[0]).map(([run, ids]) => ({ run, branches: ids }));
+  return { branches: st.branches, runs, latestBranch: st.latestBranch };
+}
+
 /** 기록에서 회차·갈래 모델을 만든다. run/branch 0 기록은 무시. 예외를 던지지 않는다. */
 export function buildHistory(records: LogRecord[]): HistoryModel {
-  const branches = new Map<number, BranchInfo>();
-  const runBranches = new Map<number, number[]>();
-  let latestBranch: number | null = null;
-  for (const r of bySeq(Array.isArray(records) ? records : [])) {
-    const run = num(r.run), id = num(r.branch);
-    if (run <= 0 || id <= 0) continue;
-    const t = num(r.t);
-    let b = branches.get(id);
-    if (!b) {
-      const start = r.type === "branchStart" ? r : null;
-      const reason = start && (start.reason === "newGame" || start.reason === "load") ? start.reason : "unknownSave";
-      b = {
-        id, run,
-        parent: start && typeof start.parentBranch === "number" ? start.parentBranch : null,
-        fromSeq: start && typeof start.fromSeq === "number" ? start.fromSeq : null,
-        reason, startSeq: r.seq, startT: t, lastSeq: r.seq, lastT: t, children: [],
-      };
-      branches.set(id, b);
-      const list = runBranches.get(run) ?? [];
-      list.push(id);
-      runBranches.set(run, list);
-      const parent = b.parent !== null ? branches.get(b.parent) : undefined;
-      if (parent && parent.id !== id && parent.run === run) parent.children.push(id);
-    } else {
-      b.lastSeq = Math.max(b.lastSeq, r.seq);
-      b.lastT = Math.max(b.lastT, t);
-    }
-    latestBranch = id;
-  }
-  const runs = [...runBranches.entries()].sort((a, b) => a[0] - b[0]).map(([run, ids]) => ({ run, branches: ids }));
-  return { branches, runs, latestBranch };
+  const st = newHistoryState();
+  for (const r of bySeq(Array.isArray(records) ? records : [])) applyHistoryRecord(st, r);
+  return historyModelOf(st);
 }
 
 /** `{run}회차 갈래 {n}` — n은 run 안에서 생성 순서(1부터). */
@@ -80,7 +92,8 @@ export function branchPath(records: LogRecord[], model: HistoryModel, branchId: 
   return bySeq(records).filter(r => r.run === self.run && limits.has(r.branch) && r.seq <= limits.get(r.branch)!);
 }
 
-function variableChanges(r: LogRecord): { id: number; t: number }[] {
+/** state 기록의 변수 변경(id, 시각). noisyVariables와 증분 누적기가 공유한다. */
+export function variableChanges(r: LogRecord): { id: number; t: number }[] {
   if (r.type !== "state" || !Array.isArray(r.changes)) return [];
   const out: { id: number; t: number }[] = [];
   for (const c of r.changes) {
