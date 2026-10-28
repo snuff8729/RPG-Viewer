@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { mapMarkers, spriteEffect, type CurrentEvent } from "./mapEvents";
+import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
 import { fitZoom, MAX_ZOOM, MIN_ZOOM } from "./mapZoom";
 import { eventStyle, sectionStyle } from "./sectionStyle";
 import type { LoadedTiles } from "./useMapTiles";
@@ -22,7 +22,7 @@ const T = 48;
 const MAX_AREA = 16_000_000;
 /** 한 프레임에 그리는 시간(ms). 넘으면 다음 프레임으로 넘겨 큰 맵에서도 화면이 멈추지 않게 한다 */
 const SLICE_MS = 10;
-const LEGEND: Section[] = ["now", "item", "repeat", "talk", "locked"];
+const LEGEND: Section[] = ["now", "item", "repeat", "exit", "talk", "locked"];
 /** 합성 방법(0 보통, 1 더하기, 2 곱하기, 3 스크린) → 캔버스 합성 */
 const BLEND: GlobalCompositeOperation[] = ["source-over", "lighter", "multiply", "screen"];
 
@@ -85,14 +85,21 @@ function drawSpriteImage(
   const ph = bmp.height / (big ? 4 : 8);
   const idx = big ? 0 : clamp(Math.floor(img.characterIndex) || 0, 0, 7);
   const pattern = Number.isInteger(img.pattern) && img.pattern >= 0 && img.pattern < 3 ? img.pattern : 1;
-  const row = clamp(Math.floor((img.direction || 2) / 2) - 1, 0, 3);
+  // 지금 바라보는 방향(live, 방향 고정이 아니면)이 있으면 그쪽
+  const dir = ev.d && !ev.page.directionFix ? ev.d : img.direction;
+  const row = clamp(Math.floor((dir || 2) / 2) - 1, 0, 3);
   const sx = ((idx % 4) * 3 + pattern) * pw;
   const sy = (Math.floor(idx / 4) * 4 + row) * ph;
   const shift = sign.includes("!") ? 0 : 6;
   ctx.drawImage(bmp, sx, sy, pw, ph, ev.x * T + T / 2 - pw / 2, (ev.y + 1) * T - ph - shift, pw, ph);
 }
 
-/** 바탕 캔버스: 아래층 타일 → 이벤트(아래·같음) → 위층 타일 → 이벤트(위). 프레임을 나눠 그린다. */
+const hasImage = (e: CurrentEvent) => !!e.page.image && (e.page.image.tileId > 0 || !!e.page.image.characterName);
+
+/**
+ * 바탕 캔버스: 아래층 타일 → 이벤트(아래·같음) → 위층 타일 → 이벤트(위). 프레임을 나눠 그린다.
+ * 움직이는 이벤트(mobile)는 여기 그리지 않는다 — 위 캔버스가 지금 위치에 그린다.
+ */
 async function renderBase(
   canvas: HTMLCanvasElement, tiles: LoadedTiles, events: CurrentEvent[], chars: Map<string, ImageBitmap | null>, cancelled: () => boolean,
 ) {
@@ -104,7 +111,7 @@ async function renderBase(
   if (!ctx) return;
   ctx.setTransform(cell / T, 0, 0, cell / T, 0, 0);
   ctx.fillStyle = "rgba(0,0,0,0.5)"; // 그림자(sheet -1)
-  const withImage = events.filter((e) => e.page.image && (e.page.image.tileId > 0 || e.page.image.characterName));
+  const withImage = events.filter((e) => !e.mobile && hasImage(e));
   const byY = (a: CurrentEvent, b: CurrentEvent) => a.y - b.y;
   const below = withImage.filter((e) => (e.page.priorityType ?? 1) !== 2).sort(byY);
   const above = withImage.filter((e) => (e.page.priorityType ?? 1) === 2).sort(byY);
@@ -145,6 +152,8 @@ function arrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, dir: 2 | 4
 
 interface OverlayInput {
   tiles: LoadedTiles; walls: Path2D | null; listed: ChecklistEvent[]; numbers: Map<number, number>;
+  /** 움직이는 이벤트(지금 위치에 그린다)와 캐릭터 그림 */
+  mobile: CurrentEvent[]; chars: Map<string, ImageBitmap | null> | null;
   player: { x: number; y: number }; route: Route | null; selected: number | null;
   /** 고른 이벤트(표시가 안 그려지는 것이어도 길은 그린다) */
   selectedEv: ChecklistEvent | undefined;
@@ -166,6 +175,11 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
     ctx.setTransform(cell, 0, 0, cell, 0, 0);
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.fill(o.walls);
+  }
+  // 움직이는 이벤트 그림(지금 위치)
+  if (o.chars && o.mobile.length > 0) {
+    ctx.setTransform(cell / T, 0, 0, cell / T, 0, 0);
+    for (const e of [...o.mobile].filter(hasImage).sort((a, b) => a.y - b.y)) drawSprite(ctx, e, e.page.image!, o.tiles, o.chars);
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const colour = (e: ChecklistEvent) => cssVar(eventStyle(e).cssVar);
@@ -218,6 +232,8 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
       ctx.globalAlpha = 1;
       continue;
     }
+    // 다 본 것은 흐리게
+    ctx.globalAlpha = ev.section === "done" && ev.eventId !== o.selected ? 0.45 : 1;
     ctx.arc(cx, cy, ev.eventId === o.selected ? r * 1.25 : r, 0, Math.PI * 2);
     ctx.fillStyle = colour(ev);
     ctx.fill();
@@ -227,6 +243,7 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
     ctx.fillStyle = "#fff";
     ctx.font = `600 ${(n >= 10 ? 10 : 12) * px}px sans-serif`;
     ctx.fillText(String(n), cx, cy + 0.5 * px);
+    ctx.globalAlpha = 1;
   }
 
   // 내 위치
@@ -257,9 +274,9 @@ function useThemeTick(): number {
 /** 실제 맵 그림(타일셋·이벤트 그림) 위에 번호·내 위치·길을 겹쳐 그린다. 표시를 누르면 onPick(eventId). */
 export function MapCanvas({ tiles, events, listed, numbers, player, route, selected, focus, onPick }: {
   tiles: LoadedTiles;
-  /** 지금 활성 페이지가 있는 이벤트(그림·길막음용) */
+  /** 지금 활성 페이지가 있는 이벤트(그림·길막음용, 지금 위치) */
   events: CurrentEvent[];
-  /** 체크리스트 이벤트(번호 표시용: 다 본 것·이야기 진행 조건은 그리지 않고, 잠김은 스위치로) */
+  /** 체크리스트 이벤트(지금 위치, 번호 표시용: 이야기·자동 진행은 그리지 않고, 잠김은 스위치로, 다 본 것은 흐리게) */
   listed: ChecklistEvent[];
   numbers: Map<number, number>;
   player: { x: number; y: number };
@@ -304,14 +321,18 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   }, [assets, charKey]);
   const charsReady = chars?.key === charKey ? chars.map : null;
 
-  // 바탕은 맵·타일셋·활성 페이지·캐릭터 그림이 바뀔 때만 다시 그린다
+  // 바탕은 맵·타일셋·움직이지 않는 이벤트·캐릭터 그림이 바뀔 때만 다시 그린다(돌아다니는 NPC 위치는 키에 없다)
+  const sk = staticKey(events);
+  const [baseEvents, setBaseEvents] = useState({ key: sk, events });
+  if (baseEvents.key !== sk) setBaseEvents({ key: sk, events });
+  const mobile = useMemo(() => events.filter((e) => e.mobile), [events]);
   useEffect(() => {
     const canvas = baseRef.current;
     if (!canvas || !charsReady) return;
     let cancelled = false;
-    void renderBase(canvas, tiles, events, charsReady, () => cancelled);
+    void renderBase(canvas, tiles, baseEvents.events, charsReady, () => cancelled);
     return () => { cancelled = true; };
-  }, [tiles, events, charsReady]);
+  }, [tiles, baseEvents, charsReady]);
 
   const walls = useMemo(() => {
     const p = new Path2D();
@@ -388,10 +409,11 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     const canvas = overRef.current;
     if (!canvas || zoom == null) return;
     renderOverlay(canvas, zoom, {
-      tiles, walls: showWalls ? walls : null, listed: markers, numbers: stableNumbers.numbers, player: { x: px, y: py }, route, selected,
+      tiles, walls: showWalls ? walls : null, listed: markers, numbers: stableNumbers.numbers, mobile, chars: charsReady,
+      player: { x: px, y: py }, route, selected,
       selectedEv: selected != null ? listed.find((e) => e.eventId === selected) : undefined,
     });
-  }, [tiles, zoom, showWalls, walls, markers, listed, stableNumbers, px, py, route, selected, themeTick]);
+  }, [tiles, zoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick]);
 
   const zoomBy = (f: number) => {
     const el = scrollRef.current;

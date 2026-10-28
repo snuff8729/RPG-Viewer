@@ -27,7 +27,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.3.0",
+    VERSION: "1.4.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -452,7 +452,11 @@
       var ev = list[i];
       if (!ev) continue;
       var page = typeof ev._pageIndex === "number" ? ev._pageIndex : -1;
-      events.push({ eventId: ev.eventId(), page: page });
+      var entry = { eventId: ev.eventId(), page: page };
+      // live position (moving NPCs): the viewer draws markers / routes there
+      if (typeof ev.x === "number" && typeof ev.y === "number") { entry.x = ev.x; entry.y = ev.y; }
+      if (typeof ev._direction === "number") entry.d = ev._direction;
+      events.push(entry);
     }
     var variables = {};
     var vdata = vars._data || [];

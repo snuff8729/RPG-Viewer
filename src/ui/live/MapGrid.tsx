@@ -2,7 +2,7 @@ import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
 import { eventStyle, sectionStyle } from "./sectionStyle";
 
-const LEGEND: Section[] = ["now", "item", "repeat", "talk", "locked"];
+const LEGEND: Section[] = ["now", "item", "repeat", "exit", "talk", "locked"];
 const GRID_MAX = 60;
 
 function GridLines({ width, height }: { width: number; height: number }) {

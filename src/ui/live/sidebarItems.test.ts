@@ -6,7 +6,7 @@ import { nowItems, placesToGo } from "./sidebarItems";
 const ev = (eventId: number, section: ChecklistEvent["section"], hasLoc = true): ChecklistEvent => ({
   eventId, name: `E${eventId}`, title: `T${eventId}`, x: 0, y: 0, section, activePage: 0,
   location: hasLoc ? { source: "map", mapId: 1, eventId, page: 0 } : null,
-  auto: false, unseen: 0, unpicked: 0, repeat: [], locked: [], interactable: true, gains: [], story: false,
+  auto: false, unseen: 0, unpicked: 0, repeat: [], locked: [], interactable: true, gains: [], story: false, describe: "", moves: false,
 });
 const checklist = (events: ChecklistEvent[]): MapChecklist =>
   ({ mapId: 1, mapName: "M", width: 1, height: 1, player: { x: 0, y: 0 }, events, remaining: events.length });
@@ -23,6 +23,12 @@ describe("nowItems", () => {
     expect(nowItems(c).map((e) => e.eventId)).toEqual([2, 6, 8, 1]);
     expect(nowItems(c, 2).map((e) => e.eventId)).toEqual([2, 6]);
     expect(nowItems(null)).toEqual([]);
+  });
+  it("skips story/background events; exits only with unseen dialogue", () => {
+    const hidden = { ...ev(1, "now"), story: true };
+    const exitNew = { ...ev(2, "exit"), unseen: 2 };
+    const c = checklist([hidden, exitNew, ev(3, "exit"), ev(4, "now")]);
+    expect(nowItems(c).map((e) => e.eventId)).toEqual([4, 2]);
   });
 });
 

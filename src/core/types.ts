@@ -15,6 +15,8 @@ export interface EventPage {
   priorityType?: number;
   through?: boolean;
   directionFix?: boolean;
+  /** 자율 이동: 0 고정, 1 무작위, 2 다가옴, 3 사용자 정의. */
+  moveType?: number;
   /** 페이지의 이동 경로(자율 이동 "사용자 정의"). */
   moveRoute?: { list?: EventCommand[] };
 }

@@ -31,7 +31,8 @@ export interface LiveSnapshot {
   running: Location | null;
   /** 실행 중인 명령 인덱스(구버전 플러그인엔 없음) */
   runningCmd?: number | null;
-  events: { eventId: number; page: number }[];   // page 0부터, -1 = 없음
+  /** page 0부터, -1 = 없음. x·y·d: 지금 위치·방향(플러그인 1.4.0+, 없으면 구버전 — 맵 데이터 위치를 쓴다) */
+  events: { eventId: number; page: number; x?: number; y?: number; d?: number }[];
   switches: number[];                             // ON인 id
   variables: Record<string, number>;              // 0이 아닌 값
   selfSwitches: string[];                         // ON인 "mapId,eventId,A"
