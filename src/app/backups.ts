@@ -13,6 +13,8 @@ export interface BackupMeta {
   fileCount: number;
   bytes: number;
   hash: string;
+  /** 게임 루트 기준 세이브 폴더. 예전 백업에는 없다. */
+  saveDir?: string;
 }
 
 export interface ApiError { ok: false; error: string }
@@ -35,7 +37,15 @@ async function post<T extends object>(route: string, body: Record<string, unknow
   }
 }
 
-export const fetchBackups = (path: string) => post<{ backups: BackupMeta[] }>("backups/list", { path });
+export interface BackupList {
+  backups: BackupMeta[];
+  /** 지금 쓰는 세이브 폴더(게임 루트 기준) */
+  saveDir?: string;
+  /** 세이브 파일을 어디에서도 찾지 못함(NW.js localStorage 저장일 수 있음) */
+  saveFilesMissing?: boolean;
+}
+
+export const fetchBackups = (path: string) => post<BackupList>("backups/list", { path });
 export const fetchSaveState = (path: string) => post<{ signature: string }>("backups/state", { path });
 export const makeBackup = (path: string, kind: BackupKind, reason: string, name?: string) =>
   post<{ skipped?: true; backup?: BackupMeta }>("backups/create", { path, kind, reason, ...(name ? { name } : {}) });
@@ -110,3 +120,8 @@ export function nextWatch(state: WatchState, signature: string, now: number, min
 }
 
 export const KIND_LABEL: Record<BackupKind, string> = { manual: "수동", auto: "자동", safety: "복원 전" };
+
+/** 파일이 하나도 없는 백업(세이브 폴더를 못 찾던 때 만든 것 등). */
+export function isEmptyBackup(b: Pick<BackupMeta, "fileCount">): boolean {
+  return b.fileCount === 0;
+}

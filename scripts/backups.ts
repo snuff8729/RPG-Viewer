@@ -1,5 +1,6 @@
 /**
- * 세이브 폴더 백업: 게임의 세이브 폴더(MV `www/save`, MZ `save`)를 통째로 복사해 둔다.
+ * 세이브 폴더 백업: 게임의 세이브 폴더를 통째로 복사해 둔다.
+ * 세이브 폴더는 resolveSaveDir로 찾는다(기본 MV `www/save`, MZ `save`, 세이브 위치를 옮기는 플러그인도 따른다).
  * 공용 데이터(global.rpgsave·config.rpgsave)와 플러그인이 같은 폴더에 쓴 파일까지 함께 들어간다.
  *
  * 백업은 `<게임 루트>/rpg-viewer/backups/<id>/`에 `files/`(복사본)와 `meta.json`으로 둔다.
@@ -20,6 +21,8 @@ export interface BackupMeta {
   fileCount: number;
   bytes: number;
   hash: string;
+  /** 게임 루트 기준 세이브 폴더(`/`로 이음). 예전 백업에는 없다. */
+  saveDir?: string;
 }
 
 export interface GameLocation {
@@ -43,9 +46,138 @@ const MAX_TEXT = 200;
 export const ERR_BAD_ID = "백업 이름이 올바르지 않아요";
 export const ERR_NO_BACKUP = "백업을 찾을 수 없어요";
 export const ERR_BAD_KIND = "백업 종류가 올바르지 않아요";
+export const ERR_BAD_SAVE_DIR = "백업의 세이브 폴더 위치가 올바르지 않아요";
+
+/** 엔진 기본 세이브 폴더(게임 루트 기준). */
+export function defaultSaveRel(engine: GameLocation["engine"]): string {
+  return engine === "MV" ? "www/save" : "save";
+}
+
+const SAVE_FILE_RE = /\.(rpgsave|rmmzsave)$/i;
+const SAVE_PARAM_RE = /save.*(path|dir|folder)|RelatedName/i;
+
+interface PluginEntry { name: string; status: boolean; parameters: Record<string, unknown> }
+
+/** `js/plugins.js`(MV는 `www/js/plugins.js`)의 `$plugins` 목록. 읽지 못하면 빈 목록. */
+export function readPlugins(root: string, engine: GameLocation["engine"]): PluginEntry[] {
+  const file = path.join(root, ...(engine === "MV" ? ["www", "js", "plugins.js"] : ["js", "plugins.js"]));
+  let text: string;
+  try { text = fs.readFileSync(file, "utf8"); } catch { return []; }
+  const at = text.indexOf("$plugins");
+  const start = at < 0 ? -1 : text.indexOf("[", at);
+  const end = text.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  try {
+    const list = JSON.parse(text.slice(start, end + 1)) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list.flatMap((p: unknown): PluginEntry[] => {
+      if (!p || typeof p !== "object") return [];
+      const o = p as Record<string, unknown>;
+      if (typeof o.name !== "string") return [];
+      const params = o.parameters && typeof o.parameters === "object" ? (o.parameters as Record<string, unknown>) : {};
+      return [{ name: o.name, status: o.status === true, parameters: params }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `base` 기준 `rel`을 게임 루트 기준 상대 경로(`/`로 이음)로 바꾼다.
+ * 절대 경로, 루트 밖(`..`), 루트·MV `www` 자체, 뷰어 폴더(`rpg-viewer`)는 거부(null).
+ */
+export function safeSaveRel(root: string, base: string, rel: string): string | null {
+  const t = rel.trim();
+  if (t === "" || path.isAbsolute(t) || /^[\\/]/.test(t) || /^[a-z]:/i.test(t)) return null;
+  const r = path.relative(path.resolve(root), path.resolve(base, t));
+  if (r === "" || path.isAbsolute(r)) return null;
+  const parts = r.split(/[\\/]+/);
+  if (parts.some((x) => x === "..")) return null;
+  const lower = parts.map((x) => x.toLowerCase());
+  if (lower.length === 1 && lower[0] === "www") return null;
+  if (lower[0] === "rpg-viewer") return null;
+  return parts.join("/");
+}
+
+function absOf(root: string, rel: string): string {
+  return path.join(root, ...rel.split("/"));
+}
+
+/** 폴더 바로 아래에 세이브 파일(*.rpgsave, *.rmmzsave)이 있는지. */
+export function hasSaveFiles(dir: string): boolean {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isFile() && SAVE_FILE_RE.test(e.name));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 켜진 플러그인이 정한 세이브 폴더 후보(게임 루트 기준).
+ * `primary`는 SavePathRelocation이 정한 것(확실), `guessed`는 이름이 세이브 경로처럼 보이는 매개변수(세이브 파일이 있을 때만 씀).
+ */
+export function pluginSaveRels(root: string, engine: GameLocation["engine"]): { primary: string[]; guessed: string[] } {
+  const primary: string[] = [];
+  const guessed: string[] = [];
+  // SavePathRelocation 설명대로 배포된 Game.exe에서도 BaseAt www는 www 폴더 기준이다. MZ는 www가 곧 게임 폴더.
+  const wwwBase = engine === "MV" ? path.join(root, "www") : root;
+  const push = (list: string[], v: string | null) => { if (v !== null && !list.includes(v)) list.push(v); };
+  for (const p of readPlugins(root, engine)) {
+    if (!p.status) continue;
+    if (p.name === "SavePathRelocation") {
+      const baseAt = String(p.parameters.BaseAt ?? "exe").trim().toLowerCase();
+      const relRaw = p.parameters.RelatedName;
+      const rel = typeof relRaw === "string" && relRaw.trim() !== "" ? relRaw : "save";
+      push(primary, safeSaveRel(root, baseAt === "www" ? wwwBase : root, rel));
+      continue;
+    }
+    for (const [k, v] of Object.entries(p.parameters)) {
+      if (!SAVE_PARAM_RE.test(k) || typeof v !== "string") continue;
+      push(guessed, safeSaveRel(root, root, v));
+      if (engine === "MV") push(guessed, safeSaveRel(root, wwwBase, v));
+    }
+  }
+  return { primary, guessed };
+}
+
+export interface SaveDirInfo {
+  /** 게임 루트 기준(`/`로 이음) */
+  rel: string;
+  abs: string;
+  /** 세이브 파일(*.rpgsave, *.rmmzsave)이 있는지 */
+  hasSaves: boolean;
+}
+
+/**
+ * 세이브 폴더 찾기. 후보: 플러그인이 정한 폴더 → `save` → `www/save`.
+ * 세이브 파일이 있는 첫 후보를 쓰고, 어디에도 없으면 SavePathRelocation 폴더나 엔진 기본 폴더(복원 때 만든다).
+ */
+export function resolveSaveDir(root: string, engine: GameLocation["engine"]): SaveDirInfo {
+  const { primary, guessed } = pluginSaveRels(root, engine);
+  const candidates: string[] = [];
+  for (const r of [...primary, ...guessed, "save", "www/save"]) if (!candidates.includes(r)) candidates.push(r);
+  for (const rel of candidates) {
+    const abs = absOf(root, rel);
+    if (hasSaveFiles(abs)) return { rel, abs, hasSaves: true };
+  }
+  const rel = primary[0] ?? defaultSaveRel(engine);
+  return { rel, abs: absOf(root, rel), hasSaves: false };
+}
 
 export function saveDirOf(game: GameLocation): string {
-  return game.engine === "MV" ? path.join(game.root, "www", "save") : path.join(game.root, "save");
+  return resolveSaveDir(game.root, game.engine).abs;
+}
+
+/** 세이브 파일이 어디에도 없는 NW.js 게임(세이브가 파일이 아닌 localStorage에 있을 수 있음)이면 참. */
+export function saveFilesMissing(game: GameLocation, info: SaveDirInfo = resolveSaveDir(game.root, game.engine)): boolean {
+  if (info.hasSaves) return false;
+  return fs.existsSync(path.join(game.root, "package.json")) || fs.existsSync(path.join(game.root, "www", "package.json"));
+}
+
+/** 백업을 되돌릴 세이브 폴더. 기록이 없는 예전 백업은 그때 쓰던 엔진 기본 폴더. 잘못된 값이면 null. */
+export function backupSaveRel(game: GameLocation, meta: Pick<BackupMeta, "saveDir">): string | null {
+  if (meta.saveDir === undefined) return defaultSaveRel(game.engine);
+  return safeSaveRel(game.root, game.root, meta.saveDir) === meta.saveDir ? meta.saveDir : null;
 }
 
 export function backupsDirOf(root: string): string {
@@ -124,6 +256,7 @@ function readMeta(dir: string, id: string): BackupMeta | null {
       id, kind: m.kind, reason: typeof m.reason === "string" ? m.reason : "",
       ...(typeof m.name === "string" && m.name !== "" ? { name: m.name } : {}),
       createdAt: m.createdAt, fileCount: Number(m.fileCount) || 0, bytes: Number(m.bytes) || 0, hash: m.hash,
+      ...(typeof m.saveDir === "string" ? { saveDir: m.saveDir } : {}),
     };
   } catch {
     return null;
@@ -191,13 +324,20 @@ export interface CreateOptions {
   now?: Date;
   /** 정리할 때 지우지 않을 백업 */
   keep?: readonly string[];
+  /** 이 세이브 폴더(게임 루트 기준)를 백업한다. 없으면 resolveSaveDir로 찾는다. */
+  saveRel?: string;
 }
 
 export function createBackup(game: GameLocation, opts: CreateOptions): BackupResult<{ skipped?: true; backup?: BackupMeta }> {
   try {
-    const saveDir = saveDirOf(game);
+    const info: SaveDirInfo = opts.saveRel !== undefined
+      ? { rel: opts.saveRel, abs: absOf(game.root, opts.saveRel), hasSaves: hasSaveFiles(absOf(game.root, opts.saveRel)) }
+      : resolveSaveDir(game.root, game.engine);
+    const saveDir = info.abs;
     const hash = hashDir(saveDir);
     if (opts.kind === "auto") {
+      // 세이브할 것이 하나도 없으면 빈 폴더를 몰래 백업하지 않는다(창에서 따로 알린다).
+      if (!info.hasSaves && listFiles(saveDir).length === 0) return { ok: true, skipped: true };
       const newest = listBackups(game.root)[0];
       if (newest && newest.hash === hash) return { ok: true, skipped: true };
     }
@@ -218,6 +358,7 @@ export function createBackup(game: GameLocation, opts: CreateOptions): BackupRes
         fileCount: files.length,
         bytes: files.reduce((s, f) => s + f.size, 0),
         hash,
+        saveDir: info.rel,
       };
       fs.writeFileSync(path.join(tmp, "meta.json"), JSON.stringify(meta, null, 2));
       fs.renameSync(tmp, path.join(base, id));
@@ -252,12 +393,16 @@ export function deleteBackup(game: GameLocation, id: unknown): BackupResult<obje
 export function restoreBackup(game: GameLocation, id: unknown): BackupResult<{ safety?: BackupMeta }> {
   if (!isValidBackupId(id)) return { ok: false, error: ERR_BAD_ID };
   const src = path.join(backupsDirOf(game.root), id);
-  if (!readMeta(src, id)) return { ok: false, error: ERR_NO_BACKUP };
+  const meta = readMeta(src, id);
+  if (!meta) return { ok: false, error: ERR_NO_BACKUP };
+  // 백업한 바로 그 폴더로 되돌린다.
+  const saveRel = backupSaveRel(game, meta);
+  if (saveRel === null) return { ok: false, error: ERR_BAD_SAVE_DIR };
 
-  const safety = createBackup(game, { kind: "safety", reason: SAFETY_REASON, keep: [id] });
+  const safety = createBackup(game, { kind: "safety", reason: SAFETY_REASON, keep: [id], saveRel });
   if (!safety.ok) return { ok: false, error: `복원 전 백업을 만들지 못해 복원하지 않았어요: ${safety.error}` };
 
-  const saveDir = saveDirOf(game);
+  const saveDir = absOf(game.root, saveRel);
   const parent = path.dirname(saveDir);
   const stamp = `${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
   const tmpNew = path.join(parent, `.rpgv-restore-new-${stamp}`);
@@ -296,7 +441,10 @@ const KINDS: readonly BackupKind[] = ["auto", "manual", "safety"];
 export function handleBackupRoute(route: string, game: GameLocation, input: Record<string, unknown>): unknown {
   try {
     switch (route as BackupRoute) {
-      case "backups/list": return { ok: true, backups: listBackups(game.root) };
+      case "backups/list": {
+        const info = resolveSaveDir(game.root, game.engine);
+        return { ok: true, backups: listBackups(game.root), saveDir: info.rel, saveFilesMissing: saveFilesMissing(game, info) };
+      }
       case "backups/state": return { ok: true, signature: saveSignature(game) };
       case "backups/create": {
         const kind = input.kind as BackupKind;
