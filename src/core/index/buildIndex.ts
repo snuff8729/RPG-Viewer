@@ -1,5 +1,5 @@
 import { describeCommonEventConditions, describePageConditions, describeTroopPageConditions } from "../conditions/describe";
-import { hasDialogue, interpret } from "../interpret/interpret";
+import { hasDialogue, interpret, subBlocks, walk } from "../interpret/interpret";
 import type {
   CommonEvent, Condition, EventCommand, EventPage, GameData, GameIndex, MapEvent, MapInfo, PageEntry, Ref, ScriptNode,
   SearchHit, Troop, TroopPage, XrefEntry,
@@ -8,27 +8,8 @@ import type {
 const GENERIC_NAME = /^EV\d+$/;
 const refKey = (r: Ref) => `${r.type}:${r.id}`;
 
-/** 노드 하위 블록과 nodePath 접두 인덱스 (types.ts 규칙) */
-function subBlocks(n: ScriptNode): { path: number[]; nodes: ScriptNode[] }[] {
-  switch (n.kind) {
-    case "choices": {
-      const out = n.branches.map((b, bi) => ({ path: [bi], nodes: b.body }));
-      if (n.cancelBranch) out.push({ path: [-1], nodes: n.cancelBranch });
-      return out;
-    }
-    case "conditional": return [{ path: [0], nodes: n.then }, ...(n.else ? [{ path: [1], nodes: n.else }] : [])];
-    case "loop": return [{ path: [0], nodes: n.body }];
-    default: return [];
-  }
-}
-
-function walk(nodes: ScriptNode[], prefix: number[], visit: (n: ScriptNode, path: number[]) => void): void {
-  nodes.forEach((n, i) => {
-    const path = [...prefix, i];
-    visit(n, path);
-    for (const b of subBlocks(n)) walk(b.nodes, [...path, ...b.path], visit);
-  });
-}
+// 정의는 해석기 쪽(순환 import 방지), 색인 사용처를 위해 여기서도 export한다.
+export { subBlocks, walk };
 
 function firstMessageTitle(nodes: ScriptNode[]): string | undefined {
   let found: ScriptNode | undefined;

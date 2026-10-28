@@ -33,8 +33,8 @@ describe("describePageConditions", () => {
   it("refs", () => {
     const cs = describePageConditions({ ...emptyConds, selfSwitchValid: true, selfSwitchCh: "B", actorValid: true, actorId: 1 }, 1, data);
     expect(cs[0].refs).toEqual([{ type: "selfSwitch", id: "B" }]);
-    expect(cs[1]).toEqual({ text: "파티에 레나 있음", refs: [{ type: "actor", id: 1 }] });
-    expect(cs[2]).toEqual({ text: "실행: 플레이어 접촉", refs: [] });
+    expect(cs[1]).toEqual({ text: "파티에 레나 있음", refs: [{ type: "actor", id: 1 }], test: { kind: "actorInParty", id: 1 } });
+    expect(cs[2]).toEqual({ text: "실행: 플레이어 접촉", refs: [], test: { kind: "trigger" } });
   });
   it("triggers", () => expect([0, 1, 2, 3, 4].map(t => describePageConditions(emptyConds, t, data)[0].text))
     .toEqual(["실행: 결정 키", "실행: 플레이어 접촉", "실행: 이벤트 접촉", "실행: 자동 실행", "실행: 병렬 처리"]));
@@ -67,7 +67,7 @@ describe("describeBranchCondition", () => {
     expect(c.text).toBe("변수: 호감도 ≠ 변수: #2");
     expect(c.refs).toEqual([{ type: "variable", id: 1 }, { type: "variable", id: 2 }]);
   });
-  it("self switch", () => expect(describeBranchCondition([2, "A", 0], data)).toEqual({ text: "셀프 스위치 A ON", refs: [{ type: "selfSwitch", id: "A" }] }));
+  it("self switch", () => expect(describeBranchCondition([2, "A", 0], data)).toEqual({ text: "셀프 스위치 A ON", refs: [{ type: "selfSwitch", id: "A" }], test: { kind: "selfSwitch", letter: "A", on: true } }));
   it("timer", () => expect(describeBranchCondition([3, 90, 0], data).text).toBe("타이머 ≥ 1분 30초"));
   it("actor", () => {
     expect(describeBranchCondition([4, 1, 0], data).text).toBe("파티에 레나 있음");
@@ -77,7 +77,7 @@ describe("describeBranchCondition", () => {
   it("character", () => expect(describeBranchCondition([6, 0, 4], data).text).toBe("캐릭터 0 방향 = 왼쪽"));
   it("gold", () => expect(describeBranchCondition([7, 100, 0], data).text).toBe("소지금 ≥ 100G"));
   it("item/weapon/armor", () => {
-    expect(describeBranchCondition([8, 1], data)).toEqual({ text: "아이템: 낡은 열쇠 보유", refs: [{ type: "item", id: 1 }] });
+    expect(describeBranchCondition([8, 1], data)).toEqual({ text: "아이템: 낡은 열쇠 보유", refs: [{ type: "item", id: 1 }], test: { kind: "item", id: 1 } });
     expect(describeBranchCondition([9, 7, false], data).text).toBe("무기: #7 보유");
     expect(describeBranchCondition([10, 7, false], data).text).toBe("방어구: #7 보유");
   });
@@ -89,5 +89,43 @@ describe("describeBranchCondition", () => {
   it("unknown / garbage", () => {
     expect(describeBranchCondition([42], data).text).toBe("알 수 없는 조건 (유형 42)");
     expect(() => describeBranchCondition([] as any, data)).not.toThrow();
+  });
+});
+
+describe("condition tests", () => {
+  it("attaches tests", () => {
+    expect(describeBranchCondition([1, 1, 0, 5, 1], data).test).toEqual({ kind: "variable", id: 1, op: ">=", value: 5 });
+    expect(describeBranchCondition([0, 2, 1], data).test).toEqual({ kind: "switch", id: 2, on: false });
+    expect(describeBranchCondition([12, "x"], data).test).toEqual({ kind: "unknown" });
+    expect(describePageConditions({ ...emptyConds, switch1Valid: true, switch1Id: 1 }, 0, data).map(c => c.test))
+      .toEqual([{ kind: "switch", id: 1, on: true }, { kind: "trigger" }]);
+  });
+  it("branch condition tests by type", () => {
+    const t = (p: any[]) => describeBranchCondition(p, data).test;
+    expect(t([1, 1, 1, 2, 5])).toEqual({ kind: "variableVar", id: 1, op: "!=", otherId: 2 });
+    expect(t([1, 1, 0, 3, 0])).toEqual({ kind: "variable", id: 1, op: "=", value: 3 });
+    expect(t([2, "B", 1])).toEqual({ kind: "selfSwitch", letter: "B", on: false });
+    expect(t([3, 90, 0])).toEqual({ kind: "unknown" });
+    expect(t([4, 1, 0])).toEqual({ kind: "actorInParty", id: 1 });
+    expect(t([4, 1, 2, 3])).toEqual({ kind: "unknown" });
+    expect(t([5, 0, 0])).toEqual({ kind: "unknown" });
+    expect(t([6, 0, 4])).toEqual({ kind: "unknown" });
+    expect(t([7, 100, 2])).toEqual({ kind: "gold", op: "<", value: 100 });
+    expect(t([8, 1])).toEqual({ kind: "item", id: 1 });
+    expect(t([9, 7, false])).toEqual({ kind: "weapon", id: 7 });
+    expect(t([10, 7, false])).toEqual({ kind: "armor", id: 7 });
+    expect(t([11, "ok"])).toEqual({ kind: "unknown" });
+    expect(t([13, 1])).toEqual({ kind: "unknown" });
+    expect(t([42])).toEqual({ kind: "unknown" });
+    expect(t([] as any)).toEqual({ kind: "unknown" });
+  });
+  it("page / common / troop tests", () => {
+    expect(describePageConditions({ ...emptyConds, variableValid: true, variableId: 1, variableValue: 5, selfSwitchValid: true, selfSwitchCh: "B", itemValid: true, itemId: 1, actorValid: true, actorId: 1 }, 3, data).map(c => c.test))
+      .toEqual([{ kind: "variable", id: 1, op: ">=", value: 5 }, { kind: "selfSwitch", letter: "B", on: true },
+        { kind: "item", id: 1 }, { kind: "actorInParty", id: 1 }, { kind: "trigger" }]);
+    expect(describeCommonEventConditions({ id: 1, name: "x", trigger: 1, switchId: 1, list: [] }, data).map(c => c.test))
+      .toEqual([{ kind: "trigger" }, { kind: "switch", id: 1, on: true }]);
+    expect(describeTroopPageConditions({ ...emptyTroop, turnEnding: true, turnValid: true, enemyValid: true, actorValid: true, switchValid: true }, 0, data).map(c => c.test))
+      .toEqual([{ kind: "trigger" }, { kind: "trigger" }, { kind: "unknown" }, { kind: "unknown" }, { kind: "switch", id: 1, on: true }, { kind: "trigger" }]);
   });
 });

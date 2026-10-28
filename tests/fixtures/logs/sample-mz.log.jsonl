@@ -1,0 +1,36 @@
+{"v":1,"seq":1,"t":1001000,"run":1,"branch":1,"type":"branchStart","reason":"newGame","parentBranch":null,"fromSeq":null}
+{"v":1,"seq":2,"t":1002000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":0,"face":"People1","faceIndex":3,"speaker":"촌장","text":"왔구나, \\N[1].\n숲이 이상하다는 소문은 들었겠지?"}
+{"v":1,"seq":3,"t":1003000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":3,"face":"Actor1","faceIndex":0,"speaker":"","text":"네… 밤마다 이상한 소리가 난다고요."}
+{"v":1,"seq":4,"t":1004000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":5,"face":"","faceIndex":0,"speaker":"","text":"(창밖에서 바람 소리가 들린다.)"}
+{"v":1,"seq":5,"t":1005000,"run":1,"branch":1,"type":"picture","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":7,"pictureId":1,"name":"village_map"}
+{"v":1,"seq":6,"t":1006000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":8,"face":"People1","faceIndex":3,"speaker":"촌장","text":"도와주겠나? \\C[2]보상\\C[0]은 \\V[1]만큼."}
+{"v":1,"seq":7,"t":1007000,"run":1,"branch":1,"type":"choices","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":10,"options":["네, 도울게요","생각해볼게요"]}
+{"v":1,"seq":8,"t":1008000,"run":1,"branch":1,"type":"save","slot":1}
+{"v":1,"seq":9,"t":1009000,"run":1,"branch":1,"type":"choice","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":10,"picked":0}
+{"v":1,"seq":10,"t":1010000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":12,"face":"People1","faceIndex":3,"speaker":"촌장","text":"고맙네!"}
+{"v":1,"seq":11,"t":1011000,"run":1,"branch":1,"type":"state","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":14,"changes":[{"kind":"switch","id":1,"value":true}]}
+{"v":1,"seq":12,"t":1012000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":3,"page":0},"cmd":0,"face":"","faceIndex":0,"speaker":"","text":"낡은 책이 꽂혀 있다. 숲의 전설에 대한 책이다."}
+{"v":1,"seq":13,"t":1013000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":3,"page":0},"cmd":0,"face":"","faceIndex":0,"speaker":"","text":"낡은 책이 꽂혀 있다. 숲의 전설에 대한 책이다."}
+{"v":1,"seq":14,"t":1014000,"run":1,"branch":1,"type":"message","src":{"source":"map","mapId":2,"eventId":3,"page":0},"cmd":0,"face":"","faceIndex":0,"speaker":"","text":"낡은 책이 꽂혀 있다. 숲의 전설에 대한 책이다."}
+{"v":1,"seq":15,"t":1015000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":1}]}
+{"v":1,"seq":16,"t":1016000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":2}]}
+{"v":1,"seq":17,"t":1017000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":3}]}
+{"v":1,"seq":18,"t":1018000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":4}]}
+{"v":1,"seq":19,"t":1019000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":5}]}
+{"v":1,"seq":20,"t":1020000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":6}]}
+{"v":1,"seq":21,"t":1021000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":7}]}
+{"v":1,"seq":22,"t":1022000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":8}]}
+{"v":1,"seq":23,"t":1023000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":9}]}
+{"v":1,"seq":24,"t":1024000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":10}]}
+{"v":1,"seq":25,"t":1025000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":11}]}
+{"v":1,"seq":26,"t":1026000,"run":1,"branch":1,"type":"state","src":null,"cmd":null,"changes":[{"kind":"variable","id":5,"value":12}]}
+{"v":1,"seq":27,"t":1027000,"run":1,"branch":1,"type":"transfer","mapId":3,"x":5,"y":12}
+{"v":1,"seq":28,"t":1028000,"run":1,"branch":2,"type":"branchStart","reason":"load","parentBranch":1,"fromSeq":8}
+{"v":1,"seq":29,"t":1029000,"run":1,"branch":2,"type":"load","slot":1}
+{"v":1,"seq":30,"t":1030000,"run":1,"branch":2,"type":"choice","src":{"source":"map","mapId":2,"eventId":1,"page":0},"cmd":10,"picked":1}
+{"v":1,"seq":31,"t":1031000,"run":1,"branch":2,"type":"message","src":{"source":"common","commonEventId":1},"cmd":0,"face":"","faceIndex":0,"speaker":"","text":"밤이 깊었다."}
+{broken
+{"v":1,"seq":32,"t":1032000,"run":2,"branch":3,"type":"branchStart","reason":"unknownSave","parentBranch":null,"fromSeq":null}
+{"v":1,"seq":33,"t":1033000,"run":2,"branch":3,"type":"load","slot":2}
+{"v":1,"seq":34,"t":1034000,"run":2,"branch":3,"type":"message","src":{"source":"map","mapId":2,"eventId":1,"page":1},"cmd":0,"face":"People1","faceIndex":3,"speaker":"촌장","text":"숲을 부탁하네."}
+{"v":1,"seq":35,"t":1035000,"run":2,"branch":3,"type":"error","message":"test error"}

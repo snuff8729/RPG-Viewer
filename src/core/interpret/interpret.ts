@@ -16,8 +16,13 @@ const indentOf =(c: EventCommand): number => (typeof c?.indent === "number" ? c.
  * are kept in `other` nodes (consecutive ones grouped together).
  */
 export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
-  const cmds = Array.isArray(list) ? list.filter(c => c && typeof c === "object") : [];
+  const cmds: EventCommand[] = [];
+  /** cmds[i]의 원본 `list` 인덱스 (객체가 아닌 항목을 걸러내도 원본 위치를 유지) */
+  const srcIndex: number[] = [];
+  if (Array.isArray(list)) list.forEach((c, i) => { if (c && typeof c === "object") { cmds.push(c); srcIndex.push(i); } });
   let pos = 0;
+  /** 방금 소비한 명령(pos - 1)의 원본 인덱스 */
+  const lastCmd = (): number => srcIndex[pos - 1] ?? 0;
 
   const peek = (): EventCommand | undefined => cmds[pos];
   /** Consumes the next command if it is `code` at exactly `indent`. */
@@ -37,11 +42,11 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
     return lines;
   };
 
-  function message(c: EventCommand): ScriptNode {
+  function message(c: EventCommand, cmd: number): ScriptNode {
     const p = params(c);
     const faceName = str(p[0]);
     const faceIndex = num(p[1]);
-    const node: Extract<ScriptNode, { kind: "message" }> = { kind: "message", lines: [] };
+    const node: Extract<ScriptNode, { kind: "message" }> = { kind: "message", cmd, lines: [] };
     if (faceName) node.face = { name: faceName, index: faceIndex };
     let speaker = data.engine === "MZ" && str(p[4]) ? formatText(str(p[4]), data) : "";
     // MV 이름 상자 플러그인(YEP_MessageCore 등): 첫 줄 맨 앞의 \n<X> / \nl<X> / \nc<X> / \nr<X>.
@@ -66,10 +71,11 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
     return node;
   }
 
-  function choices(c: EventCommand, indent: number): ScriptNode {
+  function choices(c: EventCommand, indent: number, cmd: number): ScriptNode {
     const labels: unknown[] = Array.isArray(params(c)[0]) ? params(c)[0] : [];
     const node: Extract<ScriptNode, { kind: "choices" }> = {
       kind: "choices",
+      cmd,
       branches: labels.map(l => ({ label: formatText(str(l), data), body: [] as ScriptNode[] })),
     };
     for (;;) {
@@ -112,11 +118,12 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
     for (let c = peek(); c && indentOf(c) >= indent; c = peek()) {
       pos++;
       const at = indentOf(c);
+      const here = lastCmd();
       switch (c.code) {
         case 0: continue;
-        case 101: push(message(c)); continue;
-        case 105: push({ kind: "scroll", lines: textLines(405) }); continue;
-        case 102: push(choices(c, at)); continue;
+        case 101: push(message(c, here)); continue;
+        case 105: push({ kind: "scroll", cmd: here, lines: textLines(405) }); continue;
+        case 102: push(choices(c, at, here)); continue;
         case 111: push(conditional(c, at)); continue;
         case 112: push(loop(at)); continue;
         case 117: push({ kind: "commonEvent", commonEventId: num(params(c)[0]) }); continue;
@@ -127,7 +134,7 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
         }
         case 231: {
           const name = str(params(c)[1]);
-          if (name) { push({ kind: "picture", pictureId: num(params(c)[0]), name }); continue; }
+          if (name) { push({ kind: "picture", cmd: here, pictureId: num(params(c)[0]), name }); continue; }
           break;
         }
         default: {
@@ -143,6 +150,39 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
 
   // Top level accepts every indent (even negative/garbage), so nothing is dropped.
   return parseBlock(-Infinity);
+}
+
+/** 노드 하위 블록과 nodePath 접두 인덱스 (types.ts 규칙):
+ *  choices → [branchIdx] / cancelBranch → [-1], conditional → [0](then) / [1](else), loop → [0]. */
+export function subBlocks(n: ScriptNode): { path: number[]; nodes: ScriptNode[] }[] {
+  switch (n.kind) {
+    case "choices": {
+      const out = n.branches.map((b, bi) => ({ path: [bi], nodes: b.body }));
+      if (n.cancelBranch) out.push({ path: [-1], nodes: n.cancelBranch });
+      return out;
+    }
+    case "conditional": return [{ path: [0], nodes: n.then }, ...(n.else ? [{ path: [1], nodes: n.else }] : [])];
+    case "loop": return [{ path: [0], nodes: n.body }];
+    default: return [];
+  }
+}
+
+/** Visits every node depth-first (pre-order) with its nodePath. */
+export function walk(nodes: ScriptNode[], prefix: number[], visit: (n: ScriptNode, path: number[]) => void): void {
+  nodes.forEach((n, i) => {
+    const path = [...prefix, i];
+    visit(n, path);
+    for (const b of subBlocks(n)) walk(b.nodes, [...path, ...b.path], visit);
+  });
+}
+
+/** nodePath of the first node (pre-order) whose `cmd` equals `cmd`, or null. Never throws. */
+export function findNodePathByCmd(nodes: ScriptNode[], cmd: number): number[] | null {
+  let found: number[] | null = null;
+  walk(Array.isArray(nodes) ? nodes : [], [], (n, path) => {
+    if (!found && "cmd" in n && n.cmd === cmd) found = path;
+  });
+  return found;
 }
 
 /** True when the tree (including nested blocks) contains message, scroll or choices. */

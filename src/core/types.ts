@@ -46,15 +46,27 @@ export interface GameData {
 // ---- 해석 결과 ----
 export type RefType = "switch" | "variable" | "selfSwitch" | "item" | "weapon" | "armor" | "actor" | "commonEvent" | "map";
 export interface Ref { type: RefType; id: number | string }   // selfSwitch는 "A"~"D"
-export interface Condition { text: string; refs: Ref[] }
+export type CompareOp = "=" | ">=" | "<=" | ">" | "<" | "!=";
+export type ConditionTest =
+  | { kind: "switch"; id: number; on: boolean }
+  | { kind: "variable"; id: number; op: CompareOp; value: number }
+  | { kind: "variableVar"; id: number; op: CompareOp; otherId: number }
+  | { kind: "selfSwitch"; letter: string; on: boolean }
+  | { kind: "item" | "weapon" | "armor"; id: number }
+  | { kind: "actorInParty"; id: number }
+  | { kind: "gold"; op: ">=" | "<=" | "<"; value: number }
+  | { kind: "trigger" }
+  | { kind: "unknown" };
+export interface Condition { text: string; refs: Ref[]; test?: ConditionTest }
 export interface FaceRef { name: string; index: number }
+/** `cmd`: 노드를 만든 101/105/102/231 명령의 원본 `list` 인덱스. */
 export type ScriptNode =
-  | { kind: "message"; face?: FaceRef; speaker?: string; lines: string[] }
-  | { kind: "scroll"; lines: string[] }
-  | { kind: "choices"; branches: { label: string; body: ScriptNode[] }[]; cancelBranch?: ScriptNode[] }
+  | { kind: "message"; cmd: number; face?: FaceRef; speaker?: string; lines: string[] }
+  | { kind: "scroll"; cmd: number; lines: string[] }
+  | { kind: "choices"; cmd: number; branches: { label: string; body: ScriptNode[] }[]; cancelBranch?: ScriptNode[] }
   | { kind: "conditional"; condition: Condition; then: ScriptNode[]; else?: ScriptNode[] }
   | { kind: "loop"; body: ScriptNode[] }
-  | { kind: "picture"; pictureId: number; name: string }
+  | { kind: "picture"; cmd: number; pictureId: number; name: string }
   | { kind: "commonEvent"; commonEventId: number }
   | { kind: "transfer"; mapId: number | null; x?: number; y?: number }
   | { kind: "stateChange"; target: "switch" | "variable" | "selfSwitch" | "item" | "weapon" | "armor" | "gold" | "party"; description: string; refs: Ref[] }

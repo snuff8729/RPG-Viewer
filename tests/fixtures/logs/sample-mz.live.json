@@ -1,0 +1,40 @@
+{
+  "v": 1,
+  "t": 1031000,
+  "pluginVersion": "1.0.0",
+  "run": 1,
+  "branch": 2,
+  "seq": 31,
+  "mapId": 2,
+  "x": 12,
+  "y": 8,
+  "running": null,
+  "events": [
+    {
+      "eventId": 1,
+      "page": 1
+    },
+    {
+      "eventId": 3,
+      "page": 0
+    }
+  ],
+  "switches": [
+    1
+  ],
+  "variables": {
+    "1": 3
+  },
+  "selfSwitches": [],
+  "items": {
+    "1": 1
+  },
+  "weapons": {},
+  "armors": {},
+  "gold": 100,
+  "party": [
+    1
+  ],
+  "choice": null,
+  "inBattle": false
+}
