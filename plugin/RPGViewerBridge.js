@@ -21,7 +21,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.4",
+    VERSION: "1.0.5",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -97,6 +97,55 @@
         } catch (e2) { /* skip broken line */ }
       }
     } catch (e3) { /* keep defaults */ }
+  }
+
+  // meta.json can lag behind the log (it is written on a timer): raise the counters above
+  // whatever the last ~64KB of the log shows so new records never reuse a seq.
+  var TAIL_BYTES = 65536;
+  function readLogTail() {
+    var text = null, partial = false;
+    try {
+      if (typeof fs.statSync === "function" && typeof fs.openSync === "function" && typeof fs.readSync === "function") {
+        var size = fs.statSync(LOG).size;
+        var start = Math.max(0, size - TAIL_BYTES);
+        var len = size - start;
+        var buf = Buffer.alloc(len);
+        var fd = fs.openSync(LOG, "r");
+        try { fs.readSync(fd, buf, 0, len, start); } finally { try { fs.closeSync(fd); } catch (ec) { /* ignore */ } }
+        text = buf.toString("utf8");
+        partial = start > 0;
+      }
+    } catch (e) { text = null; partial = false; }
+    if (text === null) {
+      text = String(fs.readFileSync(LOG, "utf8"));
+      if (text.length > TAIL_BYTES) { text = text.slice(-TAIL_BYTES); partial = true; }
+    }
+    var lines = text.split("\n");
+    if (partial) lines.shift(); // first line is cut
+    return lines;
+  }
+  function raiseMetaFromLog() {
+    try {
+      if (!fs.existsSync(LOG)) return;
+      var lines = readLogTail();
+      for (var i = 0; i < lines.length; i++) {
+        if (!lines[i]) continue;
+        try {
+          var r = JSON.parse(lines[i]);
+          if (isCount(r.seq) && r.seq >= meta.nextSeq) meta.nextSeq = r.seq + 1;
+          if (isCount(r.run) && r.run >= meta.nextRun) meta.nextRun = r.run + 1;
+          if (isCount(r.branch) && r.branch >= meta.nextBranch) meta.nextBranch = r.branch + 1;
+        } catch (e2) { /* skip broken line */ }
+      }
+    } catch (e3) { /* keep what we have */ }
+  }
+
+  var lastMetaJson = null;
+  function writeMeta() {
+    var json = JSON.stringify(meta);
+    if (json === lastMetaJson) return;
+    fs.writeFileSync(META, json);
+    lastMetaJson = json;
   }
 
   function ensureDir() {
@@ -295,7 +344,6 @@
       buffer = lines.concat(buffer).slice(-MAX_BUFFER);
       throw e;
     }
-    fs.writeFileSync(META, JSON.stringify(meta));
   }
 
   // ---------------------------------------------------------------- snapshot
@@ -401,10 +449,14 @@
 
   function tick() {
     try { flush(); } catch (e) { reportError(e); }
+    try { writeMeta(); } catch (em) { reportError(em); }
     try { writeLive(false); } catch (e2) { reportError(e2); }
   }
 
-  bridge._flushNow = function () { try { flush(); } catch (e) { reportError(e); } };
+  bridge._flushNow = function () {
+    try { flush(); } catch (e) { reportError(e); }
+    try { writeMeta(); } catch (em) { reportError(em); }
+  };
   bridge._snapshotNow = function () { try { writeLive(true); } catch (e) { reportError(e); } };
   bridge._tick = tick;
   bridge._runScheduled = runScheduled;
@@ -701,7 +753,7 @@
     function afterSuccess(type, slot, result) {
       var done = function () {
         emit(type, { slot: slot });
-        if (type === "save") flush();
+        if (type === "save") { flush(); writeMeta(); }
       };
       if (result && typeof result.then === "function") {
         result.then(function () {
@@ -732,6 +784,7 @@
   } catch (e) { /* harmless: overwritten on next snapshot */ }
   try {
     loadMeta();
+    raiseMetaFromLog();
     install();
   } catch (e) {
     reportError(e);

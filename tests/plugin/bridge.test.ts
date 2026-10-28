@@ -450,6 +450,51 @@ describe("RPGViewerBridge", () => {
     expect(h.readLog()[2]).toMatchObject({ seq: 3, run: 2, branch: 2 });
   });
 
+  it("starting with a stale meta.json never reuses seqs from the log tail", () => {
+    h = newGame();
+    h.g.$gameVariables.setValue(1, 1);
+    h.readLog();
+    const fs = h.fs;
+    const last = h.readLog().at(-1).seq;
+    fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+    h = newGame("MZ", fs);
+    const log = h.readLog();
+    const seqs = log.map((r) => r.seq);
+    expect(new Set(seqs).size).toBe(seqs.length);
+    expect(log.at(-1)).toMatchObject({ run: 2, branch: 2 });
+    expect(log.at(-1).seq).toBeGreaterThan(last);
+  });
+
+  it("only reads the tail of a large log and ignores the cut first line", () => {
+    const fs = new MemFs();
+    fs.dirs.add("/game/www/rpg-viewer");
+    const filler = Array.from({ length: 4000 }, (_, i) => JSON.stringify({ v: 1, seq: i + 1, run: 1, branch: 1, type: "state", pad: "x".repeat(30) }));
+    filler.push(JSON.stringify({ v: 1, seq: 5000, run: 3, branch: 4, type: "state" }));
+    fs.files.set(LOG_PATH, filler.join("\n") + "\n");
+    fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+    h = newGame("MZ", fs);
+    const rec = h.readLog().at(-1);
+    expect(rec.seq).toBe(5001);
+    expect(rec).toMatchObject({ run: 4, branch: 5 });
+  });
+
+  it("writes meta.json on the tick, not on scheduled flushes", () => {
+    h = newGame();
+    h.bridge._tick();
+    const metaWrites: string[] = [];
+    const orig = h.fs.writeFileSync.bind(h.fs);
+    h.fs.writeFileSync = (p: string, d: string) => { if (p === META_PATH) metaWrites.push(d); orig(p, d); };
+    h.clock.t += 100;
+    h.g.$gamePlayer.reserveTransfer(1, 5, 6);
+    h.g.$gamePlayer.performTransfer();
+    h.bridge._runScheduled();
+    expect(metaWrites).toHaveLength(0);
+    h.bridge._tick();
+    expect(metaWrites).toHaveLength(1);
+    h.bridge._tick();
+    expect(metaWrites).toHaveLength(1); // unchanged -> no rewrite
+  });
+
   it("reports runningCmd from the innermost interpreter", () => {
     h = newGame();
     h.g.$dataCommonEvents[1] = { id: 1, list: [cmd(121, [5, 5, 0]), cmd(121, [6, 6, 0]), cmd(0)] };
@@ -545,7 +590,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.4", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.5", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -728,6 +773,7 @@ describe("RPGViewerBridge", () => {
     const msg = recs.find((r) => r.type === "message");
     expect(st).toBeDefined();
     expect(st.seq).toBeLessThan(msg.seq);
+    h.bridge._tick();
     expect(JSON.parse(h.fs.files.get(META_PATH)!).nextSeq).toBeGreaterThan(msg.seq);
     // a new message within 50ms of the flush stays pending until the gap passes
     h.clock.t += 10;
@@ -742,13 +788,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.4"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.5"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.4");
+    expect(h.bridge.VERSION).toBe("1.0.5");
   });
 
   it("uses ES2015-compatible syntax only", () => {
