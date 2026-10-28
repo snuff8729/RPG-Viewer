@@ -81,7 +81,7 @@ const NO_WRITE = "쓰기 권한이 필요해요";
 
 const EMPTY_RECORDS: LogRecord[] = [];
 const EMPTY_MODEL: HistoryModel = buildHistory([]);
-const EMPTY_COVERAGE: Coverage = { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() };
+const EMPTY_COVERAGE: Coverage = { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set(), touched: new Set(), pluginRan: new Set() };
 const EMPTY_NOISY = new Set<number>();
 
 /**

@@ -191,9 +191,10 @@ export function noisyVariables(records: LogRecord[]): Set<number> {
   return noisy;
 }
 
-const EPISODE_TYPES = new Set(["message", "scroll", "choices", "choice", "picture"]);
+// 플러그인 명령은 이야기 기록이 아니지만, 같은 페이지 대화 사이에 끼면 대화(반복 묶음)를 끊지 않도록 에피소드에 넣는다
+const EPISODE_TYPES = new Set(["message", "scroll", "choices", "choice", "picture", "plugin"]);
 const TALK_TYPES = new Set(["message", "scroll", "choices", "choice"]);
-type EpisodeRecord = RecordOf<"message" | "scroll" | "choices" | "choice" | "picture">;
+type EpisodeRecord = RecordOf<"message" | "scroll" | "choices" | "choice" | "picture" | "plugin">;
 
 function srcKey(src: Location | null | undefined): string | null {
   if (!src || typeof src !== "object") return null;

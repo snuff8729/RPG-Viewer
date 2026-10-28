@@ -19,7 +19,7 @@ export function itemKind(item: HistoryItem): Kind | null {
         case "battle": return "battle";
         case "state": return "state";
         case "save": case "load": return "save";
-        default: return null; // branchStart, error
+        default: return null; // branchStart, error, plugin(항상 보임)
       }
   }
 }

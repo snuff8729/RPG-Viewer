@@ -21,6 +21,7 @@ const normModel = (m: HistoryModel) => ({
 });
 const normCov = (c: Coverage) => ({
   seen: [...c.seen], picks: [...c.picks.entries()], uncertainSeqs: [...c.uncertainSeqs], changedSeqs: [...c.changedSeqs],
+  touched: [...c.touched], pluginRan: [...c.pluginRan],
 });
 const normNoisy = (s: Set<number>) => [...s].sort((a, b) => a - b);
 
@@ -63,6 +64,12 @@ function bigLog(copies: number, seed = 1): LogRecord[] {
         type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 7 + (j % 2), value: j }],
       });
     }
+    // 플러그인 명령 기록(원래 페이지 실행 위치 포함 — 데이터에 없으면 위치 불확실이지만 페이지는 실행된 것)
+    seq++;
+    out.push({
+      v: 1, seq, t: 1_000_500 + k * 40_000, run: 1 + 2 * k, branch: 1 + 3 * k, type: "plugin",
+      src: { source: "map", mapId: 2, eventId: 1 + (k % 3), page: k % 2, ...(k % 2 ? { origin: 0 } : {}) }, cmd: k % 4, code: 356, text: `p${k}`,
+    });
     // 플러그인이 조절한(throttled) 드문 변수 변경: 횟수와 관계없이 잦은 변수
     if (k % 4 === 1) {
       seq++;
@@ -304,6 +311,22 @@ describe("createAccumulator", () => {
     expectSameAsBatch(acc);
     acc.reset();
     expect(acc.coverage()).not.toBe(c3);
+  });
+
+  it("plugin records touch pages incrementally, same as batch", () => {
+    const acc = createAccumulator(data);
+    acc.append(fixtureRecords());
+    const c = acc.coverage();
+    const next = (seq: number, src: unknown) =>
+      ({ v: 1, seq, t: 2_000_000 + seq, run: 1, branch: 1, type: "plugin", src, cmd: 0, code: 356, text: "x" }) as LogRecord;
+    acc.append([next(500, { source: "map", mapId: 2, eventId: 1, page: 0 })]);   // 이미 실행된 페이지, 101 → 위치 불확실
+    const c2 = acc.coverage();
+    expect(c2).not.toBe(c);
+    expect(c2.uncertainSeqs.has(500)).toBe(true);
+    expectSameAsBatch(acc);
+    acc.append([next(501, { source: "map", mapId: 7, eventId: 4, page: 2, origin: 1 })]);
+    expect(acc.coverage().touched.has("map:7:4:2")).toBe(true);
+    expectSameAsBatch(acc);
   });
 
   it("never throws on junk input", () => {

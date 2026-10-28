@@ -23,4 +23,10 @@ describe("parseLogText", () => {
     ].join("\n");
     expect(parseLogText(text)).toEqual({ records: [], badLines: 7 });
   });
+  it("parses plugin records and keeps unknown fields", () => {
+    const line = '{"v":1,"seq":3,"t":5,"run":1,"branch":1,"type":"plugin","src":{"source":"map","mapId":1,"eventId":2,"page":0},"cmd":4,"code":356,"text":"TMng Search 종이 상자.","extra":1}';
+    const { records, badLines } = parseLogText(line);
+    expect(badLines).toBe(0);
+    expect(records[0]).toMatchObject({ type: "plugin", cmd: 4, code: 356, text: "TMng Search 종이 상자.", extra: 1 });
+  });
 });

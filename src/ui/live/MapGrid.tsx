@@ -50,7 +50,7 @@ export function MapGrid({ width, height, events, player, numbers, onPick }: {
               onClick={() => onPick(ev.eventId)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(ev.eventId); } }}
             >
-              <title>{ev.name ? `${ev.name} — ${ev.title}` : ev.title}</title>
+              <title>{(ev.name ? `${ev.name} — ${ev.title}` : ev.title) + (ev.untried ? " · 아직 안 해 봄" : "")}</title>
             </circle>
             {n != null && (
               <text

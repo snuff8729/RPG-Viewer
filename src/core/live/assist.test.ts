@@ -13,7 +13,7 @@ const msg = (cmd: number): ScriptNode => ({ kind: "message", cmd, lines: ["x"] }
 const pick = (picked: number): PickInfo => ({ picked, run: 1, branch: 1, seq: 1, aftermath: [] });
 const cov = (seen: string[], picks: [string, number[]][] = []): Coverage => ({
   seen: new Set(seen), picks: new Map(picks.map(([k, ps]) => [k, ps.map(pick)])),
-  uncertainSeqs: new Set(), changedSeqs: new Set(),
+  uncertainSeqs: new Set(), changedSeqs: new Set(), touched: new Set(), pluginRan: new Set(),
 });
 const idx = (pages: PageEntry[]) => ({ pages }) as unknown as GameIndex;
 

@@ -67,8 +67,8 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
   const st = eventStyle(ev);
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
-  /** 조사·대화 가능 카드에만 보이는 플러그인 명령 글 */
-  const hint = ev.section === "talk" ? ev.pluginHint : undefined;
+  /** 조사·대화 가능 카드와 아직 안 해 본 조사 지점에 보이는 플러그인 명령 글 */
+  const hint = ev.section === "talk" || ev.untried ? ev.pluginHint : undefined;
   return (
     <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, selected && "ring-1 ring-ring", highlighted && "ring-2 ring-ring")}>
       <CardHeader className="px-4">
@@ -76,6 +76,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           <st.Icon className={cn("size-4 shrink-0", st.text)} aria-hidden />
           <span>{number != null ? `${number}. ` : ""}{ev.title}</span>
           <Badge variant="outline" className={cn(st.text, st.border)}>{st.label}</Badge>
+          {ev.untried && <Badge>아직 안 해 봄</Badge>}
           {ev.unseen > 0 && <Badge>새 대화 {ev.unseen}</Badge>}
           {ev.unpicked > 0 && <Badge>선택지 {ev.unpicked}</Badge>}
           {ev.section !== "repeat" && ev.repeat.length > 0 && <Badge variant="secondary">반복하면 달라짐</Badge>}

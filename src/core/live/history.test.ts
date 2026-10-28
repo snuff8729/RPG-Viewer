@@ -187,6 +187,13 @@ describe("save-load continuations", () => {
     bs(b2, 13, "load", 1, 10), m(b2, 14, 2), m(b2, 15, 2), st(b2, 16),
   ];
 
+  it("plugin records after the save point are not story: the load still continues", () => {
+    const plug = (o: Opts, seq: number) => ({ ...at(o, seq), type: "plugin", src: src(1), cmd: 0, code: 356, text: "x" }) as LogRecord;
+    const recs = contLog();
+    recs.splice(5, 0, plug(b1, 11.5));
+    expect(buildHistory(recs).alias).toEqual(new Map([[2, 1]]));
+  });
+
   it("a load with no story after the save point continues the parent branch", () => {
     const recs = contLog(); const model = buildHistory(recs);
     expect(model.runs).toEqual([{ run: 1, branches: [1] }]);

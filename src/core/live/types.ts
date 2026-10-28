@@ -13,6 +13,8 @@ export type LogRecord = RecordBase & (
   | { type: "choices"; src: Location | null; cmd: number; options: string[] }
   | { type: "choice"; src: Location | null; cmd: number; picked: number }
   | { type: "picture"; src: Location | null; cmd: number; pictureId: number; name: string }
+  /** 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357, 플러그인 1.3.0+). text: 356은 명령 글, 357은 플러그인·명령 이름과 문자열 인자 */
+  | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string }
   | { type: "transfer"; mapId: number; x: number; y: number }
   | { type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
@@ -88,6 +90,10 @@ export interface Coverage {
   picks: Map<string, PickInfo[]>;  // `${locationKey(src)}#${cmd}` (choices 명령) → 선택들
   uncertainSeqs: Set<number>;      // 구조 불일치·위치 없음으로 제외한 기록 seq
   changedSeqs: Set<number>;        // 구조는 맞고 본문만 달라(실행 중 변경됨) 연결한 기록 seq
+  /** 실행된 적 있는 페이지: 위치(src)가 있는 모든 기록의 `locationKey(pageLocation(src))`(원래 페이지 실행은 부른 템플릿 페이지) */
+  touched: Set<string>;
+  /** 실행된 플러그인 명령: `${locationKey(src)}#${cmd}` */
+  pluginRan: Set<string>;
 }
 
 export type EvalStatus = "met" | "unmet" | "unknown";

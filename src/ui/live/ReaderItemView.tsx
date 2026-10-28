@@ -50,6 +50,8 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
       );
     case "picture":
       return <Picture name={item.name} />;
+    case "plugin":
+      return <p className="text-sm break-words text-muted-foreground">플러그인: {item.text}</p>;
     case "choice":
       return <p className="font-medium">▶ 고른 것: "{item.label}"</p>;
     case "battle":
@@ -76,6 +78,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
     case "picture": return a.name === (b as typeof a).name;
+    case "plugin": return a.text === (b as typeof a).text;
     case "choice": return a.label === (b as typeof a).label;
     case "battle": return true;
   }

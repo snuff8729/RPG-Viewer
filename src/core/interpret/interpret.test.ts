@@ -45,6 +45,12 @@ describe("interpret (sample-mz Map002 EV1 p0)", () => {
   it("scroll", () => expect(nodes[7]).toEqual({ kind: "scroll", cmd: 27, lines: ["― 그날 밤 ―", "마을에 다시 정적이 찾아왔다."] }));
   it("commonEvent", () => expect(nodes[8]).toEqual({ kind: "commonEvent", commonEventId: 1 }));
   it("groups other commands", () => expect((nodes[9] as any).commands.map((c: any) => c.code)).toEqual([250, 225, 357, 9999]));
+  it("other commands keep their list indices", () => {
+    const other = nodes[9] as Extract<ScriptNode, { kind: "other" }>;
+    expect(other.cmds).toHaveLength(4);
+    const list = data.maps.get(2)!.events[1]!.pages[0].list;
+    other.cmds.forEach((i, k) => expect(list[i]).toBe(other.commands[k]));
+  });
   it("transfer", () => expect(nodes[10]).toEqual({ kind: "transfer", mapId: 3, x: 5, y: 12 }));
   it("records source command index", () => {
     expect(nodes.filter(n => "cmd" in n).map(n => [n.kind, (n as any).cmd]))

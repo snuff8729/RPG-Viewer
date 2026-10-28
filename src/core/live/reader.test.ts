@@ -53,6 +53,29 @@ describe("readerItems", () => {
     expect(items.some(i => (i.kind as string) === "state")).toBe(false);
   });
 
+  it("shows plugin commands in order as plain rows and keeps repeat folding of the same talk", () => {
+    const src = { source: "map", mapId: 2, eventId: 1, page: 0 } as const;
+    const msg = (seq: number) => ({ ...rec, seq, type: "message", src, cmd: 0, face: "", faceIndex: 0, speaker: "", text: "안녕" });
+    const plug = (seq: number) => ({ ...rec, seq, type: "plugin", src, cmd: 2, code: 356, text: "TMng Search 종이 상자." });
+    const recs = [
+      { ...rec, seq: 1, type: "branchStart", reason: "newGame", parentBranch: null, fromSeq: null },
+      msg(2), plug(3),
+      { ...rec, seq: 4, type: "transfer", mapId: 2, x: 0, y: 0 },
+      msg(5), plug(6),
+      { ...rec, seq: 7, type: "plugin", src: null, cmd: 0, code: 357, text: "Other" },
+    ] as LogRecord[];
+    const m = buildHistory(recs);
+    expect(m.alias.size).toBe(0);
+    const folded = foldTimeline(branchPath(recs, m, 1), m, {});
+    const out = readerItems(folded, data, new Map(), m);
+    expect(out.map(i => i.kind)).toEqual(["chapter", "message", "plugin", "chapter", "message", "plugin"]);
+    expect(out[2]).toEqual({ kind: "plugin", key: "r3", seq: 3, text: "TMng Search 종이 상자." });
+    // 두 번째 같은 대화는 반복으로 접히고(플러그인 줄은 그 안에), 다른 위치의 플러그인 줄은 따로
+    expect(out[4]).toMatchObject({ kind: "message", seq: 5, repeat: 1 });
+    expect(out[5]).toMatchObject({ kind: "plugin", seq: 7, text: "Other" });
+    expect(lastSeqOf(out[5])).toBe(7);
+  });
+
   it("infers speaker from face when empty", () => {
     const items = readerItems([
       item({ ...rec, seq: 1, type: "message", src: null, cmd: 0, face: "Actor1", faceIndex: 0, speaker: "", text: "x" }),

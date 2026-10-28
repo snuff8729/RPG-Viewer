@@ -12,7 +12,7 @@ import type { Coverage, LiveSnapshot } from "./types";
 
 /**
  * 지금 할 수 있는 것으로 나눈다(잠긴 페이지가 있어도 지금 할 수 있으면 그쪽 구역).
- * now: 지금 상호작용 + 안 본 대사·선택지 / item: 지금 상호작용 + 얻는 것 / repeat: 반복하면 달라짐 /
+ * now: 지금 상호작용 + 안 본 대사·선택지(또는 아직 안 해 본 플러그인 조사 지점) / item: 지금 상호작용 + 얻는 것 / repeat: 반복하면 달라짐 /
  * talk: 그 밖에 지금 조사·대화 가능 / locked: 지금은 못 하고 새 내용이 잠김 / done: 나머지
  */
 export type Section = "now" | "item" | "repeat" | "talk" | "locked" | "done";
@@ -41,6 +41,11 @@ export interface ChecklistEvent {
   gains: string[];
   /** 활성 페이지의 첫 플러그인 명령 글(최대 60자). 지금 상호작용 가능할 때만 */
   pluginHint?: string;
+  /**
+   * 아직 안 해 봄: 지금 상호작용 가능한 활성 페이지에 플러그인 명령(조사 지점 등)이 있고 셀 대사·선택지·얻을 것이 없는데,
+   * 그 페이지가 기록에 한 번도 나오지 않았다(coverage.touched). now 구역에 들어가고, 해 보면 talk로 돌아간다.
+   */
+  untried?: true;
   /** locked 중 이야기 진행 조건(자동 실행·병렬 페이지이거나 그래픽이 없는 이벤트). 맵에 그리지 않고 남은 수에 안 센다 */
   story: boolean;
 }
@@ -49,7 +54,7 @@ export interface MapChecklist {
   player: { x: number; y: number };
   /** 구역 순서(now → item → repeat → talk → locked → 이야기 진행 조건 → done), 같은 구역 안에서는 이벤트 id 순 */
   events: ChecklistEvent[];
-  /** now + item + repeat + locked(이야기 진행 조건 제외) 이벤트 수 */
+  /** now(아직 안 해 봄 포함) + item + repeat + locked(이야기 진행 조건 제외) 이벤트 수 */
   remaining: number;
 }
 
@@ -94,6 +99,8 @@ function gainsOf(list: EventCommand[], data: GameData): string[] {
   }
   return out;
 }
+
+const isPluginCommand = (c: EventCommand): boolean => c.code === 356 || c.code === 357;
 
 /** 첫 플러그인 명령(MV 356의 글, MZ 357의 설명 글 또는 플러그인·명령 이름)의 글. */
 function pluginHintOf(list: EventCommand[]): string | undefined {
@@ -155,6 +162,10 @@ function checkEvent(
   const repeat = active && trigger <= 4 ? repeatInfo(ev, mapId, data, live, activePage) : [];
   const gains = interactable ? gainsOf(runCommands, data) : [];
   const pluginHint = interactable ? pluginHintOf(runCommands) : undefined;
+  // 플러그인 명령은 실행되면 기록되므로(병렬 제외), 그 페이지가 기록에 없으면 아직 안 해 본 것
+  const touched = coverage.touched instanceof Set ? coverage.touched : null;
+  const untried = interactable && !!activeEntry && touched !== null && unseen === 0 && unpicked === 0 && gains.length === 0
+    && repeat.length === 0 && runCommands.some(isPluginCommand) && !touched.has(locationKey(activeEntry.location));
 
   const locked: LockedPage[] = [];
   entries.forEach((entry, pi) => {
@@ -165,7 +176,7 @@ function checkEvent(
   // 자동 실행·병렬 활성 페이지의 새 내용은 지금 할 수 있는 게 아니라 이야기 진행을 기다리는 것
   const autoNew = auto && (unseen > 0 || unpicked > 0);
 
-  const section: Section = interactable && (unseen > 0 || unpicked > 0) ? "now"
+  const section: Section = interactable && (unseen > 0 || unpicked > 0 || untried) ? "now"
     : interactable && gains.length > 0 ? "item"
     : repeat.length > 0 ? "repeat"
     : interactable ? "talk"
@@ -181,6 +192,7 @@ function checkEvent(
     auto, unseen, unpicked, repeat, locked, interactable, gains, story,
   };
   if (pluginHint) item.pluginHint = pluginHint;
+  if (untried) item.untried = true;
   return item;
 }
 

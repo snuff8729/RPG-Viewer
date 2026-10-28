@@ -1,4 +1,4 @@
-import { locationKey } from "../index/locations";
+import { locationKey, pageLocation } from "../index/locations";
 import { formatText } from "../text/escape";
 import { switchName } from "../text/names";
 import type { GameData, Location } from "../types";
@@ -60,6 +60,13 @@ export function coverRecord(
 ): PickInfo | null {
   try {
     if (!isObj(r)) return null;
+    noteTouched(cov, (r as { src?: unknown }).src);
+    if (r.type === "plugin") {
+      const m = mismatchOf(r, data);
+      if (m) { if (typeof r.seq === "number") cov.uncertainSeqs.add(r.seq); return null; }
+      cov.pluginRan.add(seenKey(r.src!, r.cmd));
+      return null;
+    }
     if (r.type !== "message" && r.type !== "scroll" && r.type !== "choices" && r.type !== "choice") return null;
     let choiceOpts: unknown = undefined;
     if ((r.type === "choices" || r.type === "choice") && isObj(r.src)) {
@@ -87,6 +94,22 @@ export function coverRecord(
   return null;
 }
 
+const SOURCES = new Set(["map", "common", "troop"]);
+
+/** 기록 위치(src)가 가리키는 페이지 항목을 실행된 페이지로 넣는다(원래 페이지 실행은 부른 템플릿 페이지). 예외를 던지지 않는다. */
+function noteTouched(cov: Coverage, src: unknown): void {
+  try {
+    if (!isObj(src) || !SOURCES.has(src.source)) return;
+    const key = locationKey(pageLocation(src as Location));
+    if (typeof key === "string") cov.touched.add(key);
+  } catch { /* 이상한 위치는 건너뛴다 */ }
+}
+
+/** 빈 진행도. */
+export function emptyCoverage(): Coverage {
+  return { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set(), touched: new Set(), pluginRan: new Set() };
+}
+
 /** 선택 뒤 결과를 모을 갈래 묶음: 대표 갈래(이어진 갈래는 이어 간 갈래와 같은 묶음). branch가 숫자가 아니면 그대로. */
 export function aftermathGroup(model: HistoryModel, branch: unknown): unknown {
   return typeof branch === "number" ? representative(model, branch) : branch;
@@ -99,7 +122,7 @@ export function aftermathGroup(model: HistoryModel, branch: unknown): unknown {
  * model: 그 묶음을 정할 갈래 모델(buildHistory(records)와 같아야 한다). 없으면 records로 만든다.
  */
 export function computeCoverage(records: LogRecord[], data: GameData, model?: HistoryModel): Coverage {
-  const cov: Coverage = { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() };
+  const cov: Coverage = emptyCoverage();
   const recs = Array.isArray(records) ? records : [];
   const m = model ?? buildHistory(recs);
   // 묶음별 기록 위치 목록(배열 순서)을 한 번 만들어, 선택 뒤 결과는 자기 묶음 기록만 본다.

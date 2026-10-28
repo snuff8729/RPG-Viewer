@@ -20,7 +20,7 @@ const base = { v: 1, t: 0, run: 1 } as const;
 const src = { source: "map", mapId: 1, eventId: 1, page: 0 } as const;
 type Pick = { picked: number; branch: number; seq: number };
 const cov = (picks: Pick[]) => ({
-  seen: new Set<string>(), uncertainSeqs: new Set<number>(), changedSeqs: new Set<number>(),
+  seen: new Set<string>(), uncertainSeqs: new Set<number>(), changedSeqs: new Set<number>(), touched: new Set<string>(), pluginRan: new Set<string>(),
   picks: new Map([[pickKey(src, 2), picks.map(p => ({ ...p, run: 1, aftermath: [] }))]]),
 });
 const long = "가".repeat(50);

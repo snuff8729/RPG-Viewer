@@ -27,7 +27,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.2.0",
+    VERSION: "1.3.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
