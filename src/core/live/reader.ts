@@ -2,7 +2,7 @@ import { formatText } from "../text/escape";
 import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
 import { locationKey } from "../index/locations";
-import { nextShot, type ScreenScene, type ScreenShot } from "../addons/screenPictures";
+import { coarseShotKey, nextShot, visibleScene, type ScreenScene, type ScreenShot } from "../addons/screenPictures";
 import { noticeSourceLabel } from "../addons/notices";
 import type { GameData, Location } from "../types";
 import { branchLabel, isContinuation } from "./history";
@@ -184,11 +184,36 @@ export function readerItems(
   let plugins: RecordOf<"plugin">[] = [];
   /** 마지막으로 보인 그림의 열쇠(nextShot). "" = 아무것도 없음, null = 모름 */
   let shown: string | null = null;
+  /** 마지막으로 보인(또는 화면에 있던) 그림의 대략적인 열쇠(coarseShotKey). null = 모름 */
+  let shownCoarse: string | null = null;
+  /** 마지막으로 넣은 화면 항목(그 뒤로 다른 기록의 그림을 보면 null) */
+  let lastScreen: Extract<ReaderItem, { kind: "screen" }> | null = null;
   /** seq의 화면에서 새로 보일 그림. always가 아니면(전투 로그·전투 시작·끝) 그 seq에 화면이 있을 때만 본다. */
   const shotAt = (seq: number, always: boolean): ScreenShot | null => {
     if (!scenes || (!always && !scenes.has(seq))) return null;
-    const { shot, key } = nextShot(shown, scenes.get(seq));
+    const scene = scenes.get(seq);
+    const { shot, key } = nextShot(shown, scene);
     shown = key;
+    shownCoarse = scene ? coarseShotKey(nextShot(null, scene).shot) : null;
+    lastScreen = null;
+    return shot;
+  };
+  /**
+   * 1.10.1 화면 기록(대사 사이에 바뀐 그림): 보이는 그림(10% 넘게 보이는 것)의 이름·대략적인 위치가 지금 보이는 것과
+   * 다를 때만 보인다. 1.10.0이 사라지거나 나타나는 중인 그림을 여러 번 기록한 것은 한 번만 보인다.
+   */
+  const screenShotAt = (seq: number): ScreenShot | null => {
+    if (!scenes || !scenes.has(seq)) return null;
+    const { shot, key } = nextShot(null, visibleScene(scenes.get(seq)));
+    const coarse = coarseShotKey(shot);
+    if (coarse === shownCoarse) {
+      // 같은 그림이 더 진하게(나타나는 중이던 것): 방금 넣은 화면 항목을 더 진한 모습으로 바꾼다
+      if (shot && lastScreen && opacitySum(shot) > opacitySum(lastScreen.screen)) { lastScreen.screen = shot; shown = key; }
+      return null;
+    }
+    shownCoarse = coarse;
+    shown = key;
+    lastScreen = null;
     return shot;
   };
   const battles = opts?.battles !== false;
@@ -201,8 +226,11 @@ export function readerItems(
           const rec = it.record;
           // 1.10.0 화면 기록: 그림만 보인다(글자 그림 설명용 플러그인 기록 이어짐도 끊지 않는다)
           if (rec?.type === "screen") {
-            const shot = shotAt(rec.seq, false);
-            if (shot) out.push({ kind: "screen", key: `r${rec.seq}`, seq: rec.seq, screen: shot });
+            const shot = screenShotAt(rec.seq);
+            if (shot) {
+              lastScreen = { kind: "screen", key: `r${rec.seq}`, seq: rec.seq, screen: shot };
+              out.push(lastScreen);
+            }
             continue;
           }
           // 알림 문구는 다른 플러그인이 띄운 것이라 이어진 플러그인 기록(글자 그림 설명)을 끊지 않는다
@@ -230,9 +258,10 @@ export function readerItems(
           const inner: ReaderItem[] = [];
           // 다시 본 같은 전투는 접혀 있어 그림을 붙이지 않는다
           if (it.repeat > 0) {
-            const saved = shown;
+            const saved = shown, savedCoarse = shownCoarse;
             convert(it.items, inner);
             shown = saved;
+            shownCoarse = savedCoarse;
             for (const x of inner) if ((x.kind === "message" || x.kind === "battlelog") && x.screen) delete x.screen;
           } else {
             convert(it.items, inner);
@@ -253,6 +282,13 @@ export function readerItems(
   const out: ReaderItem[] = [];
   convert(items, out);
   return out;
+}
+
+/** 보일 그림들의 투명도 합(같은 그림 중 더 진한 모습 고르기) */
+function opacitySum(shot: ScreenShot): number {
+  let n = 0;
+  for (const p of shot.pictures) n += p.opacity;
+  return n;
 }
 
 /** 항목이 속한 마지막 기록 seq. chapter는 null. */

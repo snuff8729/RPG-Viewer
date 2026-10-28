@@ -207,6 +207,7 @@ function coverage(r: Rect, screen: ScreenSize): number {
 export const hudKeyOf = (p: ScreenPicture): string => `${p.id}|${p.name}|${p.x}|${p.y}`;
 
 const HUD_SHARE = 0.7, HUD_AREA = 0.15, HUD_MIN_SNAPSHOTS = 5, CG_COVER = 0.8, OCCLUDE_COVER = 0.95;
+const SMALL_SPRITE = 0.05, SMALL_PICTURE = 0.02;
 
 /**
  * 게임 기록 전체(갈래마다 따로 따라간다)의 대사별 화면 그림 묶음과 그 수: 묶음(같은 배열) → 그 묶음이 보인 대사 수.
@@ -265,7 +266,12 @@ export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
   if (isPictureRole(o)) return o;
   if (ctx.hud?.has(hudKeyOf(p))) return "hud";
   const r = pictureRect(p, ctx.sizeOf);
-  if (r && coverage(r, ctx.screen) >= CG_COVER) return "cg";
+  if (r) {
+    const cover = coverage(r, ctx.screen);
+    if (cover >= CG_COVER) return "cg";
+    // 1.10.1: 작은 그림은 화면 장식(플러그인이 띄운 것은 화면의 5%, 그림 명령은 2%보다 작을 때 — 티커 배경 막대 등)
+    if (cover < (p.kind === "sprite" ? SMALL_SPRITE : SMALL_PICTURE)) return "hud";
+  }
   return "stand";
 }
 
@@ -336,6 +342,31 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
     }
   } catch { /* 없음으로 */ }
   return { shot: null, key: "" };
+}
+
+/** 보이는 그림으로 치는 투명도(255의 10% 초과)와 위치 비교 칸(px) — 1.10.1 화면 기록 겹침 거르기 */
+const VISIBLE_OPACITY = 25.5, COARSE_PX = 64;
+
+/** 장면에서 거의 투명한(10% 이하) 그림을 뺀다(사라지는 중인 그림) */
+export function visibleScene(scene: ScreenScene | null | undefined): ScreenScene | null {
+  if (!scene) return null;
+  const vis = (p: ScreenPicture) => p.opacity > VISIBLE_OPACITY;
+  return { cg: scene.cg.filter(vis), stand: scene.stand.filter(vis) };
+}
+
+/**
+ * 보일 그림의 대략적인 열쇠: 종류 + 보이는(투명도 10% 초과) 그림의 이름과 64px 칸 위치. 투명도·색조·작은 움직임은 무시한다
+ * (사라지거나 나타나는 중인 그림이 기록마다 새 그림으로 보이지 않게). 없으면 "".
+ */
+export function coarseShotKey(shot: ScreenShot | null | undefined): string {
+  if (!shot) return "";
+  try {
+    const parts = shot.pictures.filter(p => p.opacity > VISIBLE_OPACITY)
+      .map(p => `${p.name}|${Math.round(p.x / COARSE_PX)}|${Math.round(p.y / COARSE_PX)}`).sort();
+    return parts.length > 0 ? `${shot.kind}:${parts.join("\n")}` : "";
+  } catch {
+    return "";
+  }
 }
 
 /** 두 보일 그림이 같은가 */

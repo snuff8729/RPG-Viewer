@@ -16,6 +16,10 @@ function newGame(engine: "MZ" | "MV" = "MZ", capture = true): Harness {
   return harness;
 }
 const screens = (hh: Harness) => hh.readLog().filter((r) => r.type === "screen");
+/** 1.10.1: frames every 50 ms for ms (a set change is recorded once the screen stayed settled for 150 ms) */
+function settle(hh: Harness, ms = 200) {
+  for (let t = 0; t < ms; t += 50) { hh.clock.t += 50; hh.frame(); }
+}
 
 /** Like the CallCutin plugin: a plain container on the spriteset with picture-bitmap layers (no Game_Screen pictures). */
 function callCutin(hh: Harness, spriteset: any, base: string) {
@@ -48,7 +52,9 @@ describe("plugin-drawn images (1.10.0)", () => {
       h.frame(); // still loading: nothing yet
       expect(screens(h)).toEqual([]);
       h.completeLoads();
-      h.frame(); // the frame after the load: recorded
+      h.frame(); // the frame after the load: waits for the screen to settle
+      expect(screens(h)).toEqual([]);
+      settle(h);
       const recs = screens(h);
       expect(recs).toHaveLength(1);
       expect(recs[0]).toMatchObject({ scene: "map" });
@@ -63,24 +69,37 @@ describe("plugin-drawn images (1.10.0)", () => {
       ss.spriteset.removeChild(total);
       h.g.ImageManager.loadPicture("actor01_cutin_A_0001"); // cached: activity, already ready
       h.frame();
+      settle(h);
       const after = screens(h);
       expect(after).toHaveLength(2);
       expect(after[1].pics).toEqual([]);
     });
   }
 
-  it("records an image shown for a single frame after its load-ready event", () => {
+  it("records an image shown for a moment after its load-ready event; a single-frame flash is not recorded", () => {
     h = newGame();
     const ss = h.mountSpriteset(10);
     const total = callCutin(h, ss.spriteset, "B");
     h.completeLoads();
     h.frame();
+    settle(h, 300);
     ss.spriteset.removeChild(total);
     h.clock.t += 16;
     h.frame();
     const recs = screens(h);
     expect(recs).toHaveLength(1);
     expect(recs[0].pics.map((p: any[]) => p[1])).toEqual(["actor01_cutin_B_0001", "organ/B_b"]);
+    // a flash for one frame never settles
+    settle(h, 300);
+    expect(screens(h)).toHaveLength(2);
+    expect(screens(h)[1].pics).toEqual([]);
+    const flash = callCutin(h, ss.spriteset, "B2");
+    h.completeLoads();
+    h.frame();
+    ss.spriteset.removeChild(flash);
+    h.clock.t += 16; h.frame();
+    settle(h, 1000);
+    expect(screens(h)).toHaveLength(2);
   });
 
   it("accumulates parent scale, rotation, pivot and alpha; skips hidden and transparent branches", () => {
@@ -100,6 +119,7 @@ describe("plugin-drawn images (1.10.0)", () => {
     clear.addChild(new S()).bitmap = h.g.ImageManager.loadPicture("never2");
     h.completeLoads();
     h.frame();
+    settle(h);
     const [rec] = screens(h);
     expect(rec.pics).toEqual([[1000, "cut in", [0.5, 1], 120, 70, 200, 200, 127.5, 0, 0, 90, 100, 100, "sprite"]]);
   });
@@ -112,6 +132,7 @@ describe("plugin-drawn images (1.10.0)", () => {
     callCutin(h, ss.spriteset, "C");
     h.completeLoads();
     h.frame();
+    settle(h);
     const recs = screens(h);
     expect(recs).toHaveLength(1);
     expect(recs[0].pics.map((p: any[]) => [p[0], p[1]])).toEqual([[3, "stand"], [1000, "actor01_cutin_C_0001"], [1001, "organ/C_b"]]);
@@ -135,22 +156,27 @@ describe("plugin-drawn images (1.10.0)", () => {
     expect(screens(h)).toEqual([]);
   });
 
-  it("is rate limited to 8 records a second", () => {
+  it("images that keep changing are recorded at most once per 600 ms wait", () => {
     h = newGame();
     const ss = h.mountSpriteset(10);
     let last: any = null;
-    for (let i = 0; i < 20; i++) {
+    const times: number[] = [];
+    for (let i = 0; i < 100; i++) {
       if (last) ss.spriteset.removeChild(last);
       last = ss.spriteset.addChild(new h.g.Sprite());
       last.bitmap = h.g.ImageManager.loadPicture("flash" + i);
       h.completeLoads();
-      h.clock.t += 10;
+      h.clock.t += 30;
+      const n = screens(h).length;
       h.frame();
+      if (screens(h).length > n) times.push(h.clock.t);
     }
-    expect(screens(h)).toHaveLength(8);
+    expect(times.length).toBeGreaterThanOrEqual(4);
+    expect(times.length).toBeLessThanOrEqual(5);
+    for (let i = 1; i < times.length; i++) expect(times[i] - times[i - 1]).toBeGreaterThanOrEqual(600);
   });
 
-  it("the slow poll records images that never went through ImageManager once they stay for two checks", () => {
+  it("the slow poll records images that never went through ImageManager once they settle", () => {
     h = newGame();
     const ss = h.mountSpriteset(10);
     h.frame();
@@ -158,7 +184,7 @@ describe("plugin-drawn images (1.10.0)", () => {
     s.bitmap = { _url: "img/pictures/direct.png", width: 10, height: 10, isReady: () => true };
     h.clock.t += 1000; h.frame();
     expect(screens(h)).toEqual([]);
-    h.clock.t += 1000; h.frame();
+    settle(h);
     expect(screens(h).map((r) => r.pics[0][1])).toEqual(["direct"]);
   });
 
@@ -177,6 +203,7 @@ describe("plugin-drawn images (1.10.0)", () => {
     canvas.addChild(new h.g.Sprite()).bitmap = h.g.ImageManager.loadPicture("on_canvas");
     h.completeLoads();
     h.frame();
+    settle(h);
     expect(screens(h).map((r) => r.pics.map((p: any[]) => p[1]))).toEqual([["on_canvas"]]);
 
     h = newGame("MZ", false);
@@ -214,6 +241,85 @@ describe("plugin-drawn images (1.10.0)", () => {
     callCutin(h, ss.spriteset, "F");
     h.completeLoads();
     h.frame();
+    settle(h);
     expect(screens(h)).toEqual([expect.objectContaining({ scene: "battle" })]);
+  });
+});
+
+describe("screen record signature (1.10.1)", () => {
+  // the user's log: a ticker plugin's 624×24 background bar fading in and out next to 3 unchanged pictures
+  const FADE_IN = [6.67, 13.33, 40, 46.67, 50, 73.33, 80];
+  const FADE_OUT = [80, 73.33, 50, 46.67, 40, 13.33, 6.67];
+  const GAPS = [30, 130, 60, 90, 45, 110, 70];
+  for (const engine of ["MZ", "MV"] as const) {
+    it(`a fading plugin sprite: one record when it appears, none while fading, one when gone (${engine})`, () => {
+      h = newGame(engine);
+      const ss = h.mountSpriteset(10);
+      for (const [id, name] of [[1, "bg"], [2, "stand_a"], [3, "stand_b"]] as const) {
+        h.setBitmapSize(name, 400, 600);
+        h.g.$gameScreen.showPicture(id, name, 0, 100 * id, 0, 100, 100, 255, 0);
+      }
+      h.setBitmapSize("TickerTest", 624, 24);
+      ss.update();
+      h.completeLoads();
+      h.frame();
+      settle(h, 300);
+      expect(screens(h)).toHaveLength(1);
+      const ticker = ss.spriteset.addChild(new h.g.Sprite());
+      ticker.x = 10; ticker.y = 60;
+      ticker.opacity = 0;
+      ticker.bitmap = h.g.ImageManager.loadPicture("TickerTest");
+      h.completeLoads();
+      const step = (op: number | null, gap: number) => {
+        if (op === null) ss.spriteset.removeChild(ticker); else ticker.opacity = op;
+        h.g.ImageManager.loadPicture("TickerTest"); // the ticker plugin touching its bitmap every frame
+        h.clock.t += gap;
+        h.frame();
+      };
+      FADE_IN.forEach((op, i) => step(op, GAPS[i]));
+      for (let i = 0; i < 20; i++) step(80, 50); // shows for a second
+      const shown = screens(h);
+      expect(shown).toHaveLength(2);
+      const tk = shown[1].pics.filter((p: any[]) => p[1] === "TickerTest");
+      expect(tk).toEqual([[1000, "TickerTest", 0, 10, 60, 100, 100, 80, 0, 0, 0, 624, 24, "sprite"]]);
+      expect(shown[1].pics.map((p: any[]) => p[1])).toEqual(["bg", "stand_a", "stand_b", "TickerTest"]);
+      FADE_OUT.forEach((op, i) => step(op, GAPS[i]));
+      step(null, 40);
+      for (let i = 0; i < 20; i++) step(null, 50);
+      const all = screens(h);
+      expect(all).toHaveLength(3);
+      expect(all[2].pics.map((p: any[]) => p[1])).toEqual(["bg", "stand_a", "stand_b"]);
+      for (const r of all) for (const p of r.pics) if (p[1] === "TickerTest") expect(p[7]).toBe(80);
+    });
+  }
+
+  it("opacity, tone, scale and moves within 64 px alone never make a record", () => {
+    h = newGame();
+    const ss = h.mountSpriteset(10);
+    const s = ss.spriteset.addChild(new h.g.Sprite());
+    s.x = 100; s.y = 100;
+    s.bitmap = h.g.ImageManager.loadPicture("cut");
+    h.completeLoads();
+    h.frame();
+    settle(h);
+    expect(screens(h)).toHaveLength(1);
+    for (let i = 0; i < 40; i++) {
+      s.opacity = 255 - (i % 5) * 40;
+      s.x = 100 + (i % 3) * 10;
+      s.scale = { x: 1 + (i % 4) / 10, y: 1 };
+      s._colorTone = [i, 0, 0, 0];
+      h.g.ImageManager.loadPicture("cut");
+      h.clock.t += 40;
+      h.frame();
+    }
+    settle(h, 1000);
+    expect(screens(h)).toHaveLength(1);
+    // a real move (to another 64 px place) is a new record, once it settles
+    s.x = 400;
+    h.g.ImageManager.loadPicture("cut");
+    h.frame();
+    expect(screens(h)).toHaveLength(1);
+    settle(h);
+    expect(screens(h)).toHaveLength(2);
   });
 });
