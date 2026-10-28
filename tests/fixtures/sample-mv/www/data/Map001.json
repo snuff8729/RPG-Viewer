@@ -1,0 +1,56 @@
+{
+ "displayName": "",
+ "events": [
+  null,
+  {
+   "id": 1,
+   "name": "EV001",
+   "x": 0,
+   "y": 0,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "Actor1",
+        0,
+        0,
+        2
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "MV 대사입니다."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

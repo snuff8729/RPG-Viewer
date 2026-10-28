@@ -1,0 +1,15 @@
+[
+ null,
+ {
+  "id": 1,
+  "name": "레나",
+  "faceName": "Actor1",
+  "faceIndex": 0
+ },
+ {
+  "id": 2,
+  "name": "촌장",
+  "faceName": "People1",
+  "faceIndex": 3
+ }
+]

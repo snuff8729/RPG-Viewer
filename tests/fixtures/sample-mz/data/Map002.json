@@ -1,0 +1,440 @@
+{
+ "displayName": "촌장의 집",
+ "events": [
+  null,
+  {
+   "id": 1,
+   "name": "촌장",
+   "x": 5,
+   "y": 4,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "People1",
+        3,
+        0,
+        2,
+        "촌장"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "왔구나, N[1]."
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "숲이 이상하다는 소문은 들었겠지?"
+       ]
+      },
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "Actor1",
+        0,
+        0,
+        2,
+        ""
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "네… 밤마다 이상한 소리가 난다고요."
+       ]
+      },
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        ""
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "(창밖에서 바람 소리가 들린다.)"
+       ]
+      },
+      {
+       "code": 231,
+       "indent": 0,
+       "parameters": [
+        1,
+        "village_map",
+        0,
+        0,
+        0,
+        0,
+        100,
+        100,
+        255,
+        0
+       ]
+      },
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "People1",
+        3,
+        0,
+        2,
+        "촌장"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "도와주겠나? C[2]보상C[0]은 V[1]만큼."
+       ]
+      },
+      {
+       "code": 102,
+       "indent": 0,
+       "parameters": [
+        [
+         "네, 도울게요",
+         "생각해볼게요"
+        ],
+        1,
+        0,
+        2,
+        0
+       ]
+      },
+      {
+       "code": 402,
+       "indent": 0,
+       "parameters": [
+        0,
+        "네, 도울게요"
+       ]
+      },
+      {
+       "code": 101,
+       "indent": 1,
+       "parameters": [
+        "People1",
+        3,
+        0,
+        2,
+        "촌장"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 1,
+       "parameters": [
+        "고맙네!"
+       ]
+      },
+      {
+       "code": 121,
+       "indent": 1,
+       "parameters": [
+        1,
+        1,
+        0
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 1,
+       "parameters": []
+      },
+      {
+       "code": 402,
+       "indent": 0,
+       "parameters": [
+        1,
+        "생각해볼게요"
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 1,
+       "parameters": []
+      },
+      {
+       "code": 404,
+       "indent": 0,
+       "parameters": []
+      },
+      {
+       "code": 111,
+       "indent": 0,
+       "parameters": [
+        1,
+        1,
+        0,
+        5,
+        1
+       ]
+      },
+      {
+       "code": 101,
+       "indent": 1,
+       "parameters": [
+        "People1",
+        3,
+        0,
+        2,
+        "촌장"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 1,
+       "parameters": [
+        "이건 내 아내가 남긴 물건이네."
+       ]
+      },
+      {
+       "code": 126,
+       "indent": 1,
+       "parameters": [
+        2,
+        0,
+        0,
+        1
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 1,
+       "parameters": []
+      },
+      {
+       "code": 411,
+       "indent": 0,
+       "parameters": []
+      },
+      {
+       "code": 0,
+       "indent": 1,
+       "parameters": []
+      },
+      {
+       "code": 412,
+       "indent": 0,
+       "parameters": []
+      },
+      {
+       "code": 105,
+       "indent": 0,
+       "parameters": [
+        2,
+        false
+       ]
+      },
+      {
+       "code": 405,
+       "indent": 0,
+       "parameters": [
+        "― 그날 밤 ―"
+       ]
+      },
+      {
+       "code": 405,
+       "indent": 0,
+       "parameters": [
+        "마을에 다시 정적이 찾아왔다."
+       ]
+      },
+      {
+       "code": 117,
+       "indent": 0,
+       "parameters": [
+        1
+       ]
+      },
+      {
+       "code": 250,
+       "indent": 0,
+       "parameters": [
+        {
+         "name": "Wind",
+         "volume": 90,
+         "pitch": 100,
+         "pan": 0
+        }
+       ]
+      },
+      {
+       "code": 225,
+       "indent": 0,
+       "parameters": [
+        5,
+        5,
+        30,
+        true
+       ]
+      },
+      {
+       "code": 357,
+       "indent": 0,
+       "parameters": [
+        "SomePlugin",
+        "doThing",
+        "",
+        {}
+       ]
+      },
+      {
+       "code": 9999,
+       "indent": 0,
+       "parameters": [
+        "x"
+       ]
+      },
+      {
+       "code": 201,
+       "indent": 0,
+       "parameters": [
+        0,
+        3,
+        5,
+        12,
+        0,
+        0
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    },
+    {
+     "conditions": {
+      "switch1Valid": true,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "People1",
+        3,
+        0,
+        2,
+        "촌장"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "숲을 부탁하네."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  null,
+  {
+   "id": 3,
+   "name": "EV003",
+   "x": 2,
+   "y": 3,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        ""
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "낡은 책이 꽂혀 있다. 숲의 전설에 대한 책이다."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

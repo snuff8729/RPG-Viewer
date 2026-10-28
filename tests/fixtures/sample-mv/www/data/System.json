@@ -1,0 +1,14 @@
+{
+ "gameTitle": "MV 샘플",
+ "currencyUnit": "G",
+ "switches": [
+  "",
+  ""
+ ],
+ "variables": [
+  "",
+  ""
+ ],
+ "encryptionKey": "0123456789abcdef0123456789abcdef",
+ "hasEncryptedImages": true
+}

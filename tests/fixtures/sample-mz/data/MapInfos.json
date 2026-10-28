@@ -1,0 +1,27 @@
+[
+ null,
+ {
+  "id": 1,
+  "name": "마을",
+  "parentId": 0,
+  "order": 1
+ },
+ {
+  "id": 2,
+  "name": "촌장의 집",
+  "parentId": 1,
+  "order": 2
+ },
+ {
+  "id": 3,
+  "name": "숲 입구",
+  "parentId": 0,
+  "order": 3
+ },
+ {
+  "id": 4,
+  "name": "잃어버린 맵",
+  "parentId": 0,
+  "order": 4
+ }
+]

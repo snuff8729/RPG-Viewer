@@ -1,0 +1,51 @@
+{
+ "displayName": "",
+ "events": [
+  null,
+  {
+   "id": 1,
+   "name": "문",
+   "x": 0,
+   "y": 0,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 250,
+       "indent": 0,
+       "parameters": [
+        {
+         "name": "Open1",
+         "volume": 90,
+         "pitch": 100,
+         "pan": 0
+        }
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

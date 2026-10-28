@@ -1,0 +1,16 @@
+{
+ "gameTitle": "샘플 게임",
+ "currencyUnit": "G",
+ "switches": [
+  "",
+  "숲 개방",
+  ""
+ ],
+ "variables": [
+  "",
+  "호감도"
+ ],
+ "encryptionKey": "0123456789abcdef0123456789abcdef",
+ "hasEncryptedImages": true,
+ "advanced": {}
+}
