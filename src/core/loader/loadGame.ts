@@ -5,6 +5,7 @@ import type {
 import { livePaths } from "@/core/live/installer";
 import { screenSizeOf } from "@/core/addons/screenPictures";
 import { noticePluginsOf } from "@/core/addons/notices";
+import { enabledPluginsOf } from "@/core/adapters/manifest";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
@@ -151,6 +152,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   }
 
   const noticePlugins = noticePluginsOf(pluginsText);
+  const enabledPlugins = enabledPluginsOf(pluginsText);
   return {
     ok: true,
     data: {
@@ -162,6 +164,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       ...(templateMapId !== undefined ? { templateMapId } : {}),
       ...(templateKeepEventId ? { templateKeepEventId } : {}),
       ...(noticePlugins.length > 0 ? { noticePlugins } : {}),
+      ...(enabledPlugins.length > 0 ? { enabledPlugins } : {}),
     },
   };
 }

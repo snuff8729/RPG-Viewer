@@ -77,7 +77,13 @@ export async function install(folder: WritableGameFolder, dataRoot: string, plug
   if (!(await folder.writeText(p.pluginFile, pluginSource))) return fail;
   const own = entries.find((e) => e.name === PLUGIN_NAME);
   if (own) own.status = true;
-  else entries.push({ name: PLUGIN_NAME, status: true, description: "RPG Viewer 기록 플러그인", parameters: {} });
+  else {
+    // 게임 전용 확장(RPGViewerBridge_<id>)이 먼저 설치돼 있으면 그 앞에 넣는다(확장은 기록 플러그인 뒤에 읽혀야 한다)
+    const entry: PluginEntry = { name: PLUGIN_NAME, status: true, description: "RPG Viewer 기록 플러그인", parameters: {} };
+    const ext = entries.findIndex((e) => typeof e?.name === "string" && e.name.startsWith(`${PLUGIN_NAME}_`));
+    if (ext >= 0) entries.splice(ext, 0, entry);
+    else entries.push(entry);
+  }
   if (!(await folder.writeText(p.pluginsJs, formatPluginsJs(entries)))) return fail;
   return { ok: true };
 }

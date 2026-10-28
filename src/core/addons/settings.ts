@@ -10,6 +10,8 @@ export interface AddonFile {
   state: AddonState; pictureRoles: PictureRoles; noticeHooks?: string[];
   /** 플러그인이 띄운 그림(1.10.0)의 이름 열쇠(spriteKeyOf) → 직접 고른 구분(없으면 없음) */
   spriteRoles?: SpriteRoles;
+  /** 게임 전용 어댑터(adapters/<id>) 켜짐 상태: id → 켜짐. 없으면 모두 꺼짐. */
+  adapters?: Record<string, boolean>;
 }
 
 /**
@@ -19,6 +21,7 @@ export interface AddonFile {
  */
 export function addonsJson(
   state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null, spriteRoles?: SpriteRoles | null,
+  adapters?: Record<string, boolean> | null,
 ): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
@@ -29,7 +32,22 @@ export function addonsJson(
   if (hooks.length > 0) body.noticeHooks = hooks;
   const sprites = cleanSpriteRoles(spriteRoles);
   if (Object.keys(sprites).length > 0) body.spriteRoles = sprites;
+  const ad = cleanAdapters(adapters);
+  if (Object.keys(ad).length > 0) body.adapters = ad;
   return JSON.stringify(body, null, 2) + "\n";
+}
+
+const ADAPTER_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+
+/** 어댑터 id → 켜짐(쓸 수 없는 id·참/거짓이 아닌 값은 버린다, 최대 50개) */
+export function cleanAdapters(v: unknown): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, on] of Object.entries(v as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 50) break;
+    if (ADAPTER_ID_RE.test(k) && typeof on === "boolean") out[k] = on;
+  }
+  return out;
 }
 
 const SPRITE_ROLES_MAX = 500, SPRITE_KEY_MAX = 200;
@@ -76,6 +94,8 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
     if (hooks.length > 0) file.noticeHooks = hooks;
     const sprites = cleanSpriteRoles((raw as { spriteRoles?: unknown }).spriteRoles);
     if (Object.keys(sprites).length > 0) file.spriteRoles = sprites;
+    const ad = cleanAdapters((raw as { adapters?: unknown }).adapters);
+    if (Object.keys(ad).length > 0) file.adapters = ad;
     return file;
   } catch {
     return null;
