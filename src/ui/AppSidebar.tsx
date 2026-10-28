@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, TriangleAlert } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -44,6 +44,18 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
   route: Route; showEmpty: boolean; onShowEmptyChange: (v: boolean) => void;
 }) {
   const { data, index } = useGame();
+  const [openMaps, setOpenMaps] = useState<Set<number>>(new Set());
+
+  // 현재 route의 맵과 그 상위 맵을 펼친다 (딥링크·검색 이동 대응).
+  const activeMapId = route.kind === "page" && route.location.source === "map" ? route.location.mapId : null;
+  useEffect(() => {
+    if (activeMapId === null || !data) return;
+    const parentOf = new Map<number, number>();
+    for (const m of data.mapInfos) if (m) parentOf.set(m.id, m.parentId);
+    const chain: number[] = [];
+    for (let id: number | undefined = activeMapId; id !== undefined && id > 0 && !chain.includes(id); id = parentOf.get(id)) chain.push(id);
+    setOpenMaps((prev) => (chain.every((id) => prev.has(id)) ? prev : new Set([...prev, ...chain])));
+  }, [activeMapId, data]);
 
   const model = useMemo(() => {
     if (!data || !index) return null;
@@ -103,23 +115,33 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
         {errs && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <TriangleAlert className="ml-auto size-4 shrink-0 text-destructive" aria-label="오류" />
+              <span tabIndex={0} role="img" aria-label="오류" className="ml-auto shrink-0">
+                <TriangleAlert className="size-4 text-destructive" />
+              </span>
             </TooltipTrigger>
-            <TooltipContent>{errs.join("\n")}</TooltipContent>
+            <TooltipContent className="whitespace-pre-line">{errs.join("\n")}</TooltipContent>
           </Tooltip>
         )}
       </>
     );
     if (!hasContent) {
-      return <Item key={m.id}><Btn>{label}</Btn></Item>;
+      return <Item key={m.id}><Btn asChild><button type="button">{label}</button></Btn></Item>;
     }
     return (
-      <Collapsible key={m.id} asChild className="group/collapsible">
+      <Collapsible
+        key={m.id}
+        asChild
+        className="group/collapsible"
+        open={openMaps.has(m.id)}
+        onOpenChange={(o) => setOpenMaps((prev) => { const n = new Set(prev); if (o) n.add(m.id); else n.delete(m.id); return n; })}
+      >
         <Item>
           <CollapsibleTrigger asChild>
-            <Btn>
-              <ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
-              {label}
+            <Btn asChild>
+              <button type="button">
+                <ChevronRight className="transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                {label}
+              </button>
             </Btn>
           </CollapsibleTrigger>
           <CollapsibleContent>
