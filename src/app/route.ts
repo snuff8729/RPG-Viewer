@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Location } from "@/core/types";
 
-export type Route = { kind: "home" } | { kind: "page"; location: Location } | { kind: "history" } | { kind: "missing" };
+export type Route = { kind: "home" } | { kind: "page"; location: Location } | { kind: "history" } | { kind: "read" } | { kind: "missing" };
 
 const HOME: Route = { kind: "home" };
 
@@ -17,7 +17,7 @@ function pageIdx(s: string | undefined): number | null {
 
 export function parseRoute(hash: string): Route {
   const p = hash.replace(/^#\/?/, "").split("/");
-  if ((p[0] === "history" || p[0] === "missing") && (p.length === 1 || (p.length === 2 && p[1] === ""))) return { kind: p[0] };
+  if ((p[0] === "history" || p[0] === "read" || p[0] === "missing") && (p.length === 1 || (p.length === 2 && p[1] === ""))) return { kind: p[0] };
   if (p[0] === "map" && p[2] === "event" && p[4] === "page" && p.length === 6) {
     const mapId = num(p[1]), eventId = num(p[3]), page = pageIdx(p[5]);
     if (mapId !== null && eventId !== null && page !== null) return { kind: "page", location: { source: "map", mapId, eventId, page } };
@@ -34,6 +34,7 @@ export function parseRoute(hash: string): Route {
 export function formatRoute(r: Route): string {
   if (r.kind === "home") return "#/";
   if (r.kind === "history") return "#/history";
+  if (r.kind === "read") return "#/read";
   if (r.kind === "missing") return "#/missing";
   const l = r.location;
   switch (l.source) {
