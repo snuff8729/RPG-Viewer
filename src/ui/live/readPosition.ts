@@ -39,9 +39,14 @@ export function saveReadSeq(gameKey: string, branch: number, seq: number, store:
 export function initialReadSeq(gameKey: string, branch: number, path: { seq: number; branch: number }[], store: StoreLike | null = defaultStore()): number {
   let best = loadReadSeq(gameKey, branch, store);
   const lastOf = new Map<number, number>();
+  let maxSeq = -1;
   for (const r of Array.isArray(path) ? path : []) {
-    if (r && typeof r.seq === "number" && r.branch !== branch) lastOf.set(r.branch, Math.max(lastOf.get(r.branch) ?? -1, r.seq));
+    if (!r || typeof r.seq !== "number") continue;
+    maxSeq = Math.max(maxSeq, r.seq);
+    if (r.branch !== branch) lastOf.set(r.branch, Math.max(lastOf.get(r.branch) ?? -1, r.seq));
   }
+  // 경로 끝보다 큰 저장값은 기록이 지워졌거나 새로 시작된 것 — 무시한다
+  if (best > maxSeq) best = -1;
   for (const [b, last] of lastOf) best = Math.max(best, Math.min(loadReadSeq(gameKey, b, store), last));
   return best;
 }

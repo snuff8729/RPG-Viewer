@@ -14,12 +14,9 @@ import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
 import { choiceTexts } from "./historyText";
 import { initialReadSeq, saveReadSeq } from "./readPosition";
+import { initialWindow, readStats } from "./readerWindow";
 
 const PAGE = 300;
-/** 읽은 위치가 아주 앞이어도 한 번에 그리는 항목 수 상한 */
-const MAX_INITIAL = 1500;
-
-const isLine = (it: ReaderItem) => it.kind === "message" || it.kind === "scroll";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
@@ -37,7 +34,7 @@ function Picture({ name }: { name: string }) {
   const url = useAssetUrl("pictures", name);
   if (url === undefined) return <Skeleton className="h-40 w-full" />;
   if (!url) return <p className="text-center text-sm text-muted-foreground">{name}</p>;
-  return <img src={url} alt={name} title={name} className="max-h-[60vh] w-full object-contain" />;
+  return <img src={url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
 }
 
 const Item = memo(function Item({ item }: { item: ReaderItem }) {
@@ -109,28 +106,23 @@ export function ReaderView() {
     if (branch !== null && pos.key === posKey && pos.seq >= 0) saveReadSeq(gameKey, branch, pos.seq);
   }, [pos, posKey, gameKey, branch]);
 
-  // 마지막으로 읽은 항목 위치와 그 뒤 새 대사 수
-  const { lastReadIdx, firstUnreadIdx, unread } = useMemo(() => {
-    let last = -1, first = -1, n = 0;
-    items.forEach((it, i) => {
-      const s = lastSeqOf(it);
-      if (s === null) return;
-      if (s <= readSeq) last = i;
-      else {
-        if (first === -1) first = i;
-        if (isLine(it)) n++;
-      }
-    });
-    return { lastReadIdx: last, firstUnreadIdx: first, unread: n };
-  }, [items, readSeq]);
+  // 마지막으로 읽은 항목 위치와 그 뒤 새 대사 수(↻ 다시 본 대화는 세지 않는다)
+  const stats = useMemo(() => readStats(items, readSeq), [items, readSeq]);
+  const { lastReadIdx, firstUnreadIdx, unread } = stats;
 
-  // 그리는 창(뒤에서부터 shown개). 갈래마다 처음 한 번, 첫 안 읽은 항목이 창에 들어오게 정한다.
-  const [win, setWin] = useState<{ key: string | null; shown: number }>({ key: null, shown: PAGE });
-  let shown = win.shown;
+  // 그리는 창(뒤에서부터 shown개)과 처음 위치. 갈래마다 처음 한 번 정한다(readerWindow.initialWindow).
+  // armed가 false면 사용자가 스크롤하거나 다음을 누르기 전까지 읽음 표시를 하지 않는다.
+  const [win, setWin] = useState<{ key: string | null; shown: number; at: "bottom" | "item" | "top"; armed: boolean }>(
+    { key: null, shown: PAGE, at: "bottom", armed: true },
+  );
+  let curWin = win;
   if (items.length > 0 && win.key !== posKey) {
-    shown = firstUnreadIdx > 0 && readSeq >= 0 ? Math.min(MAX_INITIAL, Math.max(PAGE, items.length - firstUnreadIdx + 5)) : PAGE;
-    setWin({ key: posKey, shown });
+    curWin = { key: posKey, ...initialWindow(items.length, stats, readSeq, PAGE) };
+    setWin(curWin);
   }
+  const shown = curWin.shown;
+  const armed = curWin.armed;
+  const arm = useCallback(() => setWin(w => (w.armed ? w : { ...w, armed: true })), []);
   const start = Math.max(0, items.length - shown);
   const visible = items.slice(start);
 
@@ -175,17 +167,21 @@ export function ReaderView() {
     prevLen.current = items.length;
     if (positioned.current !== posKey) {
       positioned.current = posKey;
-      // 다 읽었으면 맨 아래, 읽던 곳이 있으면 첫 안 읽은 항목, 처음이거나 창 밖이면 창의 맨 위
-      if (firstUnreadIdx === -1) scrollToBottom();
-      else if (readSeq >= 0 && firstUnreadIdx >= start) scrollToKey(keyFrom(firstUnreadIdx));
+      // 다 읽었으면 맨 아래, 읽던 곳이 있으면 첫 안 읽은 항목, 처음 읽으면 창의 맨 위
+      if (win.at === "bottom") scrollToBottom();
+      else if (win.at === "item" && firstUnreadIdx >= start) scrollToKey(keyFrom(firstUnreadIdx));
       else { const el = scroller.current; if (el) el.scrollTop = 0; onScroll(); }
       return;
     }
     if (grew <= 0) return;
+    // follow.current는 아래 레이아웃 효과가 "직전 커밋"의 상태(맨 아래 + 새 대사 0)로 맞춰 둔 값이다.
+    // 이 효과가 먼저 선언돼 먼저 실행되므로, 여기서 읽는 값은 새 항목이 들어오기 전의 따라가기 여부다.
+    // (순서를 바꾸면 새 항목 때문에 unread > 0이 되어 따라가기가 항상 꺼진다.)
     if (follow.current) scrollToBottom();
     // 읽는 중이면 보이는 창의 시작을 그대로 둔다(창이 밀리지 않게)
     else setWin(w => ({ ...w, shown: w.shown + grew }));
-  }, [items.length, win.key, posKey, readSeq, firstUnreadIdx, start, keyFrom, scrollToKey, scrollToBottom, onScroll]);
+  }, [items.length, win.key, win.at, posKey, firstUnreadIdx, start, keyFrom, scrollToKey, scrollToBottom, onScroll]);
+  // 반드시 위 효과 뒤에 둔다(위 주석 참고)
   useLayoutEffect(() => {
     follow.current = atBottom && unread === 0;
   }, [atBottom, unread]);
@@ -226,7 +222,7 @@ export function ReaderView() {
   const visibleKeys = visible.map(it => it.key).join(",");
   useEffect(() => {
     const el = scroller.current;
-    if (!el || typeof IntersectionObserver === "undefined" || positioned.current !== posKey) return;
+    if (!el || !armed || typeof IntersectionObserver === "undefined" || positioned.current !== posKey) return;
     const io = new IntersectionObserver(entries => {
       let max = -1;
       for (const e of entries) {
@@ -240,21 +236,31 @@ export function ReaderView() {
     }, { root: el, threshold: [0, 0.5, 1] });
     el.querySelectorAll("[data-seq]").forEach(n => io.observe(n));
     return () => io.disconnect();
-  }, [visibleKeys, posKey, markRead]);
+  }, [visibleKeys, posKey, armed, markRead]);
 
   /** 다음 안 읽은 항목을 위로 올리고 그 앞까지 읽음 처리 */
   const next = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
+    arm();
     let idx = firstUnreadIdx;
-    const topOf = (i: number) => {
-      const t = el.querySelector<HTMLElement>(`[data-key="${CSS.escape(keyFrom(i))}"]`);
-      return t ? t.getBoundingClientRect().top - el.getBoundingClientRect().top : null;
+    const rectOf = (key: string) => {
+      const t = el.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
+      if (!t) return null;
+      const r = t.getBoundingClientRect(), v = el.getBoundingClientRect();
+      return { top: r.top - v.top, bottom: r.bottom - v.top };
     };
-    // 이미 맨 위에 올라와 있는(화면보다 긴) 항목이면 그 항목도 읽고 다음으로
+    // 이미 맨 위에 올라와 있는 항목: 화면보다 길어 끝이 아직 아래에 있으면 한 화면(90%)씩 내리고,
+    // 끝까지 보였으면 그 항목도 읽고 다음으로
     while (idx >= 0) {
-      const top = topOf(idx);
-      if (top === null || top > 16) break;
+      const head = rectOf(keyFrom(idx));
+      if (head === null || head.top > 16) break;
+      const own = rectOf(items[idx].key);
+      if (own && own.bottom > el.clientHeight + 1) {
+        el.scrollTop += Math.min(el.clientHeight * 0.9, own.bottom - el.clientHeight + 8);
+        onScroll();
+        return;
+      }
       const s = lastSeqOf(items[idx]);
       if (s !== null) markRead(s);
       let n = -1;
@@ -270,7 +276,7 @@ export function ReaderView() {
       pendingKey.current = keyFrom(idx);
       setWin(w => ({ ...w, shown: items.length - idx + 5 }));
     } else scrollToKey(keyFrom(idx));
-  }, [firstUnreadIdx, items, start, keyFrom, markRead, scrollToKey, scrollToBottom]);
+  }, [firstUnreadIdx, items, start, keyFrom, arm, markRead, scrollToKey, scrollToBottom, onScroll]);
 
   useEffect(() => {
     let spaceDown = false;
@@ -297,7 +303,7 @@ export function ReaderView() {
   return (
     // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
     <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
-      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className="min-h-0 flex-1 overflow-y-auto">
         <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
           {empty ? (
             <p className="text-center text-sm text-muted-foreground">게임을 진행하면 지나간 대사가 여기에 쌓여요</p>
@@ -338,7 +344,7 @@ export function ReaderView() {
       </div>
       <div className="flex shrink-0 items-center justify-center gap-2">
         <Button size="sm" onClick={next} disabled={items.length === 0}>↓ 다음 (Space)</Button>
-        <Button variant="outline" size="sm" onClick={scrollToBottom} disabled={atBottom}>맨 아래로</Button>
+        <Button variant="outline" size="sm" onClick={() => { arm(); scrollToBottom(); }} disabled={atBottom}>맨 아래로</Button>
         {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
       </div>
     </div>
