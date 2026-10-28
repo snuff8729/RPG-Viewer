@@ -23,6 +23,7 @@ import { useAutoReopen } from "@/app/useAutoReopen";
 import { PlayView } from "@/ui/live/PlayView";
 import { loadPlaySidebar, savePlaySidebar } from "@/ui/live/playLayout";
 import { AssistPanel } from "@/ui/live/AssistPanel";
+import { CheatSheet } from "@/ui/live/cheat/CheatSheet";
 import { LaunchButton } from "@/ui/live/LaunchButton";
 import { PinGameButton } from "@/ui/PinGameButton";
 import { BackupButton } from "@/ui/live/BackupButton";
@@ -128,6 +129,7 @@ function Shell() {
             <LaunchButton />
             <BackupButton />
             <AssistPanel />
+            <CheatSheet />
             <GameSettingsSheet />
           </div>
         </header>

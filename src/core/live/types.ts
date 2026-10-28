@@ -76,6 +76,13 @@ export interface LiveSnapshot {
   inBattle: boolean;
   /** 게임 보조 상태(플러그인 1.1.0+, 없으면 구버전) */
   assist?: LiveAssist;
+  /** 파티 캐릭터 자세히(플러그인 1.14.0+, 뷰어가 control.json `liveActors: true`로 부탁할 때만) */
+  actors?: LiveActor[];
+}
+/** params: 지금 능력치 8개(장비·상태 포함, actor.param(0~7)) */
+export interface LiveActor {
+  id: number; name: string; level: number; exp: number; params: number[]; hp: number; mp: number;
+  skills: number[]; states: number[];
 }
 export interface LiveAssist {
   /** 기본 배속(단축키 F6으로 바뀔 수 있음) */

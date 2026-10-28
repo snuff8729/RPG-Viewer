@@ -1,6 +1,6 @@
 import type { GameFolder } from "@/core/fs/folder";
 import type {
-  Actor, CommonEvent, GameData, LoadError, MapData, MapInfo, NamedEntry, SystemData, Troop,
+  Actor, ClassEntry, CommonEvent, GameData, LoadError, MapData, MapInfo, NamedEntry, SystemData, Troop,
 } from "@/core/types";
 import { livePaths } from "@/core/live/installer";
 import { screenSizeOf } from "@/core/addons/screenPictures";
@@ -76,6 +76,34 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const items = await readList<NamedEntry>("Items");
   const weapons = await readList<NamedEntry>("Weapons");
   const armors = await readList<NamedEntry>("Armors");
+  // 치트 창용(없어도 오류로 남기지 않는다): 기술·상태는 이름·설명·아이콘만, 직업은 능력치 곡선만
+  async function readQuiet(name: string): Promise<unknown[]> {
+    try {
+      const text = await folder.readText(`${root!.data}/${name}.json`);
+      const v: unknown = text === null ? null : JSON.parse(text.replace(/^﻿/, ""));
+      return Array.isArray(v) ? v : [null];
+    } catch {
+      return [null];
+    }
+  }
+  const pick = (v: unknown): NamedEntry | null => {
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    if (typeof o.id !== "number") return null;
+    return {
+      id: o.id, name: typeof o.name === "string" ? o.name : "",
+      ...(typeof o.description === "string" ? { description: o.description } : {}),
+      ...(typeof o.iconIndex === "number" ? { iconIndex: o.iconIndex } : {}),
+    };
+  };
+  const skills = (await readQuiet("Skills")).map(pick);
+  const states = (await readQuiet("States")).map(pick);
+  const classes = (await readQuiet("Classes")).map((v): ClassEntry | null => {
+    const e = pick(v);
+    if (!e) return null;
+    const params = (v as { params?: unknown }).params;
+    return { id: e.id, name: e.name, ...(Array.isArray(params) ? { params: params as number[][] } : {}) };
+  });
 
   // 맵은 동시에 최대 MAP_CONCURRENCY개씩 읽는다. 결과는 MapInfos 순서로, 오류는 mapId 순으로 모은다.
   const mapIds = mapInfos
@@ -157,7 +185,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       engine: system.advanced !== undefined ? "MZ" : "MV",
       dataRoot: root.data,
       imgRoot: root.img,
-      system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, errors,
+      system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, skills, states, classes, errors,
       screenSize: screenSizeOf(system, pluginsText),
       ...(templateMapId !== undefined ? { templateMapId } : {}),
       ...(templateKeepEventId ? { templateKeepEventId } : {}),

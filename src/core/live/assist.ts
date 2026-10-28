@@ -3,6 +3,7 @@ import { walk } from "../interpret/interpret";
 import type { GameIndex, PageEntry } from "../types";
 import { pageNewCounts } from "./interactable";
 import type { Coverage } from "./types";
+import { cheatOpsForControl, type CheatOp } from "./cheat";
 
 /**
  * 게임 보조 설정(뷰어 → 게임, rpg-viewer/control.json).
@@ -14,9 +15,10 @@ export type HotkeyAction = "speed" | "skip" | "win" | "lose" | "hpFull" | "hpLow
 /** 동작별 DOM keyCode. null = 끔. */
 export type Hotkeys = Record<HotkeyAction, number | null>;
 /** win·lose·escape: 전투 중만. hpFull·hpLow(플러그인 1.12.0): 파티 체력 100%(쓰러진 동료도 살림)·1%, 맵과 전투 모두. */
-export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow";
-/** at = 사용자가 누른 시각(ms) */
-export interface AssistCommand { id: string; kind: AssistCommandKind; at: number }
+/** cheat(플러그인 1.14.0): ops를 실은 치트 명령(core/live/cheat) */
+export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow" | "cheat";
+/** at = 사용자가 누른 시각(ms), ops: kind가 cheat일 때만 */
+export interface AssistCommand { id: string; kind: AssistCommandKind; at: number; ops?: CheatOp[] }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
 
 export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null };
@@ -40,7 +42,7 @@ export const AUTO_SPEEDS = [2, 4, 8] as const;
 export const ASSIST_MIN_VERSION = "1.1.0";
 /** 체력 명령(hpFull·hpLow) 지원 플러그인 최소 버전 */
 export const HP_COMMAND_MIN_VERSION = "1.12.0";
-const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>(["win", "lose", "escape", "hpFull", "hpLow"]);
+const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>(["win", "lose", "escape", "hpFull", "hpLow", "cheat"]);
 /** 파티 체력 명령인가(맵·전투 모두에서 쓴다) */
 export const isHpCommand = (kind: unknown): boolean => kind === "hpFull" || kind === "hpLow";
 
@@ -181,8 +183,11 @@ export function seenSets(coverage: Coverage, index: GameIndex): SeenSets {
 export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCommand | null, now: number, flags: Record<string, unknown> = {}): string {
   const n = normalizeAssist(s);
   const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
-  const cmd = isObj(command) && typeof command.id === "string" && COMMAND_KINDS.has(command.kind)
-    ? { id: command.id, kind: command.kind, at: Number.isFinite(command.at) ? command.at : 0 }
+  // 치트 명령은 ops가 올바를 때만 싣는다
+  const ok = isObj(command) && typeof command.id === "string" && COMMAND_KINDS.has(command.kind);
+  const ops = ok && command.kind === "cheat" ? cheatOpsForControl(command.ops) : null;
+  const cmd = ok && (command.kind !== "cheat" || ops !== null)
+    ? { id: command.id, kind: command.kind, at: Number.isFinite(command.at) ? command.at : 0, ...(ops ? { ops } : {}) }
     : null;
   return JSON.stringify({
     ...(isObj(flags) ? flags : {}),
