@@ -40,3 +40,31 @@ node scripts/make-fixture-images.mjs   # 테스트 픽스처 암호화 이미지
 ```js
 await __rpgViewer.openFixture("sample-mz")
 ```
+
+## 실시간 연결과 플레이 기록
+
+게임에 기록 플러그인을 설치하면, 게임을 플레이하는 동안 대사·선택 기록과 현재 상태를 뷰어에서 볼 수 있습니다. 크롬/엣지에서 "게임 폴더 열기"로 연 게임만 지원하며(폴더 쓰기 권한 필요), 압축 포장된 게임은 `지원하지 않아요`로 표시됩니다.
+
+- **설치**: 상단의 `플러그인 미설치` 배지를 눌러 "기록 플러그인" 창을 열고 **설치**를 누릅니다. 폴더 쓰기 권한을 허용해야 합니다. 설치 후 게임을 다시 시작하면 기록을 시작합니다.
+- **연결 표시**: 게임을 실행하면 상단 배지가 `● 연결됨`으로 바뀌고, 게임을 끄면 `○ 게임 꺼짐 · 마지막 기록 N분 전`이 됩니다.
+- **탭**: 탐색 목록에 **기록**(플레이한 순서의 타임라인, 분기·갈래 전환 포함)과 **못 본 것**(아직 보지 못한 대사 목록) 탭이 생깁니다. 게임이 실행 중이면 사이드바에 "지금" 그룹도 나타납니다.
+- **제거**: 같은 창의 **제거**를 누르면 `js/plugins.js`의 플러그인 항목과 플러그인 파일(`js/plugins/RPGViewerBridge.js`)만 지워집니다. `rpg-viewer/` 폴더와 백업은 그대로 남습니다.
+- **게임 폴더의 `rpg-viewer/`**:
+  - `log.jsonl`: 플레이 기록(한 줄에 한 건)
+  - `live.json`: 현재 상태 스냅샷 (`live.json.tmp`는 쓰는 도중의 임시 파일)
+  - `meta.json`: 플러그인이 쓰는 진행 메타 정보
+  - `plugins.js.bak`: 설치 전 `plugins.js` 백업(처음 설치할 때 한 번만 만듦)
+- **주의**: 세이브 미리보기 등을 위해 `DataManager.extractSaveContents`를 직접 호출하는 다른 플러그인이 있으면 기록에 불필요한 갈래가 생길 수 있습니다.
+
+실제 게임으로 확인할 항목은 [docs/live-checklist.md](docs/live-checklist.md)에 있습니다.
+
+### 개발용 시뮬레이터
+
+게임 없이 `npm run dev` 콘솔에서 기록·상태를 흘려 넣을 수 있습니다.
+
+```js
+await __rpgViewer.openFixture("sample-mz")
+await __rpgViewer.simulateFixtureLog()   // 픽스처 기록·상태를 rpg-viewer/에 씀
+await __rpgViewer.appendLog({ type: "..." })  // 기록 한 줄 추가
+await __rpgViewer.setLive({ mapId: 1 })       // live.json 갱신(인자 없으면 하트비트)
+```
