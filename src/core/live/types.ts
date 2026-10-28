@@ -23,6 +23,8 @@ export interface LiveSnapshot {
   run: number | null; branch: number | null; seq: number;
   mapId: number; x: number; y: number;
   running: Location | null;
+  /** 실행 중인 명령 인덱스(구버전 플러그인엔 없음) */
+  runningCmd?: number | null;
   events: { eventId: number; page: number }[];   // page 0부터, -1 = 없음
   switches: number[];                             // ON인 id
   variables: Record<string, number>;              // 0이 아닌 값
@@ -44,7 +46,7 @@ export interface HistoryModel {
   latestBranch: number | null;                   // 가장 최근 기록이 속한 갈래
 }
 export type HistoryItem =
-  | { kind: "record"; record: LogRecord; uncertain: boolean }
+  | { kind: "record"; record: LogRecord; uncertain: boolean; changed: boolean }
   | { kind: "repeat"; record: RecordOf<"message">; count: number }
   | { kind: "stateGroup"; records: RecordOf<"state">[]; count: number }
   | { kind: "fork"; atSeq: number; branches: number[] };
@@ -53,7 +55,8 @@ export interface PickInfo { picked: number; run: number; branch: number; seq: nu
 export interface Coverage {
   seen: Set<string>;               // `${locationKey(src)}#${cmd}` (message, scroll)
   picks: Map<string, PickInfo[]>;  // `${locationKey(src)}#${cmd}` (choices 명령) → 선택들
-  uncertainSeqs: Set<number>;      // 원문 불일치로 제외한 기록 seq
+  uncertainSeqs: Set<number>;      // 구조 불일치·위치 없음으로 제외한 기록 seq
+  changedSeqs: Set<number>;        // 구조는 맞고 본문만 달라(실행 중 변경됨) 연결한 기록 seq
 }
 
 export type EvalStatus = "met" | "unmet" | "unknown";

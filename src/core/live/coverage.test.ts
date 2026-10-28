@@ -23,10 +23,40 @@ describe("computeCoverage", () => {
     expect(picks[1]).toMatchObject({ run: 1, seq: 30, aftermath: ['(내레이션): "밤이 깊었다."'] });
     expect(c.uncertainSeqs.size).toBe(0);
   });
-  it("excludes mismatched records", () => {
-    const recs = fixtureRecords().map(r => r.seq === 10 ? { ...r, text: "다른 대사" } as LogRecord : r);
+  it("text-only differences are linked but marked changed", () => {
+    const recs = fixtureRecords().map(r => r.seq === 10 ? { ...r, text: "Thanks!" } as LogRecord : r);
     const c = computeCoverage(recs, data);
-    expect(c.seen.has("map:2:1:0#12")).toBe(false); expect(c.uncertainSeqs.has(10)).toBe(true);
+    expect(c.seen.has("map:2:1:0#12")).toBe(true);
+    expect(c.changedSeqs.has(10)).toBe(true);
+    expect(c.uncertainSeqs.has(10)).toBe(false);
+  });
+  it("face mismatch is uncertain", () => {
+    const recs = fixtureRecords().map(r => r.seq === 3 ? { ...r, face: "Other" } as LogRecord : r);
+    const c = computeCoverage(recs, data);
+    expect(c.uncertainSeqs.has(3)).toBe(true);
+    expect(c.changedSeqs.has(3)).toBe(false);
+    expect(c.seen.has("map:2:1:0#3")).toBe(false);
+  });
+  it("faceIndex mismatch is uncertain", () => {
+    const recs = fixtureRecords().map(r => r.seq === 2 ? { ...r, faceIndex: 5 } as LogRecord : r);
+    expect(computeCoverage(recs, data).uncertainSeqs.has(2)).toBe(true);
+  });
+  it("choices: same count with other texts is changed, other count is uncertain", () => {
+    const translated = fixtureRecords().map(r => r.seq === 7 ? { ...r, options: ["Yes", "No"] } as LogRecord : r);
+    const c1 = computeCoverage(translated, data);
+    expect(c1.changedSeqs.has(7)).toBe(true);
+    expect(c1.uncertainSeqs.has(7)).toBe(false);
+    expect(c1.uncertainSeqs.has(9)).toBe(false);
+    expect(c1.picks.get("map:2:1:0#10")!.map(p => p.picked)).toEqual([0, 1]);
+    const short = fixtureRecords().map(r => r.seq === 7 ? { ...r, options: ["a"] } as LogRecord : r);
+    const c2 = computeCoverage(short, data);
+    expect(c2.uncertainSeqs.has(7)).toBe(true);
+    expect(c2.uncertainSeqs.has(9)).toBe(true);  // choice: preceding choices count differs
+    expect(c2.changedSeqs.has(7)).toBe(false);
+    expect(c2.picks.get("map:2:1:0#10")!.map(p => p.picked)).toEqual([1]);
+  });
+  it("fixture has no changed records", () => {
+    expect(computeCoverage(fixtureRecords(), data).changedSeqs.size).toBe(0);
   });
   it("excludes wrong command codes and unknown locations", () => {
     const recs = fixtureRecords().map(r => {
@@ -67,12 +97,14 @@ describe("choice option verification", () => {
     maps.set(2, map);
     return { ...data, maps };
   };
-  it("choices/choice whose option texts differ from the data are uncertain", () => {
+  it("choices whose option texts differ (same count) are changed, not uncertain", () => {
     const c = computeCoverage(fixtureRecords(), reordered());
-    expect(c.uncertainSeqs.has(7)).toBe(true);   // choices: options reordered in data
-    expect(c.uncertainSeqs.has(9)).toBe(true);   // choice: preceding choices in branch 1 mismatches
+    expect(c.changedSeqs.has(7)).toBe(true);     // choices: options reordered in data
+    expect(c.uncertainSeqs.has(7)).toBe(false);
+    expect(c.uncertainSeqs.has(9)).toBe(false);  // choice: count matches
+    expect(c.changedSeqs.has(9)).toBe(false);    // choice has no text of its own
     expect(c.uncertainSeqs.has(30)).toBe(false); // choice: no choices record in branch 2 → code alone
-    expect(c.picks.get("map:2:1:0#10")!.map(p => [p.picked, p.branch])).toEqual([[1, 2]]);
+    expect(c.picks.get("map:2:1:0#10")!.map(p => [p.picked, p.branch])).toEqual([[0, 1], [1, 2]]);
   });
   it("matching option texts stay verified", () => {
     const c = computeCoverage(fixtureRecords(), data);
@@ -96,6 +128,24 @@ describe("empty message", () => {
     expect(c.seen.has("map:2:1:0#0")).toBe(true);
     expect(c.uncertainSeqs.has(100)).toBe(false);
     expect(c.uncertainSeqs.has(101)).toBe(true);
+    expect(c.changedSeqs.has(101)).toBe(false);
+  });
+  it("scroll checks only the 105 code; text differences are changed", () => {
+    const maps = new Map(data.maps);
+    const map = structuredClone(maps.get(2)!);
+    map.events[1]!.pages[0].list.splice(0, 0,
+      { code: 105, indent: 0, parameters: [2, false] }, { code: 405, indent: 0, parameters: ["두루마리"] });
+    maps.set(2, map);
+    const d = { ...data, maps };
+    const src = { source: "map", mapId: 2, eventId: 1, page: 0 } as const;
+    const base = { v: 1 as const, t: 0, run: 1, branch: 1 };
+    const same = { ...base, seq: 1, type: "scroll", src, cmd: 0, text: "두루마리\n둘째 줄" } as LogRecord;
+    const other = { ...base, seq: 2, type: "scroll", src, cmd: 0, text: "Scroll" } as LogRecord;
+    const wrong = { ...base, seq: 3, type: "scroll", src, cmd: 1, text: "두루마리" } as LogRecord;
+    const c = computeCoverage([same, other, wrong], d);
+    expect(c.seen.has("map:2:1:0#0")).toBe(true);
+    expect([...c.changedSeqs]).toEqual([2]);
+    expect([...c.uncertainSeqs]).toEqual([3]);
   });
 });
 
