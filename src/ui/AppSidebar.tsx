@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { BookOpen, EyeOff, FolderOpen, FolderTree, History, MapPin, Search, type LucideIcon } from "lucide-react";
+import { BookOpen, EyeOff, FolderOpen, FolderTree, Gamepad2, History, MapPin, Search, type LucideIcon } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem,
@@ -19,6 +19,7 @@ import { useMissingGroups } from "./live/useMissingGroups";
 import { VIEW_NAMES, viewOf, type ViewKind } from "./views";
 
 const NAV: { view: ViewKind; route: Route; icon: LucideIcon }[] = [
+  { view: "play", route: { kind: "play" }, icon: Gamepad2 },
   { view: "read", route: { kind: "read" }, icon: BookOpen },
   { view: "here", route: { kind: "here" }, icon: MapPin },
   { view: "history", route: { kind: "history" }, icon: History },

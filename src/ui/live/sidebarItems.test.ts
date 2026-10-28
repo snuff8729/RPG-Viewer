@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChecklistEvent, MapChecklist } from "@/core/live/mapChecklist";
 import type { MissingEventGroup, MissingGroup } from "@/core/live/missingGroups";
-import { nowItems, placesToGo } from "./sidebarItems";
+import { actionableItems, isActionable, nowItems, placesToGo } from "./sidebarItems";
 
 const ev = (eventId: number, section: ChecklistEvent["section"], hasLoc = true): ChecklistEvent => ({
   eventId, name: `E${eventId}`, title: `T${eventId}`, x: 0, y: 0, section, activePage: 0,
@@ -29,6 +29,19 @@ describe("nowItems", () => {
     const exitNew = { ...ev(2, "exit"), unseen: 2 };
     const c = checklist([hidden, exitNew, ev(3, "exit"), ev(4, "now")]);
     expect(nowItems(c).map((e) => e.eventId)).toEqual([4, 2]);
+  });
+});
+
+describe("actionableItems", () => {
+  it("keeps now/item/repeat and exits with something unseen, in that order, without a limit or location", () => {
+    const exitNew = { ...ev(9, "exit"), unpicked: 1 };
+    const evs = [ev(1, "repeat"), ev(2, "exit"), exitNew, ev(3, "talk"), ev(4, "now", false), ev(5, "locked"), ev(6, "item"), ev(7, "done"), ev(8, "now")];
+    expect(actionableItems(evs).map((e) => e.eventId)).toEqual([4, 8, 6, 1, 9]);
+  });
+  it("drops story events", () => {
+    const story = { ...ev(1, "now"), story: true };
+    expect(isActionable(story)).toBe(false);
+    expect(actionableItems([story, ev(2, "item")]).map((e) => e.eventId)).toEqual([2]);
   });
 });
 

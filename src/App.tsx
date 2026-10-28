@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { GameProvider, useGame } from "@/app/GameProvider";
 import { formatRoute, useRoute } from "@/app/route";
 import { locationKey } from "@/core/index/locations";
@@ -15,7 +15,11 @@ import { ExplorerView } from "@/ui/ExplorerView";
 import { useExplorerState } from "@/ui/useExplorerState";
 import { SearchDialog } from "@/ui/SearchDialog";
 import { VIEW_NAMES, viewOf } from "@/ui/views";
-import { LiveProvider } from "@/app/LiveProvider";
+import { LiveProvider, useLive } from "@/app/LiveProvider";
+import { popupGameKey } from "@/app/popup";
+import { useAutoReopen } from "@/app/useAutoReopen";
+import { PlayView } from "@/ui/live/PlayView";
+import { loadPlaySidebar, savePlaySidebar } from "@/ui/live/playLayout";
 import { AssistPanel } from "@/ui/live/AssistPanel";
 import { LaunchButton } from "@/ui/live/LaunchButton";
 import { PinGameButton } from "@/ui/PinGameButton";
@@ -35,6 +39,26 @@ function Shell() {
   /** 못 본 것 화면에 미리 채울 검색어. n이 바뀌면 화면을 다시 마운트한다. */
   const [missingSeed, setMissingSeed] = useState({ n: 0, query: "" });
   const ready = status === "ready";
+  const { connection } = useLive();
+  /** 따로 띄운 플레이 창이면 다시 열 게임 key */
+  const [popupKey] = useState(() => popupGameKey(window.location.search));
+  useAutoReopen(popupKey);
+  const isPlay = route.kind === "play";
+  /** 사이드바 펼침: 플레이 화면은 따로 기억한다(처음엔 접힘) */
+  const [navOpen, setNavOpen] = useState(true);
+  const [playNavOpen, setPlayNavOpen] = useState(loadPlaySidebar);
+  const onNavOpen = (v: boolean) => {
+    if (isPlay) { setPlayNavOpen(v); savePlaySidebar(v); } else setNavOpen(v);
+  };
+
+  // 게임을 열고 처음 연결되면 플레이 화면으로(다른 화면을 이미 골랐으면 그대로)
+  const playFor = useRef<unknown>(null);
+  useEffect(() => {
+    if (!ready || connection !== "connected" || playFor.current === data) return;
+    playFor.current = data;
+    const h = window.location.hash;
+    if (h === "" || h === "#" || h === "#/") window.location.replace(formatRoute({ kind: "play" }));
+  }, [ready, connection, data]);
 
   useEffect(() => {
     if (!ready) return;
@@ -59,8 +83,10 @@ function Shell() {
     window.location.hash = formatRoute({ kind: "missing" });
   };
 
+  if (popupKey !== null && isPlay) return <PlayView popup />;
+
   return (
-    <SidebarProvider>
+    <SidebarProvider open={isPlay ? playNavOpen : navOpen} onOpenChange={onNavOpen}>
       <AppSidebar
         route={route}
         follow={follow}
@@ -70,6 +96,7 @@ function Shell() {
         onClose={() => { setSearchOpen(false); close(); }}
       />
       <SidebarInset>
+        {isPlay ? <PlayView /> : (<>
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
@@ -109,6 +136,7 @@ function Shell() {
           {route.kind === "history" && <HistoryView />}
           {route.kind === "missing" && <MissingView key={missingSeed.n} initialQuery={missingSeed.query} />}
         </main>
+        </>)}
       </SidebarInset>
       <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </SidebarProvider>

@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, Maximize, Minus, Plus } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Crosshair, Maximize, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blocked } from "@/core/map/passage";
@@ -9,6 +9,7 @@ import type { EventImage } from "@/core/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
@@ -21,6 +22,8 @@ import type { LoadedTiles } from "./useMapTiles";
 const T = 48;
 /** 캔버스 한 장의 최대 픽셀 수(메모리 상한) */
 const MAX_AREA = 16_000_000;
+/** 작게 보일 때 맞춤이 이보다 작으면(px/칸) 이 크기로 내 위치를 보여준다 */
+const COMPACT_MIN_ZOOM = 8;
 /** 한 프레임에 그리는 시간(ms). 넘으면 다음 프레임으로 넘겨 큰 맵에서도 화면이 멈추지 않게 한다 */
 const SLICE_MS = 10;
 /** 합성 방법(0 보통, 1 더하기, 2 곱하기, 3 스크린) → 캔버스 합성 */
@@ -272,7 +275,7 @@ function useThemeTick(): number {
 }
 
 /** 실제 맵 그림(타일셋·이벤트 그림) 위에 번호·내 위치·길을 겹쳐 그린다. 표시를 누르면 onPick(eventId). */
-export function MapCanvas({ tiles, events, listed, numbers, player, route, selected, focus, onPick }: {
+export function MapCanvas({ tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false }: {
   tiles: LoadedTiles;
   /** 지금 활성 페이지가 있는 이벤트(그림·길막음용, 지금 위치) */
   events: CurrentEvent[];
@@ -285,8 +288,14 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   /** 바뀌면 그 칸을 가운데로(n: 같은 칸을 다시 요청해도 움직이게) */
   focus: { x: number; y: number; n: number } | null;
   onPick: (eventId: number) => void;
+  /**
+   * 작게(플레이 화면): 부모 높이를 채우고, 도구는 아이콘만, 범례·표시 설정은 Popover로.
+   * 맞춤이 너무 작으면 읽을 수 있는 크기로 내 위치를 가운데 두고, 내가 화면 밖으로 나가면 따라간다.
+   */
+  compact?: boolean;
 }) {
   const { assets } = useGame();
+  const switchId = useId();
   const { map } = tiles;
   const scrollRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -357,7 +366,8 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
     const el = scrollRef.current;
     const z = el && fitZoom(el.clientWidth, el.clientHeight, map.width, map.height);
     if (!z) return false;
-    zoomAndCenter(z, map.width / 2, map.height / 2);
+    if (compact && z < COMPACT_MIN_ZOOM) zoomAndCenter(COMPACT_MIN_ZOOM, player.x + 0.5, player.y + 0.5);
+    else zoomAndCenter(z, map.width / 2, map.height / 2);
     return true;
   };
   const fitRef = useRef(fitNow);
@@ -401,6 +411,22 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
   }, [focus]);
 
   const { x: px, y: py } = player;
+  // 작게 보일 때: 내가 보이는 영역 가장자리 밖으로 나가면 내 위치를 가운데로
+  useEffect(() => {
+    const el = scrollRef.current;
+    const z = zoomRef.current;
+    if (!compact || !el || z == null || pendingCenter.current) return;
+    const cx = (px + 0.5) * z, cy = (py + 0.5) * z;
+    const mx = Math.min(el.clientWidth / 4, 2 * z), my = Math.min(el.clientHeight / 4, 2 * z);
+    const inside = cx >= el.scrollLeft + mx && cx <= el.scrollLeft + el.clientWidth - mx
+      && cy >= el.scrollTop + my && cy <= el.scrollTop + el.clientHeight - my;
+    // 맵 전체가 보이면(스크롤할 곳이 없으면) 움직일 필요가 없다
+    const scrollable = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
+    if (!inside && scrollable) {
+      el.scrollLeft = cx - el.clientWidth / 2;
+      el.scrollTop = cy - el.clientHeight / 2;
+    }
+  }, [compact, px, py]);
   // numbers는 부모가 매번 새로 만드므로 내용이 같으면 같은 값으로 본다(스냅샷마다 다시 그리지 않게)
   const numbersKey = [...numbers].join(";");
   const [stableNumbers, setStableNumbers] = useState({ key: numbersKey, numbers });
@@ -443,24 +469,49 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
 
   const loading = !charsReady || zoom == null;
   const w = map.width * (zoom ?? 0), h = map.height * (zoom ?? 0);
+  const toggles = (
+    <>
+      <div className="flex items-center gap-2">
+        <Switch id={`${switchId}-locked`} checked={showLocked} onCheckedChange={setShowLocked} />
+        <Label htmlFor={`${switchId}-locked`}>잠긴 것도 표시</Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch id={`${switchId}-walls`} checked={showWalls} onCheckedChange={setShowWalls} />
+        <Label htmlFor={`${switchId}-walls`}>벽 표시</Label>
+      </div>
+    </>
+  );
   return (
-    <Card className="gap-2 py-3">
-      <CardContent className="space-y-2 px-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="icon-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
-          <Button variant="outline" size="icon-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
-          <Button variant="outline" size="sm" onClick={fit}><Maximize />맞춤</Button>
-          <Button variant="outline" size="sm" onClick={toPlayer}><Crosshair />내 위치로</Button>
-          <div className="ml-auto flex items-center gap-2">
-            <Switch id="map-locked" checked={showLocked} onCheckedChange={setShowLocked} />
-            <Label htmlFor="map-locked">잠긴 것도 표시</Label>
+    <Card className={compact ? "h-full gap-2 py-2" : "gap-2 py-3"}>
+      <CardContent className={compact ? "flex min-h-0 flex-1 flex-col gap-2 px-2" : "space-y-2 px-3"}>
+        {compact ? (
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="icon-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
+            <Button variant="outline" size="icon-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
+            <Button variant="outline" size="icon-sm" aria-label="맞춤" onClick={fit}><Maximize /></Button>
+            <Button variant="outline" size="icon-sm" aria-label="내 위치로" onClick={toPlayer}><Crosshair /></Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="ml-auto"><SlidersHorizontal />범례</Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72">
+                <PopoverHeader><PopoverTitle>범례</PopoverTitle></PopoverHeader>
+                <MapLegend />
+                {toggles}
+              </PopoverContent>
+            </Popover>
           </div>
-          <div className="flex items-center gap-2">
-            <Switch id="map-walls" checked={showWalls} onCheckedChange={setShowWalls} />
-            <Label htmlFor="map-walls">벽 표시</Label>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="icon-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
+            <Button variant="outline" size="icon-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
+            <Button variant="outline" size="sm" onClick={fit}><Maximize />맞춤</Button>
+            <Button variant="outline" size="sm" onClick={toPlayer}><Crosshair />내 위치로</Button>
+            <div className="ml-auto" />
+            {toggles}
           </div>
-        </div>
-        <div ref={scrollRef} className="relative h-[min(60vh,32rem)] overflow-auto rounded-md border bg-muted">
+        )}
+        <div ref={scrollRef} className={`relative overflow-auto rounded-md border bg-muted ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}>
           {loading && <Skeleton className="absolute inset-0 rounded-none" />}
           <div className="relative" style={{ width: w, height: h }}>
             <canvas ref={baseRef} className="absolute inset-0 size-full" />
@@ -474,7 +525,7 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
             />
           </div>
         </div>
-        <MapLegend />
+        {!compact && <MapLegend />}
       </CardContent>
     </Card>
   );
