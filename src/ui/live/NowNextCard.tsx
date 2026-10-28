@@ -1,12 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { locationKey } from "@/core/index/locations";
 import { findNodePathByCmd } from "@/core/interpret/interpret";
 import { pageList } from "@/core/live/mismatch";
 import { remainingNodes } from "@/core/live/remaining";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ScriptView } from "../script/ScriptView";
 import { openPage } from "../navigation";
@@ -19,6 +20,15 @@ const NOW_BASE_PATH = [-100];
 export function NowNextCard() {
   const { live } = useLive();
   const { index, data } = useGame();
+  const [open, setOpen] = useState(false);
+  const choice = live?.choice;
+  const choiceKey = choice ? `${choice.src ? locationKey(choice.src) : ""}#${choice.cmd}` : null;
+  // 새 선택지가 떠오르면 자동으로 펼친다
+  const [seenChoice, setSeenChoice] = useState<string | null>(null);
+  if (choiceKey !== seenChoice) {
+    setSeenChoice(choiceKey);
+    if (choiceKey !== null) setOpen(true);
+  }
   const running = live?.running ?? null;
   const runningCmd = live?.runningCmd;
   const key = running ? locationKey(running) : null;
@@ -50,8 +60,13 @@ export function NowNextCard() {
       <CardHeader>
         <CardTitle>지금 이후</CardTitle>
         <CardDescription>{entry.path}</CardDescription>
+        <CardAction>
+          <Button variant="ghost" size="icon-sm" aria-label={open ? "접기" : "펼치기"} onClick={() => setOpen(o => !o)}>
+            {open ? <ChevronDown /> : <ChevronUp />}
+          </Button>
+        </CardAction>
       </CardHeader>
-      <CardContent className="space-y-2">
+      {open && <CardContent className="space-y-2">
         {outdated ? (
           <p className="text-sm text-muted-foreground">플러그인을 업데이트하면 이후 대사를 볼 수 있어요</p>
         ) : (
@@ -63,7 +78,7 @@ export function NowNextCard() {
             <Button variant="outline" size="sm" onClick={onView}>탐색기에서 보기</Button>
           </>
         )}
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }
