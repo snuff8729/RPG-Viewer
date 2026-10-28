@@ -4,6 +4,7 @@ import { useLive } from "@/app/LiveProvider";
 import { choiceFlow, type FlowItem } from "@/core/live/choiceFlow";
 import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
 import { readerItems } from "@/core/live/reader";
+import { useNoticesShown } from "./noticeDisplay";
 import type { HistoryModel } from "@/core/live/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,15 +86,16 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const { records, model, noisy, uncertainSeqs, changedSeqs, coverage } = useLive();
   const { overrides } = usePluginOverrides();
   const [battlesShown] = useBattlesShown();
+  const [noticesShown] = useNoticesShown();
 
   const flow = useMemo(() => {
     if (!data) return [];
     const path = branchPath(records, model, branch);
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
     const choiceText = choiceTexts(path, data);
-    const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown });
+    const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown, notices: noticesShown });
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown]);
 
   if (!data) return null;
 

@@ -20,6 +20,8 @@ import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { ALL_KINDS, filterItems, loadKinds, saveKinds, type Kind } from "./historyFilter";
 import { classifyPluginRecord } from "@/core/live/pluginText";
 import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
+import { useNoticesShown } from "./noticeDisplay";
+import { useAddons } from "@/app/AddonsProvider";
 
 const PAGE = 500;
 const KIND_LABELS: [Kind, string][] = [
@@ -60,9 +62,13 @@ export function HistoryView() {
 
   const { overrides } = usePluginOverrides();
   const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
+  // 알림 문구 기록(애드온을 켰거나 이 갈래에 알림 문구가 있을 때만 `알림 문구 보기`를 보인다)
+  const noticesOn = useAddons().isOn("notices");
+  const hasNotices = useMemo(() => noticesOn || path.some(r => r.type === "notice"), [noticesOn, path]);
+  const [noticesShown, setNoticesShown] = useNoticesShown();
   const filtered = useMemo(
-    () => filterItems(items, kinds, showAllPlugins ? undefined : r => classifyPluginRecord(r, overrides).kind === "tech"),
-    [items, kinds, showAllPlugins, overrides],
+    () => filterItems(items, kinds, showAllPlugins ? undefined : r => classifyPluginRecord(r, overrides).kind === "tech", !noticesShown),
+    [items, kinds, showAllPlugins, overrides, noticesShown],
   );
 
   const choiceTextNow = useMemo(() => {
@@ -189,6 +195,12 @@ export function HistoryView() {
             <Switch id="history-plugin-all" checked={showAllPlugins} onCheckedChange={setShowAllPlugins} />
             <Label htmlFor="history-plugin-all">플러그인 명령 모두 보기</Label>
           </div>
+          {hasNotices && (
+            <div className="flex items-center gap-2">
+              <Switch id="history-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
+              <Label htmlFor="history-notices">알림 문구 보기</Label>
+            </div>
+          )}
         </div>
       )}
       <div className="relative min-h-0 flex-1">

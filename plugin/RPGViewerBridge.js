@@ -22,6 +22,10 @@
  * 결과(승리/패배/도주/중단, 보상)를 기록합니다. 전투 한 번에 최대 2000줄,
  * 초당 50줄까지만 남깁니다(배속 중에도 전투를 느리게 하지 않음).
  * 기술·아이템 사용 줄에는 누가(아군/적) 무엇을 썼는지도 함께 남깁니다.
+ * RPG Viewer에서 "알림 문구 기록"을 켠 게임에서만, 다른 플러그인이 화면 구석이나
+ * 위쪽에 잠깐 띄우는 문구(TickerManager.show, LiveCommentContainer의 show 등과
+ * 설정에서 직접 추가한 함수)를 기록합니다. 같은 문구는 0.3초 안에 한 번,
+ * 초당 30개까지만 남기고, 게임이 보여 주는 내용은 바꾸지 않습니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -34,7 +38,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.8.1",
+    VERSION: "1.9.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -133,6 +137,22 @@
   var BATTLE_LINES_MAX = 2000, BATTLE_RATE_MAX = 50, BATTLE_RATE_MS = 1000, BATTLE_DUP_MS = 100;
   var BATTLE_TEXT_MAX = 500, BATTLE_PICS_GAP_MS = 500, BATTLE_ENEMIES_MAX = 20, BATTLE_ITEMS_MAX = 50, BATTLE_NAME_MAX = 200;
   var BATTLE_HOLD_MS = 5000;  // the battle start record waits for Scene_Battle (encounter effect, loading)
+  // 1.9.0 notices (control.json "captureNotices"; off by default): texts other plugins pop up on screen
+  // (tickers, stream-style comments, notifications). Not story records. Deduped and rate-capped.
+  var captureNotices = false;
+  var noticeExtra = [];       // extra hook paths from control.json "noticeHooks" (validated)
+  var noticeHooked = [];      // paths wrapped so far (reported in live.json)
+  var noticeLast = { key: null, t: -Infinity, times: [] };
+  var noticeWin = null;       // cached Window_Base-like object for convertEscapeCharacters
+  var NOTICE_BUILTIN = [
+    { path: "TickerManager.show", source: "ticker" },
+    { path: "LiveCommentContainer.prototype.show", source: "livecomment" },
+    { path: "Torigoya.NotifyMessage.Manager.notify", source: "notify" },
+    { path: "Game_System.prototype.pushInfoEvent", source: "info" }
+  ];
+  var NOTICE_PATH_RE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
+  var NOTICE_DUP_MS = 300, NOTICE_RATE_MAX = 30, NOTICE_RATE_MS = 1000, NOTICE_TEXT_MAX = 500;
+  var NOTICE_HOOKS_MAX = 20, NOTICE_PATH_MAX = 200;
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -552,6 +572,8 @@
         lastCommand: lastCommand,
         controlT: controlT,
         capturePictures: capturePictures,
+        captureNotices: captureNotices,
+        notices: noticeHooked.slice(),
         hotkeys: effectiveHotkeys()
       }
     };
@@ -689,6 +711,11 @@
     var cap = c.capturePictures === true;
     if (cap !== capturePictures) lastPicsKey = null; // turned on again: the next snapshot is written in full
     capturePictures = cap;
+    captureNotices = c.captureNotices === true;
+    noticeExtra = noticePaths(c.noticeHooks);
+    if (captureNotices) {
+      try { ensureNoticeHooks(); } catch (en) { reportError(en); }
+    }
     // c.seenTroops is accepted and ignored: battles are never sped up automatically
     var hk = hotkeysFrom(c.hotkeys);
     if (JSON.stringify(hk) !== JSON.stringify(hotkeys)) {
@@ -1279,6 +1306,106 @@
     if (bridge._hooks.indexOf("Window_BattleLog.displayAction") < 0) bridge._hooks.push("Window_BattleLog.displayAction");
   }
 
+  // ---------------------------------------------------------------- notices (1.9.0)
+  // control.json "noticeHooks": extra "Global.path.to.fn" strings (validated, at most NOTICE_HOOKS_MAX).
+  function noticePaths(v) {
+    var out = [];
+    if (!v || typeof v.length !== "number") return out;
+    for (var i = 0; i < v.length && out.length < NOTICE_HOOKS_MAX; i++) {
+      var p = v[i];
+      if (typeof p !== "string" || p.length > NOTICE_PATH_MAX || !NOTICE_PATH_RE.test(p)) continue;
+      if (p.split(".").indexOf("__proto__") >= 0 || out.indexOf(p) >= 0) continue;
+      out.push(p);
+    }
+    return out;
+  }
+
+  // "A.b.c" -> { owner: A.b, name: "c" } when A.b.c is a function now, else null.
+  function resolveNoticePath(p) {
+    var parts = p.split(".");
+    var owner = G;
+    for (var i = 0; i < parts.length - 1; i++) {
+      owner = owner[parts[i]];
+      if (!owner || (typeof owner !== "object" && typeof owner !== "function")) return null;
+    }
+    var name = parts[parts.length - 1];
+    return typeof owner[name] === "function" ? { owner: owner, name: name } : null;
+  }
+
+  // The text a notice call shows: a string first argument, or { message } / { text } of an object.
+  function noticeArgText(a) {
+    if (typeof a === "string") return a;
+    if (a && typeof a === "object") {
+      if (typeof a.message === "string") return a.message;
+      if (typeof a.text === "string") return a.text;
+    }
+    return null;
+  }
+
+  // \n[1], \v[3], \p[1], \g ... expanded the way the game's windows do (Window_Base.convertEscapeCharacters,
+  // including plugin extensions); codes left over (\c[], \i[] ...) keep their backslash. Fallback: the raw text.
+  function expandNotice(raw) {
+    if (!noticeWin) {
+      var WBp = G.Window_Base && G.Window_Base.prototype;
+      if (!WBp || typeof WBp.convertEscapeCharacters !== "function") return raw;
+      noticeWin = Object.create(WBp); // no bitmap / contents: only the prototype's text helpers are used
+    }
+    try {
+      var out = noticeWin.convertEscapeCharacters(raw);
+      return typeof out === "string" ? out.split("\u001b").join("\\") : raw;
+    } catch (e) {
+      return raw; // a plugin's override that needs a real window
+    }
+  }
+
+  function recordNotice(arg, source) {
+    if (!captureNotices || run === null) return;
+    var raw = noticeArgText(arg);
+    if (raw === null || !/\S/.test(raw)) return;
+    if (raw.length > NOTICE_TEXT_MAX) raw = raw.slice(0, NOTICE_TEXT_MAX);
+    var text = expandNotice(raw);
+    if (text.length > NOTICE_TEXT_MAX) text = text.slice(0, NOTICE_TEXT_MAX);
+    var key = source + "\u0001" + text;
+    var t = now(), n = noticeLast;
+    if (key === n.key && t - n.t < NOTICE_DUP_MS) { n.t = t; return; }
+    n.key = key;
+    n.t = t;
+    while (n.times.length && t - n.times[0] >= NOTICE_RATE_MS) n.times.shift();
+    if (n.times.length >= NOTICE_RATE_MAX) return;
+    n.times.push(t);
+    emit("notice", { source: source, text: text, raw: raw });
+  }
+
+  function wrapNotice(owner, name, source) {
+    var orig = owner[name];
+    var wrapped = function () {
+      try { if (captureNotices) recordNotice(arguments[0], source); } catch (e) { reportError(e); }
+      return orig.apply(this, arguments);
+    };
+    wrapped.__rpgvNotice = true;
+    if (orig.prototype) wrapped.prototype = orig.prototype; // a wrapped constructor keeps its methods
+    owner[name] = wrapped;
+  }
+
+  // Wraps every known notice API and every extra path that is a function right now (plugins may define
+  // their globals late: checked again on Scene_Map / Scene_Battle start and when control.json changes).
+  // A function is wrapped once; a replacement installed later is wrapped again.
+  function ensureNoticeHooks() {
+    if (!captureNotices) return;
+    var list = [];
+    for (var i = 0; i < NOTICE_BUILTIN.length; i++) list.push(NOTICE_BUILTIN[i]);
+    for (var j = 0; j < noticeExtra.length; j++) list.push({ path: noticeExtra[j], source: noticeExtra[j] });
+    for (var k = 0; k < list.length; k++) {
+      try {
+        var r = resolveNoticePath(list[k].path);
+        if (!r || r.owner[r.name].__rpgvNotice) continue;
+        wrapNotice(r.owner, r.name, list[k].source);
+        if (noticeHooked.indexOf(list[k].path) < 0) noticeHooked.push(list[k].path);
+        if (bridge._hooks.indexOf(list[k].path) < 0) bridge._hooks.push(list[k].path);
+      } catch (e) { reportError(e); }
+    }
+  }
+
   // ---------------------------------------------------------------- plugin commands
   // Plugin commands (356 MV / 357 MZ) run by events, recorded so the viewer can tell an examine
   // spot or plugin-shown text was reached. Parallel interpreters are skipped; the same src+cmd is
@@ -1646,6 +1773,15 @@
       return function () {
         var r = orig.apply(this, arguments);
         try { if (heldMsg && heldMsg.rec.type === "battle") { finishHeld(); scheduleFlush(); } } catch (e) { reportError(e); }
+        try { ensureNoticeHooks(); } catch (en) { reportError(en); }
+        return r;
+      };
+    });
+    var SMap = G.Scene_Map && G.Scene_Map.prototype;
+    hook(SMap, "Scene_Map", "start", function (orig) {
+      return function () {
+        var r = orig.apply(this, arguments);
+        try { ensureNoticeHooks(); } catch (en) { reportError(en); }
         return r;
       };
     });
@@ -1662,6 +1798,7 @@
       };
     });
     try { ensureActionHook(); } catch (eh) { reportError(eh); }
+    try { ensureNoticeHooks(); } catch (en) { reportError(en); }
 
     try { installAssist(); } catch (ea) { reportError(ea); } // the log hooks below must still install
 

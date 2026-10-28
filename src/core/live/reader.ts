@@ -3,6 +3,7 @@ import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
 import { locationKey } from "../index/locations";
 import { nextShot, type ScreenScene, type ScreenShot } from "../addons/screenPictures";
+import { noticeSourceLabel } from "../addons/notices";
 import type { GameData, Location } from "../types";
 import { branchLabel, isContinuation } from "./history";
 import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginText";
@@ -33,7 +34,9 @@ export type ReaderItem =
     screen?: ScreenShot; endScreen?: ScreenShot;
   }
   /** 전투 로그 한 줄(제어 문자·줄 태그 처리). action: 기술·아이템 사용 줄. screen: 이 줄에서 새로 보일 화면 그림 */
-  | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot };
+  | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot }
+  /** 1.9.0 알림 문구(티커·코멘트 등). text = 제어 문자 처리한 글, source = 보일 출처 이름 */
+  | { kind: "notice"; key: string; seq: number; text: string; source: string };
 
 export type BattleResult = "win" | "lose" | "escape" | "abort";
 const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
@@ -120,6 +123,10 @@ function fromRecord(
       if (action) item.action = action;
       return item;
     }
+    case "notice": {
+      const text = formatText(safe(r.text) || safe(r.raw), data).trim();
+      return text ? { kind: "notice", key: `r${r.seq}`, seq: r.seq, text, source: noticeSourceLabel(r.source) } : null;
+    }
     default: return null;
   }
 }
@@ -164,11 +171,12 @@ function battleItem(
  * foldTimeline 결과를 읽기 항목으로 바꾼다(대사·그림·고른 선택·플러그인 명령·장면 구분만). 예외를 던지지 않는다.
  * model은 갈래 시작 문구(`— {n}회차 갈래 {m} 시작 —`)에 쓴다. overrides: 플러그인 명령별 보이기 설정(pluginText).
  * 플러그인 줄은 모두 넣고 tech로 표시만 한다(숨기기는 화면이 정한다).
+ * opts.battles = false면 전투 묶음을, opts.notices = false면 알림 문구(1.9.0, 전투 안의 것도)를 뺀다.
  * scenes(화면 그림 따라 그리기, scenesBySeq): 주면 보이는 이벤트 그림·스탠딩이 앞에 보인 것과 달라진 대사에 screen을 붙인다(nextShot).
  */
 export function readerItems(
   items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
-  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean } = {},
+  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean } = {},
 ): ReaderItem[] {
   /** 바로 앞에 이어진 플러그인 기록들(글자 그림 설명용) */
   let plugins: RecordOf<"plugin">[] = [];
@@ -182,14 +190,17 @@ export function readerItems(
     return shot;
   };
   const battles = opts?.battles !== false;
+  const notices = opts?.notices !== false;
   const convert = (list: HistoryItem[], out: ReaderItem[]) => {
     for (const it of Array.isArray(list) ? list : []) {
       try {
         if (!it) continue;
         if (it.kind === "record") {
           const rec = it.record;
+          // 알림 문구는 다른 플러그인이 띄운 것이라 이어진 플러그인 기록(글자 그림 설명)을 끊지 않는다
+          if (rec?.type === "notice" && !notices) continue;
           const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);
-          plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
+          if (rec?.type !== "notice") plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
           // 화면 그림을 기록하는 중이면 그림 표시(231)는 다음 대사의 화면이 실제 모습으로 보여 주므로 따로 넣지 않는다(글자 띄우기는 남긴다)
           if (r?.kind === "picture" && r.name && shown !== null) continue;
           if (!r) continue;
@@ -219,7 +230,10 @@ export function readerItems(
             convert(it.items, inner);
           }
           const endScreen = it.repeat > 0 || !it.end ? null : shotAt(it.end.seq, false);
-          const b = battleItem(it.start, it.end ?? null, inner, typeof it.logLines === "number" ? it.logLines : 0, typeof it.repeat === "number" ? it.repeat : 0, data);
+          // 알림 문구를 숨겼으면 줄 수에서도 뺀다
+          const hidden = notices ? 0 : it.items.filter(x => x?.kind === "record" && x.record?.type === "notice").length;
+          const logLines = Math.max(0, (typeof it.logLines === "number" ? it.logLines : 0) - hidden);
+          const b = battleItem(it.start, it.end ?? null, inner, logLines, typeof it.repeat === "number" ? it.repeat : 0, data);
           if (screen) b.screen = screen;
           if (endScreen) b.endScreen = endScreen;
           out.push(b);

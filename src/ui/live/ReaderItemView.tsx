@@ -15,6 +15,7 @@ import { ScreenPictures } from "../addons/ScreenPictures";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
+import { NoticeLine } from "./NoticeLine";
 import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
@@ -54,20 +55,36 @@ function ReaderPlugin({ item }: { item: Extract<ReaderItem, { kind: "plugin" }> 
 }
 
 type BattleReaderItem = Extract<ReaderItem, { kind: "battle" }>;
-type BattleLogItem = Extract<ReaderItem, { kind: "battlelog" }>;
+type BattleLogItem = Extract<ReaderItem, { kind: "battlelog" | "notice" }>;
 
-/** 이어진 전투 로그 줄은 한 덩어리로(촘촘하게) */
+const isLogLine = (it: ReaderItem): it is BattleLogItem => it.kind === "battlelog" || it.kind === "notice";
+
+/** 이어진 전투 로그 줄·알림 문구는 한 덩어리로(촘촘하게, 순서대로) */
 function groupLog(items: ReaderItem[]): (ReaderItem | BattleLogItem[])[] {
   const out: (ReaderItem | BattleLogItem[])[] = [];
   for (const it of items) {
     const last = out[out.length - 1];
-    if (it.kind === "battlelog" && Array.isArray(last)) last.push(it);
-    else out.push(it.kind === "battlelog" ? [it] : it);
+    if (isLogLine(it) && Array.isArray(last)) last.push(it);
+    else out.push(isLogLine(it) ? [it] : it);
   }
   return out;
 }
 
-/** 전투 묶음 안: 대사·그림은 늘 보이고, 전투 로그 줄은 펼쳤을 때만(줄의 화면 그림은 접혀 있어도 보인다). */
+/** 전투 로그 줄 하나(펼쳤을 때) 또는 알림 문구 */
+function LogLine({ line }: { line: BattleLogItem }) {
+  if (line.kind === "notice") return <NoticeLine text={line.text} source={line.source} />;
+  return (
+    <div>
+      {line.screen && <Screen shot={line.screen} />}
+      {line.action ? <BattleActionLine action={line.action} /> : <p className="whitespace-pre-wrap break-words">{line.text}</p>}
+    </div>
+  );
+}
+
+/**
+ * 전투 묶음 안: 대사·그림·알림 문구(캐릭터 대사 등)는 늘 보이고, 전투 로그 줄은 펼쳤을 때만
+ * (줄의 화면 그림은 접혀 있어도 보인다).
+ */
 function BattleBody({ item }: { item: BattleReaderItem }) {
   const [logOpen, setLogOpen] = useState(false);
   return (
@@ -81,17 +98,19 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
       {groupLog(item.items).map(g => {
         if (!Array.isArray(g)) return <ReaderItemView key={g.key} item={g} />;
         if (!logOpen) {
-          const shots = g.filter(l => l.screen);
-          return shots.length > 0 ? <div key={g[0].key}>{shots.map(l => <Screen key={l.key} shot={l.screen!} />)}</div> : null;
+          const kept = g.filter(l => l.kind === "notice" || l.screen);
+          if (kept.length === 0) return null;
+          return (
+            <div key={g[0].key} className="space-y-0.5 text-sm leading-snug">
+              {kept.map(l => l.kind === "notice"
+                ? <NoticeLine key={l.key} text={l.text} source={l.source} />
+                : <Screen key={l.key} shot={l.screen!} />)}
+            </div>
+          );
         }
         return (
           <div key={g[0].key} className="space-y-0.5 text-sm leading-snug text-muted-foreground">
-            {g.map(l => (
-              <div key={l.key}>
-                {l.screen && <Screen shot={l.screen} />}
-                {l.action ? <BattleActionLine action={l.action} /> : <p className="whitespace-pre-wrap break-words">{l.text}</p>}
-              </div>
-            ))}
+            {g.map(l => <LogLine key={l.key} line={l} />)}
           </div>
         );
       })}
@@ -162,6 +181,8 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
       return <BattleBlock item={item} />;
     case "battlelog":
       return <>{item.screen && <Screen shot={item.screen} />}{item.action ? <BattleActionLine action={item.action} /> : <p className="text-sm text-muted-foreground">{item.text}</p>}</>;
+    case "notice":
+      return <NoticeLine text={item.text} source={item.source} />;
   }
 }, (a, b) => sameItem(a.item, b.item));
 
@@ -206,6 +227,10 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     case "battlelog": {
       const p = b as typeof a;
       return a.text === p.text && sameShot(a.screen, p.screen) && sameAction(a.action, p.action);
+    }
+    case "notice": {
+      const p = b as typeof a;
+      return a.text === p.text && a.source === p.source;
     }
   }
 }

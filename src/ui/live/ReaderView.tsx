@@ -29,6 +29,7 @@ import { ReaderItemView } from "./ReaderItemView";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
 import { useBattlesShown } from "./battleDisplay";
+import { useNoticesShown } from "./noticeDisplay";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 
 const PAGE = 300;
@@ -102,6 +103,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const { overrides } = usePluginOverrides();
   const [showAllPlugins] = usePluginShowAll();
   const [battlesShown] = useBattlesShown();
+  const [noticesShown] = useNoticesShown();
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
@@ -111,10 +113,10 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const items = useMemo(() => {
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
-    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, { battles: battlesShown });
+    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, { battles: battlesShown, notices: noticesShown });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만
     return showAllPlugins ? all : all.filter(it => it.kind !== "plugin" || !it.tech);
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown]);
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown]);
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
@@ -494,6 +496,10 @@ export function ReaderView() {
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
   const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
   const [battlesShown, setBattlesShown] = useBattlesShown();
+  const [noticesShown, setNoticesShown] = useNoticesShown();
+  // `알림 문구 보기`는 알림 문구 기록을 켰거나 기록에 알림 문구가 있을 때만
+  const noticesOn = useAddons().isOn("notices");
+  const hasNotices = useMemo(() => noticesOn || records.some(r => r.type === "notice"), [noticesOn, records]);
   const onMode = (v: string) => {
     if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
     setMode(v);
@@ -521,6 +527,12 @@ export function ReaderView() {
             <Switch id="reader-battles" checked={battlesShown} onCheckedChange={setBattlesShown} />
             <Label htmlFor="reader-battles">전투 기록 보기</Label>
           </div>
+          {hasNotices && (
+            <div className="flex items-center gap-2">
+              <Switch id="reader-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
+              <Label htmlFor="reader-notices">알림 문구 보기</Label>
+            </div>
+          )}
         </div>
       )}
       {hasBranch && mode === "flow"

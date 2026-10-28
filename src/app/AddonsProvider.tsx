@@ -4,6 +4,7 @@ import { loadAddonFile, saveAddonFile } from "./addons";
 import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
 import type { AddonFile } from "@/core/addons/settings";
+import { cleanNoticeHooks } from "@/core/addons/notices";
 import type { PictureRole, PictureRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
 
@@ -18,6 +19,10 @@ export interface AddonsValue {
   pictureRoles: PictureRoles;
   /** 그림 번호들의 구분을 정한다(null = 자동). 선택 핸들러 안에서 부를 것. */
   setPictureRole(ids: number[], role: PictureRole | null): void;
+  /** 알림 문구 기록: 직접 추가한 함수 경로(Global.path.to.fn) */
+  noticeHooks: string[];
+  /** 직접 추가한 함수 경로를 바꾼다(쓸 수 없는 경로는 버린다). 클릭 핸들러 안에서 부를 것. */
+  setNoticeHooks(paths: string[]): void;
   /** 켜진 애드온이 control.json에 싣는 값 */
   controlFlags: Record<string, unknown>;
   /** 설정이 게임 폴더(rpg-viewer/addons.json)에 저장되는가(아니면 이 브라우저에만) */
@@ -26,9 +31,10 @@ export interface AddonsValue {
 
 const EMPTY: AddonState = {};
 const NO_ROLES: PictureRoles = {};
+const NO_HOOKS: string[] = [];
 const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
-  state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {}, controlFlags: {}, savedInFolder: false,
+  state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
 
@@ -55,6 +61,7 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const current = loaded && loaded.key === gameKey ? loaded : null;
   const state = current?.file.state ?? EMPTY;
   const pictureRoles = current?.file.pictureRoles ?? NO_ROLES;
+  const noticeHooks = current?.file.noticeHooks ?? NO_HOOKS;
 
   /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
@@ -87,15 +94,26 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setNoticeHooks = useCallback((paths: string[]) => {
+    update((prev) => {
+      const hooks = cleanNoticeHooks(paths);
+      const next: AddonFile = { ...prev };
+      if (hooks.length > 0) next.noticeHooks = hooks; else delete next.noticeHooks;
+      return next;
+    });
+  }, [update]);
+
   const value = useMemo<AddonsValue>(() => ({
     state,
     isOn: (id) => state[id] === true,
     setOn,
     pictureRoles,
     setPictureRole,
-    controlFlags: addonControlFlags(state),
+    noticeHooks,
+    setNoticeHooks,
+    controlFlags: addonControlFlags(state, { noticeHooks }),
     savedInFolder: current?.inFolder ?? false,
-  }), [state, setOn, pictureRoles, setPictureRole, current?.inFolder]);
+  }), [state, setOn, pictureRoles, setPictureRole, noticeHooks, setNoticeHooks, current?.inFolder]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

@@ -1,19 +1,26 @@
 import { ADDONS, type AddonState } from "./registry";
 import { isPictureRole, type PictureRoles } from "./screenPictures";
-
-/** 게임별 애드온 설정 전체: 켜짐 상태와 화면 그림 구분(그림 번호 → 직접 고른 구분) */
-export interface AddonFile { state: AddonState; pictureRoles: PictureRoles }
+import { cleanNoticeHooks } from "./notices";
 
 /**
- * 게임 폴더의 rpg-viewer/addons.json 본문(계약 v1): { v: 1, enabled: { [id]: boolean }, pictureRoles?: { [그림 번호]: 구분 } }.
- * pictureRoles는 고른 것이 있을 때만 쓴다.
+ * 게임별 애드온 설정 전체: 켜짐 상태와 화면 그림 구분(그림 번호 → 직접 고른 구분),
+ * noticeHooks = 알림 문구 기록에 직접 추가한 함수 경로(없으면 없음)
  */
-export function addonsJson(state: AddonState, pictureRoles?: PictureRoles | null): string {
+export interface AddonFile { state: AddonState; pictureRoles: PictureRoles; noticeHooks?: string[] }
+
+/**
+ * 게임 폴더의 rpg-viewer/addons.json 본문(계약 v1):
+ * { v: 1, enabled: { [id]: boolean }, pictureRoles?: { [그림 번호]: 구분 }, noticeHooks?: string[] }.
+ * pictureRoles·noticeHooks는 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
+ */
+export function addonsJson(state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
   const roles = cleanRoles(pictureRoles);
   const body: Record<string, unknown> = { v: 1, enabled };
   if (Object.keys(roles).length > 0) body.pictureRoles = roles;
+  const hooks = cleanNoticeHooks(noticeHooks);
+  if (hooks.length > 0) body.noticeHooks = hooks;
   return JSON.stringify(body, null, 2) + "\n";
 }
 
@@ -40,7 +47,10 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
       const v = (en as Record<string, unknown>)[a.id];
       if (typeof v === "boolean") state[a.id] = v;
     }
-    return { state, pictureRoles: cleanRoles((raw as { pictureRoles?: unknown }).pictureRoles) };
+    const file: AddonFile = { state, pictureRoles: cleanRoles((raw as { pictureRoles?: unknown }).pictureRoles) };
+    const hooks = cleanNoticeHooks((raw as { noticeHooks?: unknown }).noticeHooks);
+    if (hooks.length > 0) file.noticeHooks = hooks;
+    return file;
   } catch {
     return null;
   }
