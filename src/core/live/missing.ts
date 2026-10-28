@@ -1,4 +1,4 @@
-import type { Condition, GameData, GameIndex, PageEntry, ScriptNode } from "../types";
+import type { Condition, GameData, GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import { pickKey, seenKey } from "./coverage";
 import { evaluate } from "./evaluate";
 import type { Coverage, EvalStatus, LiveSnapshot, MissingItem, Requirement } from "./types";
@@ -18,8 +18,8 @@ function pageRequirements(entry: PageEntry, live: LiveSnapshot | null, ctx: Ctx)
     .map(c => ({ text: String(c.text ?? ""), status: evaluate(c.test, live, ctx) }));
 }
 
-const isUnseen = (n: ScriptNode, entry: PageEntry, cov: Coverage) =>
-  (n.kind === "message" || n.kind === "scroll") && !cov.seen.has(seenKey(entry.location, n.cmd));
+const isUnseen = (n: ScriptNode, loc: Location, cov: Coverage) =>
+  (n.kind === "message" || n.kind === "scroll") && !cov.seen.has(seenKey(loc, n.cmd));
 
 function comparePaths(a: number[], b: number[]): number {
   for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
@@ -47,39 +47,43 @@ export function computeMissing(index: GameIndex, data: GameData, coverage: Cover
       let pageFound = false;
 
       /** inChoice: 선택지 분기 안이면 "page" 항목 후보에서 제외. */
-      const visit = (nodes: ScriptNode[], prefix: number[], reqs: Requirement[], inChoice: boolean) => {
+      // loc: 노드 cmd가 가리키는 목록 위치(TemplateEvent 호출 안은 불린 목록)
+      const visit = (nodes: ScriptNode[], prefix: number[], reqs: Requirement[], inChoice: boolean, loc: Location = entry.location) => {
         arr<ScriptNode | null>(nodes).forEach((n, i) => {
           if (!n || typeof n !== "object") return;
           const path = [...prefix, i];
           switch (n.kind) {
+            case "call":
+              if (n.location && typeof n.location === "object") visit(n.nodes, [...path, 0], reqs, inChoice, n.location);
+              break;
             case "message": case "scroll":
-              if (!inChoice && !pageFound && isUnseen(n, entry, coverage)) {
+              if (!inChoice && !pageFound && isUnseen(n, loc, coverage)) {
                 pageFound = true;
                 push("page", path, arr<string>(n.lines)[0] ?? "", reqs);
               }
               break;
             case "choices": {
-              const picked = new Set(arr<{ picked: number }>(coverage.picks.get(pickKey(entry.location, n.cmd))).map(p => p?.picked));
+              const picked = new Set(arr<{ picked: number }>(coverage.picks.get(pickKey(loc, n.cmd))).map(p => p?.picked));
               arr<{ label: string; body: ScriptNode[] } | null>(n.branches).forEach((b, bi) => {
                 if (!b) return;
                 if (!picked.has(bi)) push("choice", [...path, bi], `"${b.label}"`, reqs);
-                visit(b.body, [...path, bi], [...reqs, { text: `선택지 "${b.label}" 선택`, status: "unknown" }], true);
+                visit(b.body, [...path, bi], [...reqs, { text: `선택지 "${b.label}" 선택`, status: "unknown" }], true, loc);
               });
               if (n.cancelBranch) {
                 if (!picked.has(-2)) push("choice", [...path, -1], "취소했을 때", reqs);
-                visit(n.cancelBranch, [...path, -1], [...reqs, { text: "취소했을 때", status: "unknown" }], true);
+                visit(n.cancelBranch, [...path, -1], [...reqs, { text: "취소했을 때", status: "unknown" }], true, loc);
               }
               break;
             }
             case "conditional": {
               const text = String(n.condition?.text ?? "");
               const s = evaluate(n.condition?.test, live, ctx);
-              visit(n.then, [...path, 0], [...reqs, { text, status: s }], inChoice);
-              if (n.else) visit(n.else, [...path, 1], [...reqs, { text: `아니라면: ${text}`, status: invert(s) }], inChoice);
+              visit(n.then, [...path, 0], [...reqs, { text, status: s }], inChoice, loc);
+              if (n.else) visit(n.else, [...path, 1], [...reqs, { text: `아니라면: ${text}`, status: invert(s) }], inChoice, loc);
               break;
             }
             case "loop":
-              visit(n.body, [...path, 0], reqs, inChoice);
+              visit(n.body, [...path, 0], reqs, inChoice, loc);
               break;
           }
         });

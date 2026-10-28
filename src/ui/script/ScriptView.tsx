@@ -52,6 +52,22 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
           renderBody={(nodes, bp) => <ScriptView nodes={nodes} basePath={bp} onRefClick={onRefClick} />}
         />
       );
+    case "call":
+      // TemplateEvent 호출: 불린 목록의 대본. 본 대사·선택은 그 목록 위치로 찾는다.
+      return (
+        <div className="rounded-md border">
+          <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-1.5 text-sm font-medium">↪ {node.label}</div>
+          <div className="px-3 py-2">
+            {node.nodes.length === 0
+              ? <span className="text-sm text-muted-foreground">(명령 없음)</span>
+              : (
+                <ScriptLocation.Provider value={node.location}>
+                  <ScriptView nodes={node.nodes} basePath={[...path, 0]} onRefClick={onRefClick} />
+                </ScriptLocation.Provider>
+              )}
+          </div>
+        </div>
+      );
     case "picture": return <PictureNode node={node} />;
     case "other": return <OtherNode node={node} />;
     case "stateChange": {

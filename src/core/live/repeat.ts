@@ -1,5 +1,7 @@
 import { describeBranchCondition, describePageConditions } from "../conditions/describe";
 import { switchName, variableName } from "../text/names";
+import { locationKey } from "../index/locations";
+import { parseTeCall, resolveTeCall, type CallCtx } from "../interpret/teCall";
 import type { ConditionTest, EventCommand, GameData, MapEvent, PageConditions } from "../types";
 import { evaluate } from "./evaluate";
 import { activePageIndex } from "./interactable";
@@ -50,6 +52,10 @@ interface Sim {
   /** 판정할 수 없는 조건을 만나 시뮬레이션을 멈췄다 */
   unknown: boolean;
   steps: number;
+  /** TemplateEvent 호출을 풀 문맥(이 이벤트·시작 페이지) */
+  call: CallCtx | null;
+  /** 지금 실행 중인 TemplateEvent 호출 목록(재진입 막기) */
+  active: unknown[];
 }
 
 function setSwitch(s: LiveSnapshot, id: number, on: boolean) {
@@ -114,12 +120,17 @@ function findAt(list: unknown[], from: number, indent: number, codes: number[]):
 }
 
 /** 공통 이벤트 목록(깊이 제한)에 상태를 바꾸는 명령이 있는지 */
-function hasWrites(list: unknown[], data: GameData, depth: number): boolean {
+function hasWrites(list: unknown[], data: GameData, depth: number, call: CallCtx | null = null): boolean {
   for (const c of list) {
     if (!isObj(c)) continue;
     if (c.code === 117) {
-      if (depth < MAX_CALL_DEPTH && hasWrites(arr(data.commonEvents?.[num(arr(c.parameters)[0])]?.list), data, depth + 1)) return true;
+      if (depth < MAX_CALL_DEPTH && hasWrites(arr(data.commonEvents?.[num(arr(c.parameters)[0])]?.list), data, depth + 1, call)) return true;
     } else if (WRITE_CODES.has(c.code)) return true;
+    else if (call && depth < MAX_CALL_DEPTH) {
+      const te = parseTeCall(c);
+      const r = te ? resolveTeCall(te, call) : null;
+      if (r && hasWrites(r.list, data, depth + 1, call)) return true;
+    }
   }
   return false;
 }
@@ -140,7 +151,7 @@ function run(sim: Sim, list: unknown[], prefix: string, depth: number, shown: Se
         break;
       case 102: {
         const end = findAt(list, i + 1, indent, [404]);
-        if (hasWrites(list.slice(i + 1, end), data, depth)) sim.choiceDependent = true;
+        if (hasWrites(list.slice(i + 1, end), data, depth, sim.call)) sim.choiceDependent = true;
         i = end + 1;
         continue;
       }
@@ -197,11 +208,23 @@ function run(sim: Sim, list: unknown[], prefix: string, depth: number, shown: Se
         else sim.state.party = sim.state.party.filter(x => x !== id);
         break;
       }
-      default:
+      default: {
+        // TemplateEvent 호출: 불린 목록(원래 이벤트 페이지 등)을 자식으로 실행한다. 셀프 스위치는 같은 이벤트에 걸린다.
+        const te = sim.call ? parseTeCall(cmd) : null;
+        const r = te && sim.call ? resolveTeCall(te, sim.call) : null;
+        if (r) {
+          if (depth >= MAX_CALL_DEPTH || sim.active.includes(r.list)) { sim.estimated = true; break; }
+          sim.active.push(r.list);
+          const ok = run(sim, r.list, `${locationKey(r.location)}:`, depth + 1, shown);
+          sim.active.pop();
+          if (!ok) return false;
+          break;
+        }
         if (OPAQUE_CODES.has(cmd.code)) {
           sim.estimated = true;
           if (cmd.code === 355 && /Math\.random/.test(String(p[0] ?? ""))) sim.random = true;
         }
+      }
     }
     i++;
   }
@@ -301,7 +324,10 @@ function pageCondReads(pg: unknown, data: GameData): Reads {
   });
 }
 
-function scanReads(r: Reads, list: unknown[], data: GameData, depth: number, seen: Set<number>) {
+function scanReads(
+  r: Reads, list: unknown[], data: GameData, depth: number, seen: Set<number>,
+  call: CallCtx | null = null, seenLists: Set<unknown> = new Set(),
+) {
   for (const cmd of list) {
     if (!isObj(cmd)) continue;
     const p = arr<any>(cmd.parameters);
@@ -311,7 +337,16 @@ function scanReads(r: Reads, list: unknown[], data: GameData, depth: number, see
         const id = num(p[0]);
         if (depth < MAX_CALL_DEPTH && !seen.has(id)) {
           seen.add(id);
-          scanReads(r, arr(data.commonEvents?.[id]?.list), data, depth + 1, seen);
+          scanReads(r, arr(data.commonEvents?.[id]?.list), data, depth + 1, seen, call, seenLists);
+        }
+        break;
+      }
+      case 356: case 357: {
+        const te = call ? parseTeCall(cmd) : null;
+        const res = te && call ? resolveTeCall(te, call) : null;
+        if (res && depth < MAX_CALL_DEPTH && !seenLists.has(res.list)) {
+          seenLists.add(res.list);
+          scanReads(r, res.list, data, depth + 1, seen, call, seenLists);
         }
         break;
       }
@@ -334,20 +369,23 @@ function scanReads(r: Reads, list: unknown[], data: GameData, depth: number, see
   }
 }
 
-function pageListReads(pg: unknown, data: GameData): Reads {
+function pageListReads(pg: unknown, data: GameData, call: CallCtx): Reads {
   if (!isObj(pg)) return newReads();
-  return memo(listReadsCache, data, pg, () => {
+  const scan = () => {
     const r = newReads();
-    scanReads(r, arr(pg.list), data, 0, new Set());
+    scanReads(r, arr(pg.list), data, 0, new Set(), call);
     return r;
-  });
+  };
+  // TemplateEvent 호출이 있으면 같은 (템플릿) 페이지라도 이벤트마다 불리는 목록이 달라 기억하지 않는다.
+  if (arr(pg.list).some(c => parseTeCall(c) !== null)) return scan();
+  return memo(listReadsCache, data, pg, scan);
 }
 
-/** 이 이벤트의 시뮬레이션이 읽는 원자: 모든 페이지의 출현 조건 + 시작 페이지 명령(호출한 공통 이벤트 포함, 깊이 5). */
-function eventReads(ev: MapEvent, page: number, data: GameData): Reads {
+/** 이 이벤트의 시뮬레이션이 읽는 원자: 모든 페이지의 출현 조건 + 시작 페이지 명령(호출한 공통 이벤트·TemplateEvent 호출 포함, 깊이 5). */
+function eventReads(ev: MapEvent, mapId: number, page: number, data: GameData): Reads {
   const r = newReads();
   for (const pg of arr<unknown>(ev.pages)) mergeReads(r, pageCondReads(pg, data));
-  mergeReads(r, pageListReads(ev.pages[page], data));
+  mergeReads(r, pageListReads(ev.pages[page], data, { data, mapId, event: ev, page }));
   return r;
 }
 
@@ -382,6 +420,7 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
   const sim: Sim = {
     data, mapId, eventId: ev.id, state: cloneLive(start), randomVars: new Set(),
     random: false, choiceDependent: false, estimated: false, unknown: false, steps: 0,
+    call: { data, mapId, event: ev, page: first }, active: [],
   };
   const found: Omit<RepeatInfo, "estimated">[] = [];
   let firstShown: Set<string> | null = null;
@@ -444,7 +483,7 @@ export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: Li
     const pg = typeof startPage === "number" && startPage >= 0 ? startPage : activePageIndex(ev, mapId, data, live);
     const pageObj = ev.pages[pg];
     if (!isObj(pageObj)) return [];
-    const reads = eventReads(ev, pg, data);
+    const reads = eventReads(ev, mapId, pg, data);
     let byKey = cache.get(data);
     if (!byKey) { byKey = new Map(); cache.set(data, byKey); }
     // 모든 페이지 객체 번호: 활성 페이지 판정에 다른 페이지도 쓰인다

@@ -117,6 +117,47 @@ describe("RPGViewerBridge", () => {
     expect(h.readLog()[1]).toMatchObject({ type: "scroll", src: null, cmd: 0, text: "s1\ns2" });
   });
 
+  it("resolves a TemplateEvent original page run from a template page as an origin source", () => {
+    h = newGame();
+    const original = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["found it"]), cmd(0)];
+    const tplP0 = [cmd(0)];
+    const tplP1 = [cmd(356, ["TE固有イベント呼び出し"]), cmd(0)];
+    const ev = h.addMapEvent(5, [tplP0, tplP1], 1);
+    ev.getOriginalPages = () => [{ list: [cmd(0)] }, { list: original }];
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(tplP1, 5);
+    expect(interp._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1 });
+    interp.setupChild(original, 5);
+    const child = interp._childInterpreter;
+    expect(child._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 1 });
+    h.runCommand(child, 0);
+    expect(h.readLog()[1]).toMatchObject({
+      type: "message", src: { source: "map", mapId: 1, eventId: 5, page: 1, origin: 1 }, cmd: 0, text: "found it",
+    });
+  });
+
+  it("origin page without a parent interpreter falls back to the event's current page", () => {
+    h = newGame();
+    const original = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["x"]), cmd(0)];
+    const ev = h.addMapEvent(5, [[cmd(0)], [cmd(0)]], 1);
+    ev.getOriginalPages = () => [{ list: original }];
+    const interp = h.newInterpreter();
+    interp.setup(original, 5);
+    expect(interp._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 0 });
+  });
+
+  it("resolves another map event's page run by this event (TE_CALL_MAP_EVENT)", () => {
+    h = newGame();
+    const other = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["other"]), cmd(0)];
+    h.addMapEvent(2, [[cmd(0)], other]);
+    const mine = [cmd(356, ["TE_CALL_MAP_EVENT 2 2"]), cmd(0)];
+    h.addMapEvent(4, [mine]);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(mine, 4);
+    interp.setupChild(other, 4);
+    expect(interp._childInterpreter._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 2, page: 1 });
+  });
+
   for (const engine of ["MZ", "MV"] as const) {
     it(`records choices and the picked index (${engine})`, () => {
       h = newGame(engine);
@@ -783,7 +824,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.1.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.2.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1404,13 +1445,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.1\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.2\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.1.0");
+    expect(h.bridge.VERSION).toBe("1.2.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

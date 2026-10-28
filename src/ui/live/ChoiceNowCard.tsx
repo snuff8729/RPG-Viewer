@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useLive } from "@/app/LiveProvider";
 import { useGame } from "@/app/GameProvider";
-import { locationKey } from "@/core/index/locations";
-import { walk } from "@/core/interpret/interpret";
+import { locationKey, pageLocation } from "@/core/index/locations";
+import { walkAt } from "@/core/interpret/interpret";
 import { pickKey } from "@/core/live/coverage";
 import { branchLabel } from "@/core/live/history";
 import { firstMessage } from "@/core/live/remaining";
@@ -23,12 +23,16 @@ export function ChoiceNowCard() {
   const choiceKey = choice ? `${choice.src ? locationKey(choice.src) : ""}#${choice.cmd}` : null;
   const srcKey = choice?.src ? locationKey(choice.src) : null;
   const choicesNode = useMemo(() => {
-    if (!choice || !srcKey) return null;
-    const nodes = index?.pages.find(p => locationKey(p.location) === srcKey)?.nodes;
-    if (!nodes) return null;
+    if (!choice || !choice.src || !srcKey) return null;
+    // TemplateEvent 원래 페이지의 선택지면 그것을 부른 템플릿 페이지 항목 안에서 찾는다.
+    const entryKey = locationKey(pageLocation(choice.src));
+    const entry = index?.pages.find(p => locationKey(p.location) === entryKey);
+    if (!entry) return null;
     const found: { n: ScriptNode | null } = { n: null };
     try {
-      walk(nodes, [], n => { if (!found.n && n.kind === "choices" && n.cmd === choice.cmd) found.n = n; });
+      walkAt(entry.nodes, entry.location, [], (n, _path, loc) => {
+        if (!found.n && n.kind === "choices" && n.cmd === choice.cmd && locationKey(loc) === srcKey) found.n = n;
+      });
     } catch { /* 깨진 노드 → 미리보기 없음 */ }
     return found.n;
   }, [index, srcKey, choice]);

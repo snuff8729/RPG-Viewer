@@ -25,7 +25,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.1.0",
+    VERSION: "1.2.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -71,6 +71,7 @@
   var pendingGroups = [];
   var groupByKey = {};
   var currentCtx = null;      // { src, cmd } of the command being executed
+  var childParentSrc = null;  // source of the interpreter running setupChild (while it runs)
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
   var deferredNewGame = false;
@@ -539,7 +540,9 @@
   // ---------------------------------------------------------------- game assist
   function locKey(src) {
     if (!src) return null;
-    if (src.source === "map") return "map:" + src.mapId + ":" + src.eventId + ":" + src.page;
+    if (src.source === "map") {
+      return "map:" + src.mapId + ":" + src.eventId + ":" + src.page + (typeof src.origin === "number" ? ":o" + src.origin : "");
+    }
     if (src.source === "common") return "common:" + src.commonEventId;
     if (src.source === "troop") return "troop:" + src.troopId + ":" + src.page;
     return null;
@@ -822,20 +825,51 @@
   bridge._frame = function () { return frameStart(G.SceneManager); };
 
   // ---------------------------------------------------------------- engine helpers
+  function pageIndexOf(pages, list) {
+    if (!pages) return -1;
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i] && pages[i].list === list) return i;
+    }
+    return -1;
+  }
+
+  function eventPages(ev) {
+    var data = ev && ev.event ? ev.event() : null;
+    return data && data.pages;
+  }
+
   function resolveSource(list, eventId) {
     if (!list) return null;
     var i;
     var map = G.$gameMap;
     if (eventId > 0 && map && map.event) {
       var ev = map.event(eventId);
-      var data = ev && ev.event ? ev.event() : null;
-      var pages = data && data.pages;
-      if (pages) {
-        for (i = 0; i < pages.length; i++) {
-          if (pages[i] && pages[i].list === list) {
-            return { source: "map", mapId: map.mapId(), eventId: eventId, page: i };
-          }
+      var pages = eventPages(ev);
+      i = pageIndexOf(pages, list);
+      if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: eventId, page: i };
+      // TemplateEvent: the event's own (original) page run by TE_CALL_ORIGIN_EVENT from a template page.
+      // page = the template page that called it (parent interpreter), origin = the original page index.
+      var orig = ev && typeof ev.getOriginalPages === "function" ? ev.getOriginalPages() : null;
+      if (orig && orig !== pages) {
+        i = pageIndexOf(orig, list);
+        if (i >= 0) {
+          var parent = childParentSrc;
+          var page = parent && parent.source === "map" && parent.mapId === map.mapId() && parent.eventId === eventId
+            ? parent.page
+            : (typeof ev._pageIndex === "number" && ev._pageIndex >= 0 ? ev._pageIndex : i);
+          return { source: "map", mapId: map.mapId(), eventId: eventId, page: page, origin: i };
         }
+      }
+    }
+    // A page of another map event run by this one (TemplateEvent TE_CALL_MAP_EVENT).
+    var all = map && map.events ? map.events() : null;
+    if (all) {
+      for (var k = 0; k < all.length; k++) {
+        var other = all[k];
+        var oid = other && other.eventId ? other.eventId() : 0;
+        if (!(oid > 0) || oid === eventId) continue;
+        i = pageIndexOf(eventPages(other), list);
+        if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: oid, page: i };
       }
     }
     var ces = G.$dataCommonEvents;
@@ -905,6 +939,19 @@
           this._rpgvSrc = resolveSource(list, eventId);
         } catch (e) { reportError(e); }
         return r;
+      };
+    });
+
+    // Remember the parent's source while a child interpreter is set up (TemplateEvent origin pages report it).
+    hook(GI, "Game_Interpreter", "setupChild", function (orig) {
+      return function () {
+        var prev = childParentSrc;
+        childParentSrc = this._rpgvSrc || null;
+        try {
+          return orig.apply(this, arguments);
+        } finally {
+          childParentSrc = prev;
+        }
       };
     });
 

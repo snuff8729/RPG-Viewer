@@ -1,4 +1,6 @@
-import type { EventCommand, GameData, ScriptNode } from "../types";
+import type { EventCommand, GameData, Location, ScriptNode } from "../types";
+import { locationKey } from "../index/locations";
+import { parseTeCall, resolveTeCall, TE_MAX_DEPTH, type CallCtx } from "./teCall";
 import { formatText } from "../text/escape";
 import { describeBranchCondition } from "../conditions/describe";
 import { describeStateChange } from "./stateChange";
@@ -14,8 +16,10 @@ const indentOf =(c: EventCommand): number => (typeof c?.indent === "number" ? c.
  * Converts an RPG Maker event command list into a ScriptNode tree.
  * Cursor-based recursive descent; never throws. Unrecognised or orphaned commands
  * are kept in `other` nodes (consecutive ones grouped together).
+ * ctx(맵 이벤트 페이지일 때): TemplateEvent 호출(356/357)을 불린 목록의 `call` 노드로 펼친다
+ * (깊이 5, 같은 목록 재진입 금지 — 못 펼치면 `other`로 남는다).
  */
-export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
+export function interpret(list: EventCommand[], data: GameData, ctx?: CallCtx | null, stack: unknown[] = [list]): ScriptNode[] {
   const cmds: EventCommand[] = [];
   /** cmds[i]의 원본 `list` 인덱스 (객체가 아닌 항목을 걸러내도 원본 위치를 유지) */
   const srcIndex: number[] = [];
@@ -127,6 +131,16 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
         case 111: push(conditional(c, at)); continue;
         case 112: push(loop(at)); continue;
         case 117: push({ kind: "commonEvent", commonEventId: num(params(c)[0]) }); continue;
+        case 356: case 357: {
+          const call = ctx ? parseTeCall(c) : null;
+          const r = call && ctx && stack.length <= TE_MAX_DEPTH ? resolveTeCall(call, ctx) : null;
+          if (r && !stack.includes(r.list)) {
+            const nodes = interpret(r.list, data, ctx, [...stack, r.list]);
+            push({ kind: "call", cmd: here, label: r.label, location: r.location, nodes });
+            continue;
+          }
+          break;
+        }
         case 201: {
           const p = params(c);
           push(p[0] === 0 ? { kind: "transfer", mapId: num(p[1]), x: num(p[2]), y: num(p[3]) } : { kind: "transfer", mapId: null });
@@ -153,7 +167,7 @@ export function interpret(list: EventCommand[], data: GameData): ScriptNode[] {
 }
 
 /** 노드 하위 블록과 nodePath 접두 인덱스 (types.ts 규칙):
- *  choices → [branchIdx] / cancelBranch → [-1], conditional → [0](then) / [1](else), loop → [0]. */
+ *  choices → [branchIdx] / cancelBranch → [-1], conditional → [0](then) / [1](else), loop → [0], call → [0]. */
 export function subBlocks(n: ScriptNode): { path: number[]; nodes: ScriptNode[] }[] {
   switch (n.kind) {
     case "choices": {
@@ -163,6 +177,7 @@ export function subBlocks(n: ScriptNode): { path: number[]; nodes: ScriptNode[] 
     }
     case "conditional": return [{ path: [0], nodes: n.then }, ...(n.else ? [{ path: [1], nodes: n.else }] : [])];
     case "loop": return [{ path: [0], nodes: n.body }];
+    case "call": return [{ path: [0], nodes: n.nodes }];
     default: return [];
   }
 }
@@ -176,13 +191,60 @@ export function walk(nodes: ScriptNode[], prefix: number[], visit: (n: ScriptNod
   });
 }
 
-/** nodePath of the first node (pre-order) whose `cmd` equals `cmd`, or null. Never throws. */
-export function findNodePathByCmd(nodes: ScriptNode[], cmd: number): number[] | null {
-  let found: number[] | null = null;
-  walk(Array.isArray(nodes) ? nodes : [], [], (n, path) => {
-    if (!found && "cmd" in n && n.cmd === cmd) found = path;
+/** walk와 같지만 각 노드의 `cmd`가 가리키는 목록 위치(loc)도 넘긴다: `call` 노드 안은 그 노드의 location. */
+export function walkAt(
+  nodes: ScriptNode[], loc: Location, prefix: number[], visit: (n: ScriptNode, path: number[], loc: Location) => void,
+): void {
+  nodes.forEach((n, i) => {
+    const path = [...prefix, i];
+    visit(n, path, loc);
+    const inner = n.kind === "call" && n.location ? n.location : loc;
+    for (const b of subBlocks(n)) walkAt(b.nodes, inner, [...path, ...b.path], visit);
   });
+}
+
+/**
+ * nodePath of the first node (pre-order) whose `cmd` equals `cmd`, or null. Never throws.
+ * at가 없으면 페이지 자신의 목록 노드만 본다(`call` 노드 안은 다른 목록이라 뺀다).
+ * at가 있으면 base 위치의 nodes에서 target 위치 목록의 노드만 본다(`call` 노드 안 포함).
+ */
+export function findNodePathByCmd(nodes: ScriptNode[], cmd: number, at?: { base: Location; target: Location }): number[] | null {
+  let found: number[] | null = null;
+  try {
+    const list = Array.isArray(nodes) ? nodes : [];
+    if (at) {
+      const want = locationKey(at.target);
+      walkAt(list, at.base, [], (n, path, loc) => {
+        if (!found && "cmd" in n && n.cmd === cmd && locationKey(loc) === want) found = path;
+      });
+      return found;
+    }
+    const own = (ns: ScriptNode[], prefix: number[]) => ns.forEach((n, i) => {
+      if (found) return;
+      const path = [...prefix, i];
+      if ("cmd" in n && n.cmd === cmd) { found = path; return; }
+      if (n.kind !== "call") for (const b of subBlocks(n)) own(b.nodes, [...path, ...b.path]);
+    });
+    own(list, []);
+  } catch {
+    return null;
+  }
   return found;
+}
+
+/** base 위치 nodes 안에서 target 위치 목록을 펼친 노드들(target이 base면 nodes 그대로). 없으면 null. 예외를 던지지 않는다. */
+export function nodesAt(nodes: ScriptNode[], base: Location, target: Location): ScriptNode[] | null {
+  try {
+    const want = locationKey(target);
+    if (locationKey(base) === want) return nodes;
+    let found: ScriptNode[] | null = null;
+    walk(Array.isArray(nodes) ? nodes : [], [], n => {
+      if (!found && n.kind === "call" && n.location && locationKey(n.location) === want) found = n.nodes;
+    });
+    return found;
+  } catch {
+    return null;
+  }
 }
 
 /** True when the tree (including nested blocks) contains message, scroll or choices. */
@@ -192,6 +254,7 @@ export function hasDialogue(nodes: ScriptNode[]): boolean {
       case "message": case "scroll": case "choices": return true;
       case "conditional": return hasDialogue(n.then) || hasDialogue(n.else ?? []);
       case "loop": return hasDialogue(n.body);
+      case "call": return hasDialogue(n.nodes);
       default: return false;
     }
   });

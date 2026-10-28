@@ -3,6 +3,7 @@ import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { atomKey, type Req, type Writer } from "@/core/deps/graph";
 import { howTo, type HowTo, type HowToEnd, type HowToStep } from "@/core/deps/howTo";
+import { locationKey } from "@/core/index/locations";
 import { conditionsKey } from "@/core/live/interactable";
 import type { LiveSnapshot } from "@/core/live/types";
 import type { GameData } from "@/core/types";
@@ -45,7 +46,7 @@ function StepLine({ step }: { step: HowToStep }) {
   );
 }
 
-const candKey = (s: HowToStep) => `${s.writer.ctx}:${s.writer.cmd}`;
+const candKey = (s: HowToStep) => `${s.writer.ctx}:${s.writer.at ? `${locationKey(s.writer.at)}:` : ""}${s.writer.cmd}`;
 
 function Fork({ end }: { end: Extract<HowToEnd, { kind: "fork" }> }) {
   // 후보 순서는 live가 바뀌면 달라질 수 있어, 고른 후보를 위치가 아니라 쓰는 곳(문맥 + 명령)으로 기억한다.

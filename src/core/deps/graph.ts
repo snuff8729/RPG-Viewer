@@ -1,4 +1,5 @@
 import { describeBranchCondition } from "../conditions/describe";
+import { parseTeCall, resolveTeCall, type CallCtx } from "../interpret/teCall";
 import type { CompareOp, ConditionTest, EventCommand, GameData, Location, PageConditions, TroopPageConditions } from "../types";
 
 // ---- 공개 타입 ----
@@ -11,7 +12,8 @@ export type Req = { atom: Atom; test: ConditionTest };
 /** "M{map}:{event}:{page}" | "C{id}" | "T{troop}:{page}" */
 export type CtxId = string;
 export interface WriteOp { atom: Atom; op: "on" | "set" | "add" | "sub" | "other" | "gain" | "shop" | "script"; value?: number }
-export interface Writer { ctx: CtxId; cmd: number; write: WriteOp; reqs: Req[]; choice?: { cmd: number; branch: number; label: string } }
+/** cmd·choice.cmd: 문맥 목록의 명령 인덱스. at가 있으면 그 위치 목록(TemplateEvent 호출로 불린 목록)의 인덱스. */
+export interface Writer { ctx: CtxId; cmd: number; write: WriteOp; reqs: Req[]; choice?: { cmd: number; branch: number; label: string }; at?: Location }
 /** trigger: 맵 페이지 = 페이지 트리거, 공통 이벤트 = 공통 이벤트 트리거(0 없음·1 자동·2 병렬), 전투 페이지 = -1. */
 export interface CtxInfo { id: CtxId; location: Location; reqs: Req[]; trigger: number; callers: CtxId[]; opaque: { plugin: number; script: number } }
 export interface DepGraph {
@@ -136,7 +138,11 @@ function addWriter(b: Builder, w: Writer) {
 
 const ITEM_KINDS = ["item", "weapon", "armor"] as const;
 
-function scanList(b: Builder, info: CtxInfo, list: unknown, self: Self) {
+/** TemplateEvent 호출로 불린 목록을 훑을 때: 부른 자리의 요구·선택지, 불린 목록 위치, 지금 훑는 목록들(재진입 막기). */
+interface Nested { reqs: Req[]; choice?: Writer["choice"]; at: Location; active: unknown[] }
+const MAX_TE_DEPTH = 5;
+
+function scanList(b: Builder, info: CtxInfo, list: unknown, self: Self, call: CallCtx | null = null, nested: Nested | null = null) {
   if (!Array.isArray(list)) return;
   const stack: Frame[] = [];
   let prevCode = -1;
@@ -162,15 +168,15 @@ function scanList(b: Builder, info: CtxInfo, list: unknown, self: Self) {
     while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
 
     const ctxReqs = (): { reqs: Req[]; choice?: Writer["choice"] } => {
-      const reqs = info.reqs.slice();
-      let choice: Writer["choice"];
+      const reqs = (nested ? nested.reqs : info.reqs).slice();
+      let choice: Writer["choice"] = nested?.choice;
       for (const f of stack) {
         if (f.kind === "if") { if (!f.inElse && f.req) reqs.push(f.req); }
         else if (f.branch !== -2) choice = { cmd: f.cmd, branch: f.branch, label: f.label };
       }
       return choice ? { reqs, choice } : { reqs };
     };
-    const write = (w: WriteOp) => addWriter(b, { ctx: info.id, cmd: i, write: w, ...ctxReqs() });
+    const write = (w: WriteOp) => addWriter(b, { ctx: info.id, cmd: i, write: w, ...ctxReqs(), ...(nested ? { at: nested.at } : {}) });
 
     switch (code) {
       case 111: {
@@ -235,9 +241,20 @@ function scanList(b: Builder, info: CtxInfo, list: unknown, self: Self) {
         }
         break;
       }
-      case 356: case 357:
+      case 356: case 357: {
+        // TemplateEvent 호출: 불린 목록(원래 이벤트 페이지 등)의 쓰기는 같은 문맥에 속한다(부른 자리의 요구를 이어 받는다).
+        const te = call ? parseTeCall(cmd) : null;
+        const r = te && call ? resolveTeCall(te, call) : null;
+        const active = nested?.active ?? [list];
+        if (r) {
+          if (active.length <= MAX_TE_DEPTH && !active.includes(r.list)) {
+            scanList(b, info, r.list, self, call, { ...ctxReqs(), at: r.location, active: [...active, r.list] });
+          }
+          break;
+        }
         info.opaque.plugin++;
         break;
+      }
     }
     prevCode = code;
   }
@@ -248,8 +265,11 @@ const newInfo = (id: CtxId, location: Location, reqs: Req[], trigger: number): C
 
 function collect(data: GameData): Builder {
   const b: Builder = { data, ctxs: new Map(), writers: new Map(), calls: [] };
-  const lists: [CtxInfo, unknown, Self][] = [];
-  const add = (info: CtxInfo, list: unknown, self: Self) => { b.ctxs.set(info.id, info); lists.push([info, list, self]); };
+  const lists: [CtxInfo, unknown, Self, CallCtx | null][] = [];
+  const add = (info: CtxInfo, list: unknown, self: Self, call: CallCtx | null = null) => {
+    b.ctxs.set(info.id, info);
+    lists.push([info, list, self, call]);
+  };
 
   if (data.maps instanceof Map) {
     for (const [mapId, m] of data.maps) {
@@ -261,7 +281,8 @@ function collect(data: GameData): Builder {
         ev.pages.forEach((pg, pi) => {
           if (!pg || typeof pg !== "object") return;
           const id = mapCtxId(mapId, eventId, pi);
-          add(newInfo(id, { source: "map", mapId, eventId, page: pi }, pageReqs(pg.conditions, self), num(pg.trigger)), pg.list, self);
+          add(newInfo(id, { source: "map", mapId, eventId, page: pi }, pageReqs(pg.conditions, self), num(pg.trigger)), pg.list, self,
+            { data, mapId, event: ev, page: pi });
         });
       }
     }
@@ -288,8 +309,8 @@ function collect(data: GameData): Builder {
       });
     }
   }
-  for (const [info, list, self] of lists) {
-    try { scanList(b, info, list, self); } catch { /* 이 목록만 건너뜀 */ }
+  for (const [info, list, self, call] of lists) {
+    try { scanList(b, info, list, self, call); } catch { /* 이 목록만 건너뜀 */ }
   }
   for (const [from, ceId] of b.calls) {
     const target = b.ctxs.get(commonCtxId(ceId));

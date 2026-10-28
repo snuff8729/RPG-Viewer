@@ -14,7 +14,10 @@ export function pageList(data: GameData, loc: Location): EventCommand[] | null {
     switch (loc.source) {
       case "map": {
         const ev = data.maps?.get(loc.mapId)?.events?.[loc.eventId];
-        return isObj(ev) ? listOf(ev.pages?.[loc.page]?.list) : null;
+        if (!isObj(ev)) return null;
+        // TemplateEvent 원래 페이지(템플릿 페이지가 불러 실행한 목록)
+        if (typeof loc.origin === "number") return Array.isArray(ev.originalPages) ? listOf(ev.originalPages[loc.origin]?.list) : null;
+        return listOf(ev.pages?.[loc.page]?.list);
       }
       case "common": return listOf(data.commonEvents?.[loc.commonEventId]?.list);
       case "troop": return listOf(data.troops?.[loc.troopId]?.pages?.[loc.page]?.list);
