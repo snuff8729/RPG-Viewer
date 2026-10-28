@@ -3,7 +3,7 @@ import { evaluate } from "../live/evaluate";
 import type { LiveSnapshot } from "../live/types";
 import { actorName, armorName, itemName, switchName, variableName, weaponName } from "../text/names";
 import type { CompareOp, GameData, Location, MapEvent } from "../types";
-import { atomKey, buildDepGraph, initiallyTrue, isTraceableWrite, type Atom, type CtxId, type CtxInfo, type DepGraph, type Req, type Writer } from "./graph";
+import { atomKey, buildDepGraph, isTraceableWrite, type Atom, type CtxId, type CtxInfo, type DepGraph, type Req, type Writer } from "./graph";
 
 export interface HowToStep {
   writer: Writer;
@@ -190,12 +190,39 @@ function stepOf(c: Ctx, w: Writer, req: Req): HowToStep | null {
   return step;
 }
 
-/** 후보 정렬용 레벨: max(문맥 레벨, 분기 요구 레벨) */
-function writerLevel(g: DepGraph, w: Writer): number {
-  const own = g.ctxs.get(w.ctx)?.reqs.length ?? 0;
-  let lv = g.ctxLevel(w.ctx);
-  for (const r of w.reqs.slice(own)) if (!initiallyTrue(r.test)) lv = Math.max(lv, g.level(r.atom));
-  return lv;
+/** 같은 문맥 안의 쓰는 곳 묶음. 대표(rep)는 지금 할 수 있는 것 → 요구에 가장 잘 맞는 동작 → 먼저 나온 것 순으로 고른다. */
+interface Group { ctx: CtxId; rep: Writer; avail: boolean; level: number; unmet: number }
+
+/** 동작 순위(작을수록 좋음): 변수는 값을 바로 정하는 set, 그다음 큰 증감. */
+function actionRank(w: Writer): [number, number] {
+  const { op, value } = w.write;
+  return [op === "set" && value !== undefined ? 0 : 1, -Math.abs(num(value))];
+}
+
+function groupWriters(c: Ctx, writers: Writer[]): Group[] {
+  const byCtx = new Map<CtxId, Writer[]>();
+  for (const w of writers) {
+    const list = byCtx.get(w.ctx);
+    if (list) list.push(w);
+    else byCtx.set(w.ctx, [w]);
+  }
+  const out: Group[] = [];
+  for (const [ctx, list] of byCtx) {
+    const best = list
+      .map((w, i) => ({ w, i, a: writerAvailable(c, w), r: actionRank(w) }))
+      .sort((x, y) => Number(y.a) - Number(x.a) || x.r[0] - y.r[0] || x.r[1] - y.r[1] || x.i - y.i)[0];
+    out.push({ ctx, rep: best.w, avail: best.a, level: c.g.ctxLevel(ctx), unmet: best.w.reqs.filter(r => !reqMet(r, c.live)).length });
+  }
+  return out;
+}
+
+const byCtxId = (a: CtxId, b: CtxId) => a.localeCompare(b, undefined, { numeric: true });
+
+/** 갈림길 후보 순서: 닿을 수 없는 문맥은 맨 뒤, 지금 가능 → 낮은 문맥 레벨 → 안 된 요구 적은 것 → 문맥 id. */
+function compareGroups(x: Group, y: Group): number {
+  const xu = x.level === Infinity, yu = y.level === Infinity;
+  return Number(xu) - Number(yu) || Number(y.avail) - Number(x.avail)
+    || (xu || yu ? 0 : x.level - y.level) || x.unmet - y.unmet || byCtxId(x.ctx, y.ctx);
 }
 
 /** 쓰는 곳의 아직 안 된 요구들. 다 됐는데 호출식 공통 이벤트가 막혀 있으면 호출자가 하나일 때 그 호출자의 요구. */
@@ -236,22 +263,21 @@ function solve(run: Run, req: Req, ancestors: Set<string>): HowToEnd {
     if (traceable.length === 0) {
       return { kind: "opaque", reason: useful.some(w => w.write.op === "script") ? "script" : "noWriter" };
     }
-    if (traceable.length === 1) chosen = traceable[0];
+    // 같은 문맥의 여러 쓰기는 하나로 본다. 닿을 수 있는 문맥이 있으면 닿을 수 없는 문맥(호출자 없는 디버그 이벤트 등)은 판단에서 뺀다.
+    const groups = groupWriters(c, traceable);
+    const reachable = groups.filter(gr => gr.level !== Infinity);
+    const deciding = reachable.length ? reachable : groups;
+    const avail = deciding.filter(gr => gr.avail);
+    if (deciding.length === 1) chosen = deciding[0].rep;
+    else if (avail.length === 1) chosen = avail[0].rep;
     else {
-      const avail = traceable.filter(w => writerAvailable(c, w));
-      if (avail.length === 1) chosen = avail[0];
-      else {
-        const ranked = traceable
-          .map(w => ({ w, a: writerAvailable(c, w), lv: writerLevel(c.g, w) }))
-          .sort((x, y) => Number(y.a) - Number(x.a) || x.lv - y.lv);
-        const candidates: HowToStep[] = [];
-        for (const r of ranked) {
-          if (candidates.length >= MAX_CANDIDATES) break;
-          const s = stepOf(c, r.w, req);
-          if (s) candidates.push(s);
-        }
-        return { kind: "fork", req, candidates, more: Math.max(0, traceable.length - candidates.length) };
+      const candidates: HowToStep[] = [];
+      for (const gr of [...groups].sort(compareGroups)) {
+        if (candidates.length >= MAX_CANDIDATES) break;
+        const s = stepOf(c, gr.rep, req);
+        if (s) candidates.push(s);
       }
+      return { kind: "fork", req, candidates, more: Math.max(0, groups.length - candidates.length) };
     }
   }
 
