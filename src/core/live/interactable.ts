@@ -86,6 +86,16 @@ function markOf(entry: PageEntry, trigger: unknown): Interactable["mark"] {
   return trigger <= 2 ? "talk" : trigger <= 4 ? "auto" : "none";
 }
 
+/** 페이지 항목의 선택지 밖 안 본 대사 수·안 고른 선택지 항목 수(coverage·항목별로 기억). 예외를 던지지 않는다. */
+export function pageNewCounts(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: number } {
+  try {
+    if (!isObj(entry) || !isObj(cov)) return { unseen: 0, unpicked: 0 };
+    return countNewCached(entry, cov);
+  } catch {
+    return { unseen: 0, unpicked: 0 };
+  }
+}
+
 /** countNew를 coverage·페이지 항목별로 기억한다. */
 function countNewCached(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: number } {
   let byEntry = countCache.get(cov);
@@ -135,7 +145,7 @@ function countNew(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: 
 }
 
 /** 위치 키 → 페이지 항목. index별로 한 번만 만든다. */
-function pageEntries(index: GameIndex): Map<string, PageEntry> {
+export function pageEntries(index: GameIndex): Map<string, PageEntry> {
   const cached = isObj(index) ? entriesCache.get(index) : undefined;
   if (cached) return cached;
   const byKey = new Map<string, PageEntry>();

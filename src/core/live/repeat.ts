@@ -248,10 +248,11 @@ function counterNote(ch: Change[], data: GameData): string {
 
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(x => b.has(x));
 
-function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot): RepeatInfo[] {
+function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot, first: number): RepeatInfo[] {
   const start = cloneLive(live);
-  const first = activePageIndex(ev, mapId, data, start);
   if (first < 0) return [];
+  /** 시뮬레이션 상태로 계산한 기준 페이지. live.events가 알려 준 실제 활성 페이지(first)와 다를 수 있다. */
+  const base = activePageIndex(ev, mapId, data, start);
   const sim: Sim = {
     data, mapId, eventId: ev.id, state: cloneLive(start), randomVars: new Set(),
     random: false, choiceDependent: false, estimated: false, unknown: false, steps: 0,
@@ -260,12 +261,11 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
   let firstShown: Set<string> | null = null;
   let prevKey = conditionsKey(sim.state);
   for (let k = 1; k <= MAX_RUNS; k++) {
-    const pg = activePageIndex(ev, mapId, data, sim.state);
-    if (pg !== first) break;
+    if (k > 1 && activePageIndex(ev, mapId, data, sim.state) !== base) break;
     const before = cloneLive(sim.state);
     const shown = new Set<string>();
     sim.steps = 0;
-    const ok = run(sim, arr(ev.pages[pg]?.list), "", 0, shown);
+    const ok = run(sim, arr(ev.pages[first]?.list), "", 0, shown);
     if (firstShown === null) firstShown = shown;
     else if (ok && !sameSet(firstShown, shown)) {
       found.push({ kind: "counter", text: `${k}번째부터 다른 대사가 나와요${counterNote(changes(start, before, mapId, ev.id), data)}`, after: k });
@@ -273,8 +273,8 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
     }
     if (!ok) break;
     const next = activePageIndex(ev, mapId, data, sim.state);
-    if (next !== first) {
-      if (next >= 0) {
+    if (next !== base) {
+      if (next >= 0 && next !== first) {
         const lead = k === 1 ? `말을 걸면 ${causeText(changes(start, sim.state, mapId, ev.id), data)}` : `${k}번 하면 `;
         found.push({ kind: "nextPage", text: `${lead}다음엔 ${next + 1}페이지가 나와요`, after: k });
       }
@@ -295,20 +295,21 @@ const cache = new WeakMap<object, WeakMap<object, Map<string, RepeatInfo[]>>>();
 /**
  * 이벤트의 지금 활성 페이지를 여러 번(최대 5번) 상호작용한다고 보고 live 복사본에서 시뮬레이션해,
  * 다음 상호작용에서 내용이 달라지는지 알려준다. [] = 매번 같음. live는 바꾸지 않는다. 예외를 던지지 않는다.
+ * startPage: 실제 활성 페이지(live.events)를 알 때 넘긴다. 없으면 activePageIndex로 계산한다.
  */
-export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot): RepeatInfo[] {
+export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot, startPage?: number): RepeatInfo[] {
   try {
     if (!isObj(ev) || !isObj(live) || !isObj(data) || typeof ev.id !== "number" || !Array.isArray(ev.pages)) return [];
-    const pg = activePageIndex(ev, mapId, data, live);
+    const pg = typeof startPage === "number" && startPage >= 0 ? startPage : activePageIndex(ev, mapId, data, live);
     const pageObj = ev.pages[pg];
     if (!isObj(pageObj)) return [];
     let byPage = cache.get(data);
     if (!byPage) { byPage = new WeakMap(); cache.set(data, byPage); }
     let byKey = byPage.get(pageObj);
     if (!byKey) { byKey = new Map(); byPage.set(pageObj, byKey); }
-    const key = `${mapId},${ev.id}|${conditionsKey({ ...live, events: [] })}|${num(live.gold)}`;
+    const key = `${mapId},${ev.id},${pg}|${conditionsKey({ ...live, events: [] })}|${num(live.gold)}`;
     let hit = byKey.get(key);
-    if (!hit) { hit = analyse(ev, mapId, data, live); byKey.set(key, hit); }
+    if (!hit) { hit = analyse(ev, mapId, data, live, pg); byKey.set(key, hit); }
     return hit.map(r => ({ ...r }));
   } catch {
     return [];

@@ -93,6 +93,16 @@ describe("repeatInfo", () => {
     expect(JSON.stringify(l)).toBe(before);
   });
 
+  it("startPage overrides the computed active page", () => {
+    const ev = event([page([...msg(), c(123, 0, ["A", 0])]), page(msg(), { selfSwitchValid: true })]);
+    // 실제로는 이미 2페이지(계산은 1페이지) → 2페이지는 매번 같다
+    expect(repeatInfo(ev, 3, data, live(), 1)).toEqual([]);
+    // 계산상 활성 페이지가 없지만 실제로는 1페이지
+    const gated = event([page([...msg(), c(123, 0, ["A", 0])], { switch1Valid: true }), page(msg(), { selfSwitchValid: true })]);
+    expect(repeatInfo(gated, 3, data, live())).toEqual([]);
+    expect(repeatInfo(gated, 3, data, live(), 0).map(r => [r.kind, r.after])).toEqual([["nextPage", 1]]);
+  });
+
   it("no active page → []", () => {
     expect(repeatInfo(event([page(msg(), { switch1Valid: true })]), 3, data, live())).toEqual([]);
   });

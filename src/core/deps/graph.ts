@@ -75,7 +75,8 @@ const SCRIPT_VARIABLE = /\$gameVariables\.setValue\(\s*(\d+)/g;
 
 type Self = { mapId: number; eventId: number } | null;
 
-function testToReq(test: ConditionTest | undefined, self: Self): Req | null {
+/** 조건 판정식 → 요구(원자 + 판정식). 셀프 스위치는 self가 있어야 한다. 원자로 못 바꾸면 null. */
+export function testToReq(test: ConditionTest | undefined, self: Self): Req | null {
   if (!test) return null;
   switch (test.kind) {
     case "switch": return { atom: { kind: "switch", id: test.id }, test };
