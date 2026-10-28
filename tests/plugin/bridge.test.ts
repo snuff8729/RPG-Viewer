@@ -713,7 +713,7 @@ describe("RPGViewerBridge", () => {
     h.bridge._flushNow();
     h.clock.t += 100;
     const append = vi.spyOn(h.fs, "appendFileSync");
-    h.g.$gameVariables.setValue(5, 7); // state change before the message
+    h.g.$gameSwitches.setValue(5, true); // state change before the message
     const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["a"]), cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["b"]), cmd(0)];
     h.addMapEvent(3, [list], 0);
     const interp = h.g.$gameMap._interpreter;
@@ -726,7 +726,8 @@ describe("RPGViewerBridge", () => {
     const recs = lines();
     const st = recs.find((r) => r.type === "state");
     const msg = recs.find((r) => r.type === "message");
-    if (st) expect(st.seq).toBeLessThan(msg.seq);
+    expect(st).toBeDefined();
+    expect(st.seq).toBeLessThan(msg.seq);
     expect(JSON.parse(h.fs.files.get(META_PATH)!).nextSeq).toBeGreaterThan(msg.seq);
     // a new message within 50ms of the flush stays pending until the gap passes
     h.clock.t += 10;
