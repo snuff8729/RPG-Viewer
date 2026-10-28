@@ -15,6 +15,15 @@ describe("loadGame", () => {
     expect(r.data.errors).toEqual([expect.objectContaining({ file: "data/Map004.json", mapId: 4 })]);
     expect(r.data.commonEvents[2]).toBeNull();
   });
+  it("keeps message escape codes intact in the MZ fixture", async () => {
+    const r = await loadGame(loadFixtureFolder("sample-mz"));
+    if (!r.ok) throw new Error("load failed");
+    const list = r.data.maps.get(2)!.events[1]!.pages[0].list;
+    expect(list).toHaveLength(37);
+    expect(list[1].parameters[0]).toBe(String.raw`왔구나, \N[1].`);
+    expect(list[9].code).toBe(401);
+    expect(list[9].parameters[0]).toBe(String.raw`도와주겠나? \C[2]보상\C[0]은 \V[1]만큼.`);
+  });
   it("loads MV fixture from www/", async () => {
     const r = await loadGame(loadFixtureFolder("sample-mv"));
     if (!r.ok) throw new Error();
