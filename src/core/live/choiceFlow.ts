@@ -37,7 +37,7 @@ export function choiceFlow(args: {
 }): FlowItem[] {
   const out: FlowItem[] = [];
   try {
-    const { data, model, coverage, branch } = args;
+    const { data, model, coverage } = args;
     const items = Array.isArray(args.items) ? args.items : [];
     const reader = Array.isArray(args.reader) ? args.reader : [];
     let ri = 0;
@@ -55,8 +55,10 @@ export function choiceFlow(args: {
     let lastMsg: Extract<ReaderItem, { kind: "message" }> | null = null;
     let pending: { k: string | null; question: Question } | null = null;
     const take = (key: string): ReaderItem | null => {
-      const it = reader[ri];
-      if (it && it.key === key) { ri++; return it; }
+      // 키가 어긋나면 앞으로 훑어 맞는 항목에 맞춘다(없으면 위치를 유지하고 이 기록만 건너뛴다)
+      for (let j = ri; j < reader.length; j++) {
+        if (reader[j]?.key === key) { ri = j + 1; return reader[j]; }
+      }
       return null;
     };
 
@@ -95,7 +97,7 @@ export function choiceFlow(args: {
               const idx = cancel && i === labels.length - 1 ? -2 : i;
               const elsewhere: string[] = [];
               for (const p of infos) {
-                if (p.branch === branch || p.picked !== idx) continue;
+                if (p.seq === r.seq || p.picked !== idx) continue;   // 이 기록 자신(상속된 선택 포함)은 제외
                 const bl = branchLabel(model, p.branch);
                 if (!elsewhere.includes(bl)) elsewhere.push(bl);
               }
