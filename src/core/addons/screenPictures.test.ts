@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LogRecord } from "../live/types";
 import {
   alphaStatsOf, DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf,
-  screenSizeOf, seenPictures, snapshotCounts, type PictureContext, type PictureRoles, type ScreenPicture,
+  screenSizeOf, seenPictures, snapshotCounts, standGroupLabel, standGroups, type PictureContext, type PictureRoles, type ScreenPicture,
 } from "./screenPictures";
 
 const base = { v: 1, t: 0, run: 1, branch: 1 } as const;
@@ -217,6 +217,50 @@ describe("picture groups", () => {
       expect(alphaStatsOf(px, w, h)).toEqual({ opaque: 1 / 8, box: [0.25, 0, 0.75, 1] });
       expect(alphaStatsOf(new Uint8Array(32), w, h)).toEqual({ opaque: 0, box: null });
       expect(alphaStatsOf(null, w, h)).toBeNull();
+    });
+  });
+
+  // 따거모드(1.10+): 스탠딩은 그림 111–143(380,0), 컷인은 플러그인이 띄운 그림(1000~, 240,256 근처)
+  describe("cut-ins apart from the stand (ddaggeo)", () => {
+    const HAIR = P([112, "hair/01_1", 0, 380, 0, 100, 100, 255, 0, 0, 0, 922, 922]);
+    const cut = (id: number, name: string, x: number, y: number, w: number, h: number) =>
+      P([id, name, 0, x, y, 100, 100, 255, 0, 0, 0, w, h, "sprite"]);
+    const BREAST = cut(1000, "actor01_cutin_breast_0001", 240, 256, 336, 368);
+    const ORGAN_C = cut(1001, "organ/02c", 248, 260, 320, 360);
+    const MARK = cut(1002, "mark/heart_01", 520, 300, 64, 64);
+    const cutin = [BREAST, ORGAN_C, MARK];
+
+    it("groups picture-command layers and plugin sprites separately, never merged", () => {
+      const groups = standGroups([BODY, HAIR, ...cutin]);
+      expect(groups.map(g => [g.key, g.kind, standGroupLabel(g), g.pictures.map(p => p.id)])).toEqual([
+        ["", undefined, "스탠딩", [111, 112]],
+        ["c0", "cutin", "컷인", [1000, 1001, 1002]],
+      ]);
+      // 떨어진 그림 명령 스탠딩 두 덩어리는 따로
+      const left = P([20, "left_body", 0, 0, 0, 100, 100, 255, 0, 0, 0, 300, 700]);
+      const leftFace = P([21, "left_face", 0, 4, 2, 100, 100, 255, 0, 0, 0, 0, 0]); // 크기 없음: 같은 자리라서 함께
+      expect(standGroups([left, BODY, leftFace]).map(g => [g.key, g.pictures.map(p => p.id)])).toEqual([["", [20, 21]], ["p1", [111]]]);
+    });
+
+    it("each group re-shows only when its own layers change", () => {
+      const stand = (...more: ScreenPicture[]) => ({ cg: [], stand: [BODY, HAIR, ...more] });
+      const a = nextShot(null, stand());
+      expect(a.shot?.pictures.map(p => p.id)).toEqual([111, 112]);
+      // 컷인이 나타남: 컷인만 새로 보인다
+      const b = nextShot(a.key, stand(...cutin));
+      expect(b.shot?.kind).toBe("stand");
+      expect(b.shot?.pictures.map(p => p.name)).toEqual(["actor01_cutin_breast_0001", "organ/02c", "mark/heart_01"]);
+      expect(standGroups(b.shot!.pictures).map(standGroupLabel)).toEqual(["컷인"]);
+      // 컷인 다음 장: 컷인만
+      const next = { ...BREAST, name: "actor01_cutin_breast_0002" };
+      const c = nextShot(b.key, stand(next, ORGAN_C, MARK));
+      expect(c.shot?.pictures.map(p => p.id)).toEqual([1000, 1001, 1002]);
+      // 컷인이 사라짐: 스탠딩은 그대로라 다시 보이지 않는다
+      const d = nextShot(c.key, stand());
+      expect(d.shot).toBeNull();
+      // 스탠딩만 바뀜(표정): 스탠딩만
+      const e = nextShot(nextShot(d.key, stand(...cutin)).key, { cg: [], stand: [{ ...BODY, name: "actor01_pose01_body_0004" }, HAIR, ...cutin] });
+      expect(e.shot?.pictures.map(p => p.id)).toEqual([111, 112]);
     });
   });
 
