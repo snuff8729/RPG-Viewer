@@ -4,7 +4,7 @@ import { fixtureLive } from "../../../tests/helpers/fixtureLog";
 import { buildIndex } from "@/core/index/buildIndex";
 import { loadGame } from "@/core/loader/loadGame";
 import type { GameData, GameIndex } from "@/core/types";
-import { conditionIcon, nowEvents } from "./annotations";
+import { conditionIcon, liveHintsEnabled, nowEvents } from "./annotations";
 
 let data: GameData, index: GameIndex;
 beforeAll(async () => {
@@ -21,6 +21,10 @@ describe("annotations", () => {
   });
   it("nowEvents: null live -> empty", () => {
     expect(nowEvents(data, index, null)).toEqual([]);
+  });
+  it("liveHintsEnabled", () => {
+    expect(liveHintsEnabled("noPlugin")).toBe(false);
+    for (const c of ["waiting", "connected", "stale"] as const) expect(liveHintsEnabled(c)).toBe(true);
   });
   it("conditionIcon", () => {
     expect(conditionIcon("met")).toBe("✓");

@@ -26,8 +26,8 @@ export function NowGroup({ showEmpty, follow, onFollowChange }: {
       <div className="flex items-center justify-between pr-2">
         <SidebarGroupLabel>지금</SidebarGroupLabel>
         <div className="flex items-center gap-1.5">
-        <Label htmlFor="follow-live" className="text-xs font-normal">따라가기</Label>
-        <Switch id="follow-live" checked={follow} onCheckedChange={onFollowChange} />
+          <Label htmlFor="follow-live" className="text-xs font-normal">따라가기</Label>
+          <Switch id="follow-live" checked={follow} onCheckedChange={onFollowChange} />
         </div>
       </div>
       <SidebarGroupContent>

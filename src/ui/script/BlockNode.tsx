@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { pickKey } from "@/core/live/coverage";
 import { branchLabel } from "@/core/live/history";
+import { liveHintsEnabled } from "@/ui/live/annotations";
 import { RefBadge } from "@/ui/RefBadge";
 import { useForcedOpen } from "@/ui/highlight";
 import { ScriptLocation } from "./ScriptLocation";
@@ -34,7 +35,7 @@ function Branch({ label, body, bp, renderBody, picks }: {
         {label}
         {empty && <span className="font-normal text-muted-foreground">(대사 없음)</span>}
         {picks && (picks.length > 0
-          ? picks.map((l) => <Badge key={l} variant="secondary" className="ml-1">{l}</Badge>)
+          ? picks.map((l) => <Badge key={l} variant="secondary" className="ml-1">✓ {l}</Badge>)
           : <span className="ml-1 text-xs font-normal text-muted-foreground">아직 안 고름</span>)}
       </CollapsibleTrigger>
       <CollapsibleContent className="ml-1 mt-2 border-l-2 pl-3">{renderBody(body, bp)}</CollapsibleContent>
@@ -45,11 +46,11 @@ function Branch({ label, body, bp, renderBody, picks }: {
 function ChoicesBlock({ node, path, renderBody }: {
   node: Extract<Block, { kind: "choices" }>; path: number[]; renderBody: RenderBody;
 }) {
-  const { coverage, model } = useLive();
+  const { coverage, model, connection } = useLive();
   const loc = useContext(ScriptLocation);
   const infos = loc ? coverage.picks.get(pickKey(loc, node.cmd)) : undefined;
   const picksFor = (idx: number): string[] | undefined => {
-    if (!loc) return undefined;
+    if (!loc || !liveHintsEnabled(connection)) return undefined;
     const labels: string[] = [];
     for (const p of infos ?? []) {
       if (p.picked !== idx) continue;

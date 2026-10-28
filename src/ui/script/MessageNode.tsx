@@ -17,7 +17,7 @@ function useSeen(cmd: number): boolean {
 }
 
 function SeenMark() {
-  return <Check className="ml-1 inline size-3.5 align-text-bottom text-muted-foreground" aria-label="본 대사" />;
+  return <Check className="ml-1 inline size-3.5 align-text-bottom text-muted-foreground" role="img" aria-label="본 대사" />;
 }
 
 export function MessageNode({ node }: { node: Msg }) {
