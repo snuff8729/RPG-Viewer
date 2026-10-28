@@ -255,6 +255,38 @@ describe("RPGViewerBridge", () => {
       expect(log.filter((r) => r.type === "state").flatMap((r) => r.changes).filter((c: any) => c.kind === "switch")).toHaveLength(7500);
     });
 
+    const throttle = () => {
+      for (let i = 1; i <= 40; i++) { h.g.$gameVariables.setValue(1, i); h.bridge._tick(); h.clock.t += 16; }
+      h.g.$gameVariables.setValue(1, 999); // held back
+    };
+
+    it("writes held-back values before the save stamp's seq", async () => {
+      h = newGame();
+      throttle();
+      await h.g.DataManager.saveGame(1);
+      const rec = h.readLog().find((r) => r.type === "state" && r.changes.some((c: any) => c.value === 999));
+      expect(rec).toBeDefined();
+      expect(rec.seq).toBeLessThanOrEqual(h.saves[1].rpgViewer.seq);
+    });
+
+    it("writes held-back values before the next branchStart", async () => {
+      h = newGame();
+      await h.g.DataManager.saveGame(1);
+      throttle();
+      h.g.DataManager.setupNewGame();
+      let log = h.readLog();
+      let idx = log.findIndex((r) => r.type === "state" && r.changes.some((c: any) => c.value === 999));
+      expect(idx).toBeGreaterThan(0);
+      expect(log[idx].branch).toBe(1);
+      expect(log[idx + 1]).toMatchObject({ type: "branchStart", reason: "newGame" });
+      h.clock.t += 20;
+      throttle();
+      await h.g.DataManager.loadGame(1);
+      log = h.readLog();
+      idx = log.map((r) => r.type === "state" && r.changes.some((c: any) => c.value === 999)).lastIndexOf(true);
+      expect(log[idx + 1]).toMatchObject({ type: "branchStart", reason: "load" });
+    });
+
     it("emits the pending latest value once 10s passed, and releases when slow", () => {
       h = newGame();
       for (let i = 1; i <= 40; i++) { h.g.$gameVariables.setValue(1, i); h.bridge._tick(); h.clock.t += 16; }

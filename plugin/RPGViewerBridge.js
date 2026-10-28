@@ -186,7 +186,7 @@
       clearPending(key);
       return true;
     }
-    setPending(key, { value: value, src: src, cmd: cmd });
+    setPending(key, { id: id, value: value, src: src, cmd: cmd });
     return false;
   }
 
@@ -200,7 +200,7 @@
       var p = varPending[key];
       clearPending(key);
       varLastEmit[key] = t;
-      addChange("variable", Number(key), p.value, p.src, p.cmd);
+      addChange("variable", p.id, p.value, p.src, p.cmd);
     }
   }
 
@@ -622,6 +622,7 @@
         var contents = orig.apply(this, arguments);
         try {
           if (run !== null && contents && typeof contents === "object") {
+            releasePending(true);
             closeState();
             contents.rpgViewer = { run: run, branch: branch, seq: meta.nextSeq - 1 };
           }
