@@ -73,12 +73,12 @@ export function clampRange(r: ReadRange, total: number, page: number): ReadRange
 
 /**
  * 항목 수가 prev → total로 바뀌었을 때의 구간. 구간이 끝에 붙어 있었으면 새 항목도 그리되,
- * 구간 길이가 2×page를 넘지 않게 한다(넘는 부분은 `다음 대사 더 보기`로). 끝에 붙어 있지 않으면 그대로.
- * 몰아 들어와도 첫 새 항목(prev)은 늘 그려진다(끝에 붙은 구간의 길이 ≤ 2×page이고 따라가기 구간은 ≤ page라서).
+ * 새 항목은 page개까지만(구간이 짧으면 2×page 길이까지는) 붙인다 — 나머지는 `다음 대사 더 보기`로.
+ * 구간이 이미 길어도(이전 대사 더 보기) 첫 새 항목(prev)은 늘 그려진다. 끝에 붙어 있지 않으면 그대로.
  */
 export function grownRange(r: ReadRange, prev: number, total: number, page: number): ReadRange {
   if (total <= prev || r.end !== prev) return clampRange(r, total, page);
-  const end = Math.min(total, Math.max(r.end, r.start + 2 * page));
+  const end = Math.min(total, Math.max(r.end, r.start + 2 * page, prev + page));
   return end === r.end ? r : { start: r.start, end };
 }
 

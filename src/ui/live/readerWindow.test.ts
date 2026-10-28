@@ -46,8 +46,16 @@ describe("range helpers", () => {
   it("grownRange: attached range takes new items up to 2×page", () => {
     expect(grownRange({ start: 700, end: 1000 }, 1000, 1010, 300)).toEqual({ start: 700, end: 1010 });
     expect(grownRange({ start: 700, end: 1000 }, 1000, 5000, 300)).toEqual({ start: 700, end: 1300 });
-    const big = { start: 0, end: 600 }; // 이미 2×page 길이면 더 붙이지 않는다
-    expect(grownRange(big, 600, 700, 300)).toBe(big);
+    // 이미 2×page 길이여도 새 항목은 page개까지 붙는다
+    expect(grownRange({ start: 0, end: 600 }, 600, 700, 300)).toEqual({ start: 0, end: 700 });
+    expect(grownRange({ start: 0, end: 600 }, 600, 5000, 300)).toEqual({ start: 0, end: 900 });
+  });
+  it("burst after 이전 대사 더 보기: first new item still inside", () => {
+    const up = extendUp(extendUp(tailRange(1000, 300), 300), 300); // [100, 1000) — 2×page 넘음
+    expect(up).toEqual({ start: 100, end: 1000 });
+    const g = grownRange(up, 1000, 9000, 300);
+    expect(g).toEqual({ start: 100, end: 1300 });
+    expect(g.start <= 1000 && 1000 < g.end).toBe(true);
   });
   it("grownRange: detached range stays", () => {
     const r = { start: 95, end: 400 };

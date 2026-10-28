@@ -45,7 +45,7 @@ export interface LiveContextValue {
   /** 뷰어에 들어 있는 플러그인 버전 */
   bundledVersion: string;
   /**
-   * 현재 게임의 기록을 끝까지(나눠 읽기 `more` 없이) 한 번 읽었고, records·model이 그 시점까지를 담고 있다.
+   * 현재 게임의 기록을 끝까지(LogTail eof) 한 번 읽었고, records·model이 그 시점까지를 담고 있다.
    * 그 전에는 기록이 앞부분만 있을 수 있어 읽은 위치·창을 정하면 안 된다.
    */
   caughtUp: boolean;
@@ -94,7 +94,7 @@ interface TailEntry {
   acc: LiveAccumulator;
   gen: number;
   gameKey: string;
-  /** tail이 more 없이 끝까지 한 번 읽었다 */
+  /** tail이 끝까지(eof) 한 번 읽었다 */
   caughtUp: boolean;
   /** LogTail reset 횟수 */
   epoch: number;
@@ -200,7 +200,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             if (res.reset) { acc.reset(); bad = 0; entry.epoch++; }
             acc.append(res.records);
             bad += res.badLines;
-            if (!res.more) entry.caughtUp = true;
+            if (res.eof) entry.caughtUp = true;
             // 기록 크기: 바뀐 주기에만 stat 한 번(LogTail은 고치지 않는다).
             let bytes: number | null = null;
             try { bytes = (await wfolder.stat(paths.logFile))?.size ?? null; } catch { bytes = null; }
@@ -210,8 +210,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
               gen, version: acc.version, count: recs.length, lastT: recs.length > 0 ? recs[recs.length - 1].t : null,
               badLines: bad, bytes, caughtUp: entry.caughtUp,
             });
-          } else if (!res.more && !entry.caughtUp) {
-            // 기록이 없거나 더 읽을 게 없음 — 끝까지 읽은 것
+          } else if (res.eof && !entry.caughtUp) {
+            // 기록이 없거나 더 읽을 게 없음 — 끝까지 읽은 것(읽기 실패는 eof가 아니다)
             entry.caughtUp = true;
             setTailInfo(p => (p.gen === gen ? { ...p, caughtUp: true } : { ...EMPTY_TAIL, gen, caughtUp: true }));
           }

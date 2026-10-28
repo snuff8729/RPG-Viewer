@@ -40,9 +40,21 @@ type AfterRange = { kind: "anchor"; h: number; top: number } | { kind: "key"; ke
 /** 그리는 구간과 처음 위치(갈래마다 처음 한 번 initialView로 정한다). total은 구간을 맞춰 둔 항목 수. */
 type View = InitialView & { total: number };
 
-/** 항목이 처음 생기면 initialView, 항목 수가 바뀌면 grownRange. 바뀔 게 없으면 v 그대로. */
+/** 뷰어 창에 포커스가 있는가(게임 창에서 넘기는 중이면 false). */
+function hasFocus(): boolean {
+  try { return typeof document === "undefined" || document.hasFocus(); } catch { return true; }
+}
+
+/**
+ * 항목이 처음 생기면 initialView(포커스가 없으면 다 읽은 경우도 사용자 동작 전까지 읽음 표시 안 함),
+ * 항목 수가 바뀌면 grownRange. 바뀔 게 없으면 v 그대로.
+ */
 function syncView(v: View | null, total: number, stats: ReadStats, readSeq: number): View | null {
-  if (v === null) return total > 0 ? { total, ...initialView(total, stats, readSeq, PAGE) } : null;
+  if (v === null) {
+    if (total === 0) return null;
+    const iv = initialView(total, stats, readSeq, PAGE);
+    return { total, ...iv, armed: iv.armed && hasFocus() };
+  }
   if (v.total === total) return v;
   return { ...v, total, range: grownRange(v.range, v.total, total, PAGE) };
 }
@@ -197,6 +209,17 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     }
     if (max >= 0) markRead(max);
   }, [markRead]);
+  /** 다음 사용자 동작까지 읽음 표시를 멈춘다. */
+  const disarm = useCallback(() => {
+    armedRef.current = false;
+    setView(v => (v && v.armed ? { ...v, armed: false } : v));
+  }, []);
+  // 뷰어 창이 포커스를 잃으면(게임 창으로 감) 읽음 표시를 멈춘다. 돌아와도 사용자 동작(스크롤·다음·맨 아래로) 뒤부터.
+  // 포커스 없이 뷰어 위에서 휠을 굴리는 것도 사용자 동작이라 그때부터는 지나간 항목을 읽음 처리한다.
+  useEffect(() => {
+    window.addEventListener("blur", disarm);
+    return () => window.removeEventListener("blur", disarm);
+  }, [disarm]);
 
   // ── 구간 바꾸기 ──────────────────────────────────────────────
   const after = useRef<AfterRange | null>(null);
@@ -239,15 +262,22 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     // 이 효과가 먼저 선언돼 먼저 실행되므로, 여기서 읽는 값은 새 항목이 들어오기 전의 따라가기 여부다.
     // (순서를 바꾸면 새 항목 때문에 unread > 0이 되어 따라가기가 항상 꺼진다.)
     if (total <= prev || !follow.current) return;
+    // 뷰어 창에 포커스가 없으면(게임 창에서 넘기는 중) 따라가지 않는다 — 새 항목은 안 읽음으로 남고 수만 는다.
+    if (!hasFocus()) { follow.current = false; return; }
     // 새 항목 높이가 한 화면을 넘으면(몰아 들어옴) 맨 아래 대신 첫 새 항목으로 가고 따라가기를 멈춘다.
     // 그 화면도 사용자가 움직이기 전까지는 읽음 표시하지 않는다(구분선·새 대사 수가 몰아 들어온 양을 보여준다).
-    const first = prev < total ? el.querySelector<HTMLElement>(`[data-key="${CSS.escape(items[prev].key)}"]`) : null;
-    const firstTop = first ? first.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop : el.scrollHeight;
-    if (first && el.scrollHeight - firstTop > el.clientHeight) {
+    // 첫 새 항목이 그려지지 않았으면(구간 밖) 그것도 몰아 들어온 것으로 본다.
+    const firstKey = items[prev].key;
+    const first = el.querySelector<HTMLElement>(`[data-key="${CSS.escape(firstKey)}"]`);
+    const firstTop = first ? first.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop : 0;
+    if (!first || el.scrollHeight - firstTop > el.clientHeight) {
       follow.current = false;
-      armedRef.current = false;
-      setView(v => (v && v.armed ? { ...v, armed: false } : v));
-      scrollToKey(items[prev].key, 48);
+      disarm();
+      if (first) scrollToKey(firstKey, 48);
+      else {
+        after.current = { kind: "key", key: firstKey };
+        setView(v => (v ? { ...v, range: rangeShowing(v.range, prev, total, PAGE) } : v));
+      }
       return;
     }
     scrollToBottom();
@@ -257,7 +287,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
       after.current = { kind: "bottom" };
       setView(v => (v ? { ...v, range: trimmed } : v));
     }
-  }, [cur, total, items, range, firstUnreadIdx, keyFrom, scrollToKey, scrollToBottom, onScroll]);
+  }, [cur, total, items, range, firstUnreadIdx, keyFrom, scrollToKey, scrollToBottom, onScroll, disarm]);
   // 반드시 위 효과 뒤에 둔다(위 주석 참고)
   useLayoutEffect(() => {
     follow.current = atBottom && unread === 0 && atEnd;

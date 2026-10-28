@@ -67,11 +67,12 @@ describe("initialReadSeq", () => {
   it("nothing saved → -1", () => expect(initialReadSeq("g", 2, path, fake())).toBe(-1));
 });
 
-describe("initialReadSeq beyond path end", () => {
-  it("keeps a saved seq beyond the end of the path (log still loading)", () => {
+describe("initialReadSeq stale", () => {
+  it("ignores a saved seq beyond the end of the (fully loaded) path", () => {
     const s = fake();
     saveReadSeq("g", 1, 500, s);
-    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 9, branch: 1 }], s)).toBe(500);
+    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 9, branch: 1 }], s)).toBe(-1);
+    expect(initialReadSeq("g", 1, [{ seq: 1, branch: 1 }, { seq: 500, branch: 1 }], s)).toBe(500);
   });
 });
 
