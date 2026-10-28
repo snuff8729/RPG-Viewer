@@ -11,7 +11,13 @@ export class LogTail {
   private offset = 0;
   private carry = new Uint8Array(0);
 
-  constructor(private folder: WritableGameFolder, private path: string) {}
+  private folder: WritableGameFolder;
+  private path: string;
+
+  constructor(folder: WritableGameFolder, path: string) {
+    this.folder = folder;
+    this.path = path;
+  }
 
   async poll(): Promise<TailResult> {
     try {
