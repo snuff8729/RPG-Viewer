@@ -1,72 +1,24 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
-import { branchPath, foldTimeline } from "@/core/live/history";
-import { lastSeqOf, readerItems, type ReaderItem } from "@/core/live/reader";
+import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
+import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
-import { FaceImage } from "../script/FaceImage";
-import { useAssetUrl } from "../script/useAssetUrl";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ChoiceFlowView } from "./ChoiceFlowView";
 import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
 import { choiceTexts } from "./historyText";
 import { initialReadSeq, saveReadSeq } from "./readPosition";
 import { initialWindow, readStats } from "./readerWindow";
+import { ReaderItemView } from "./ReaderItemView";
+import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 
 const PAGE = 300;
-
-function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
-  return (
-    <div className="flex gap-3">
-      {item.face && <FaceImage name={item.face} index={item.faceIndex} />}
-      <div className="min-w-0 flex-1 space-y-0.5">
-        {item.speaker && <p className="text-sm font-medium text-muted-foreground">{item.speaker}</p>}
-        {item.lines.map((l, i) => <p key={i} className="whitespace-pre-wrap break-words">{l || " "}</p>)}
-      </div>
-    </div>
-  );
-}
-
-function Picture({ name }: { name: string }) {
-  const url = useAssetUrl("pictures", name);
-  if (url === undefined) return <Skeleton className="h-40 w-full" />;
-  if (!url) return <p className="text-center text-sm text-muted-foreground">{name}</p>;
-  return <img src={url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
-}
-
-const Item = memo(function Item({ item }: { item: ReaderItem }) {
-  switch (item.kind) {
-    case "chapter":
-      return <p className="py-2 text-center text-sm text-muted-foreground">{item.text}</p>;
-    case "message":
-      if (item.repeat !== undefined) {
-        return (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-muted-foreground">↻ 같은 대화 다시 봄 ×{item.repeat}</Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-1 text-muted-foreground"><MessageLines item={item} /></CollapsibleContent>
-          </Collapsible>
-        );
-      }
-      return <MessageLines item={item} />;
-    case "scroll":
-      return (
-        <div className="space-y-0.5 text-center">
-          {item.lines.map((l, i) => <p key={i} className="whitespace-pre-wrap break-words">{l || " "}</p>)}
-        </div>
-      );
-    case "picture":
-      return <Picture name={item.name} />;
-    case "choice":
-      return <p className="font-medium">▶ 고른 것: "{item.label}"</p>;
-    case "battle":
-      return <p className="text-center text-sm text-muted-foreground">⚔ 전투</p>;
-  }
-}, (a, b) => a.item === b.item || JSON.stringify(a.item) === JSON.stringify(b.item));
 
 /** 입력 중이거나 목록·대화상자 안에 포커스가 있으면 Space/↓를 가로채지 않는다. */
 function typingTarget(t: EventTarget | null): boolean {
@@ -77,11 +29,14 @@ function typingTarget(t: EventTarget | null): boolean {
   return t.closest("[role=dialog],[role=listbox],[role=menu],[contenteditable=true]") !== null;
 }
 
-/** 읽기 탭 — 최신 갈래에서 실제로 지나간 대사·그림·고른 선택을 소설처럼 순서대로. */
-export function ReaderView() {
+/**
+ * 전체 읽기 — 고른 갈래에서 실제로 지나간 대사·그림·고른 선택을 소설처럼 순서대로(읽은 위치는 갈래별).
+ * withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다.
+ */
+function FullReader({ branch, withLive }: { branch: number | null; withLive: boolean }) {
   const { data } = useGame();
-  const { records, model, noisy, uncertainSeqs, changedSeqs, latestBranch, live } = useLive();
-  const branch = latestBranch;
+  const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
+  const live = withLive ? liveNow : null;
   const gameKey = data ? `${data.system.gameTitle}|${data.dataRoot}` : "";
   const posKey = `${gameKey}.${branch}`;
 
@@ -301,8 +256,7 @@ export function ReaderView() {
   const empty = items.length === 0 && !live?.choice;
 
   return (
-    // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
-    <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div ref={scroller} onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className="min-h-0 flex-1 overflow-y-auto">
         <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
           {empty ? (
@@ -318,7 +272,7 @@ export function ReaderView() {
                 const seq = lastSeqOf(item);
                 return (
                   <div key={item.key}>
-                    <div data-key={item.key} data-seq={seq ?? undefined}><Item item={item} /></div>
+                    <div data-key={item.key} data-seq={seq ?? undefined}><ReaderItemView item={item} /></div>
                     {start + i === lastReadIdx && unread > 0 && (
                       <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
                         <Separator className="flex-1" />
@@ -329,7 +283,7 @@ export function ReaderView() {
                   </div>
                 );
               })}
-              <ChoiceNowCard />
+              {withLive && <ChoiceNowCard />}
               {live?.running && (
                 <Collapsible>
                   <CollapsibleTrigger asChild>
@@ -347,6 +301,52 @@ export function ReaderView() {
         <Button variant="outline" size="sm" onClick={() => { arm(); scrollToBottom(); }} disabled={atBottom}>맨 아래로</Button>
         {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
       </div>
+    </div>
+  );
+}
+
+/** 읽기 탭 — 회차·갈래 고르기와 보기 방식(전체 읽기 / 선택 흐름). */
+export function ReaderView() {
+  const { data } = useGame();
+  const { records, model, latestBranch } = useLive();
+  // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
+  const [picked, setPicked] = useState<number | null>(null);
+  const selected = picked !== null && model.branches.has(picked) ? picked : latestBranch;
+  const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
+  const onMode = (v: string) => {
+    if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
+    setMode(v);
+    saveReaderMode(v);
+  };
+
+  if (!data) return null;
+  const hasBranch = records.length > 0 && selected !== null;
+
+  return (
+    // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
+    <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
+      {hasBranch && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Select value={String(selected)} onValueChange={v => setPicked(Number(v))}>
+            <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {model.runs.map(run => (
+                <SelectGroup key={run.run}>
+                  <SelectLabel>{run.run}회차</SelectLabel>
+                  {run.branches.map(id => <SelectItem key={id} value={String(id)}>{branchLabel(model, id)}</SelectItem>)}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={onMode}>
+            <ToggleGroupItem value="full">전체 읽기</ToggleGroupItem>
+            <ToggleGroupItem value="flow">선택 흐름</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      )}
+      {hasBranch && mode === "flow"
+        ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
+        : <FullReader branch={selected} withLive={selected === latestBranch} />}
     </div>
   );
 }
