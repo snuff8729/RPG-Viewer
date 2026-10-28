@@ -24,9 +24,35 @@ function bySeq(records: LogRecord[]): LogRecord[] {
   return (allValid ? valid.slice() : valid).sort((a, b) => a.seq - b.seq);
 }
 
-/** buildHistory의 진행 상태. 증분 누적기와 공유한다. */
-export interface HistoryState { branches: Map<number, BranchInfo>; runBranches: Map<number, number[]>; latestBranch: number | null }
-export const newHistoryState = (): HistoryState => ({ branches: new Map(), runBranches: new Map(), latestBranch: null });
+/** 이야기 기록(이어짐 판단에 쓰인다): 대화·스크롤·선택지·선택·그림. */
+const STORY_TYPES = new Set(["message", "scroll", "choices", "choice", "picture"]);
+
+/**
+ * buildHistory의 진행 상태. 증분 누적기와 공유한다.
+ * runBranches: 회차별 대표 갈래(이어진 갈래 제외). alias: 이어진 갈래 → 대표 갈래.
+ * storyMax: 갈래별 이야기 기록의 최대 seq. contChildren: 갈래 → 바로 이어진 자식 갈래들.
+ */
+export interface HistoryState {
+  branches: Map<number, BranchInfo>; runBranches: Map<number, number[]>; latestBranch: number | null;
+  alias: Map<number, number>; storyMax: Map<number, number>; contChildren: Map<number, number[]>;
+}
+export const newHistoryState = (): HistoryState => ({
+  branches: new Map(), runBranches: new Map(), latestBranch: null, alias: new Map(), storyMax: new Map(), contChildren: new Map(),
+});
+
+/** id와 그 이어진 후손들 중 이야기 기록의 최대 seq(없으면 -Infinity). */
+function subtreeStoryMax(st: HistoryState, id: number): number {
+  let max = -Infinity;
+  const stack = [id], seen = new Set<number>();
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    max = Math.max(max, st.storyMax.get(cur) ?? -Infinity);
+    for (const c of st.contChildren.get(cur) ?? []) stack.push(c);
+  }
+  return max;
+}
 
 /** 유효한 기록(isValidRecord) 하나를 seq 순으로 반영한다. run/branch 0 기록은 무시. */
 export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
@@ -44,49 +70,92 @@ export function applyHistoryRecord(st: HistoryState, r: LogRecord): void {
       reason, startSeq: r.seq, startT: t, lastSeq: r.seq, lastT: t, children: [],
     };
     st.branches.set(id, b);
-    const list = st.runBranches.get(run) ?? [];
-    list.push(id);
-    st.runBranches.set(run, list);
     const parent = b.parent !== null ? st.branches.get(b.parent) : undefined;
-    if (parent && parent.id !== id && parent.run === run) parent.children.push(id);
+    if (parent && parent.id !== id && parent.run === run) {
+      parent.children.push(id);
+      // 이어짐: 불러오기로 시작했고, 부모(와 그 이어진 후손)에 저장 지점(fromSeq) 뒤 이야기 기록이 없다.
+      // 갈래가 시작되는 순간에 한 번 정하고 바꾸지 않는다(seq 순 처리라 일괄·증분이 같다).
+      if (b.reason === "load" && b.fromSeq !== null && subtreeStoryMax(st, parent.id) <= b.fromSeq) {
+        st.alias.set(id, st.alias.get(parent.id) ?? parent.id);
+        const list = st.contChildren.get(parent.id) ?? [];
+        list.push(id);
+        st.contChildren.set(parent.id, list);
+      }
+    }
+    if (!st.alias.has(id)) {
+      const list = st.runBranches.get(run) ?? [];
+      list.push(id);
+      st.runBranches.set(run, list);
+    }
   } else {
     b.lastSeq = Math.max(b.lastSeq, r.seq);
     b.lastT = Math.max(b.lastT, t);
   }
-  st.latestBranch = id;
+  if (STORY_TYPES.has(r.type)) st.storyMax.set(id, Math.max(st.storyMax.get(id) ?? -Infinity, r.seq));
+  st.latestBranch = st.alias.get(id) ?? id;
 }
 
 /** 진행 상태에서 모델을 만든다(내부 Map·배열을 그대로 쓴다). */
 export function historyModelOf(st: HistoryState): HistoryModel {
   const runs = [...st.runBranches.entries()].sort((a, b) => a[0] - b[0]).map(([run, ids]) => ({ run, branches: ids }));
-  return { branches: st.branches, runs, latestBranch: st.latestBranch };
+  return { branches: st.branches, runs, alias: st.alias, latestBranch: st.latestBranch };
+}
+
+/** 기록을 seq 순으로 모두 반영한 진행 상태. */
+export function buildHistoryState(records: LogRecord[]): HistoryState {
+  const st = newHistoryState();
+  for (const r of bySeq(Array.isArray(records) ? records : [])) applyHistoryRecord(st, r);
+  return st;
 }
 
 /** 기록에서 회차·갈래 모델을 만든다. run/branch 0 기록은 무시. 예외를 던지지 않는다. */
 export function buildHistory(records: LogRecord[]): HistoryModel {
-  const st = newHistoryState();
-  for (const r of bySeq(Array.isArray(records) ? records : [])) applyHistoryRecord(st, r);
-  return historyModelOf(st);
+  return historyModelOf(buildHistoryState(records));
 }
 
-/** `{run}회차 갈래 {n}` — n은 run 안에서 생성 순서(1부터). */
+/**
+ * 갈래를 화면에 보일 대표 갈래 id로 바꾼다. 이어진 갈래(저장 → 종료 → 이어하기로 생긴 갈래)는
+ * 이어 간 원래 갈래(사슬이면 맨 위)로, 그 밖의 갈래와 모르는 id는 그대로.
+ */
+export function representative(model: HistoryModel, branchId: number): number {
+  return model.alias?.get(branchId) ?? branchId;
+}
+
+/** `{run}회차 갈래 {n}` — n은 run 안에서 대표 갈래의 생성 순서(1부터). 이어진 갈래는 대표 갈래의 이름. */
 export function branchLabel(model: HistoryModel, branchId: number): string {
-  const b = model.branches.get(branchId);
+  const id = representative(model, branchId);
+  const b = model.branches.get(id);
   if (!b) return `갈래 ${branchId}`;
-  const n = (model.runs.find(r => r.run === b.run)?.branches.indexOf(branchId) ?? -1) + 1;
-  return `${b.run}회차 갈래 ${n > 0 ? n : branchId}`;
+  const n = (model.runs.find(r => r.run === b.run)?.branches.indexOf(id) ?? -1) + 1;
+  return `${b.run}회차 갈래 ${n > 0 ? n : id}`;
 }
 
-/** 같은 run의 조상 갈래 기록(각각 자식의 fromSeq 이하) + 자기 기록, seq 순. */
+/** 이어진 갈래라 대표 갈래에 합쳐지는가 */
+const isContinuation = (model: HistoryModel, id: number) => model.alias?.has(id) ?? false;
+
+/**
+ * 대표 갈래의 이야기 전체, seq 순: 대표 갈래와 그 이어진 후손 갈래들의 기록 전부 +
+ * 같은 run의 조상 갈래 기록(각각 자식의 fromSeq 이하, 자식이 이어진 갈래면 조상 기록 전부).
+ * 이어진 갈래 id를 주면 그 대표 갈래의 결과와 같다.
+ */
 export function branchPath(records: LogRecord[], model: HistoryModel, branchId: number): LogRecord[] {
-  const self = model.branches.get(branchId);
+  const self = model.branches.get(representative(model, branchId));
   if (!self || !Array.isArray(records)) return [];
-  const limits = new Map<number, number>([[self.id, Infinity]]);
+  const limits = new Map<number, number>();
+  // 대표 갈래와 이어진 후손들
+  const stack = [self.id];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (limits.has(id)) continue;
+    limits.set(id, Infinity);
+    for (const c of model.branches.get(id)?.children ?? []) if (isContinuation(model, c)) stack.push(c);
+  }
+  // 조상
   let cur = self;
   while (cur.parent !== null && cur.fromSeq !== null) {
     const parent = model.branches.get(cur.parent);
     if (!parent || parent.run !== self.run || limits.has(parent.id)) break;
-    limits.set(parent.id, cur.fromSeq);
+    limits.set(parent.id, isContinuation(model, cur.id) ? Infinity : cur.fromSeq);
     cur = parent;
   }
   return bySeq(records).filter(r => r.run === self.run && limits.has(r.branch) && r.seq <= limits.get(r.branch)!);
@@ -152,16 +221,18 @@ export function foldTimeline(
   const changed = (seq: number) => opts?.changedSeqs?.has(seq) ?? false;
   const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
 
-  // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들
+  // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들(이어진 갈래는 갈래 지점이 아니다)
   const forkChildren = new Map<string, number[]>();
   for (const b of model?.branches?.values() ?? []) {
-    if (b.parent === null || b.fromSeq === null) continue;
+    if (b.parent === null || b.fromSeq === null || isContinuation(model, b.id)) continue;
     const parent = model.branches.get(b.parent);
     if (!parent || parent.run !== b.run) continue;
     const k = `${b.parent}:${b.fromSeq}`;
     forkChildren.set(k, [...(forkChildren.get(k) ?? []), b.id]);
   }
-  const pathBranches = new Set(records.map(r => r.branch));
+  // 갈래 지점의 갈래들은 대표 갈래 id로 보인다
+  const rep = (id: number) => (model ? representative(model, id) : id);
+  const pathBranches = new Set(records.map(r => rep(r.branch)));
 
   const items: HistoryItem[] = [];
   const seenSignatures = new Set<string>();
@@ -240,8 +311,9 @@ export function foldTimeline(
     if (children) {
       flushEpisode();
       flushGroup();
-      const all = [r.branch, ...children];
-      const next = children.find(id => pathBranches.has(id)) ?? r.branch;
+      const own = rep(r.branch);
+      const all = [own, ...children];
+      const next = children.find(id => pathBranches.has(id)) ?? own;
       const rest = [...new Set(all.filter(id => id !== next))].sort((a, b) => a - b);
       push({ kind: "fork", atSeq: r.seq, branches: [next, ...rest] });
     }
