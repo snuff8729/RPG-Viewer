@@ -790,7 +790,8 @@ describe("RPGViewerBridge", () => {
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
-        speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, lastCommand: null,
+        speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
+        lastCommand: null, controlT: null,
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
       },
     });
@@ -1172,20 +1173,145 @@ describe("RPGViewerBridge", () => {
       expect(assistOf(h).lastCommand).toBe("c-3:ignored");
     });
 
-    it("escape always succeeds when escaping is allowed, else aborts", () => {
+    it("escape always succeeds when escaping is allowed, else is ignored; canEscape / canLose reported", () => {
       h = newGame();
       startBattle(h);
+      expect(assistOf(h)).toMatchObject({ canEscape: true, canLose: false });
       writeControl(h, { command: { id: "e-1", kind: "escape" } });
       h.bridge._tick();
       h.bridge._frame();
       expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort"]);
       expect(h.g.BattleManager._escapeRatio).toBe(0.5);
+      expect(assistOf(h)).toMatchObject({ lastCommand: "e-1", canEscape: false, canLose: false }); // battle over
       startBattle(h);
       h.g.BattleManager._canEscape = false;
+      h.g.BattleManager._canLose = true;
+      expect(assistOf(h)).toMatchObject({ canEscape: false, canLose: true });
       writeControl(h, { command: { id: "e-2", kind: "escape" } });
       poll(h);
       h.bridge._frame();
-      expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort", "abort"]);
+      expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort"]);
+      expect(h.g.$gameParty.inBattle()).toBe(true);
+      expect(assistOf(h).lastCommand).toBe("e-2:ignored");
+    });
+
+    it("reports a command that throws as failed", () => {
+      h = newGame();
+      startBattle(h);
+      h.g.BattleManager.checkBattleEnd = () => { throw new Error("broken"); };
+      writeControl(h, { command: { id: "f-1", kind: "win" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(assistOf(h).lastCommand).toBe("f-1:failed");
+    });
+
+    it("uses the command's own issue time; never applies a command issued before the battle started", () => {
+      h = newGame();
+      onMap(h);
+      writeControl(h, { command: { id: "a-1", kind: "win", at: h.clock.t - 11_000 } }); // file t fresh, command old
+      h.bridge._tick();
+      expect(assistOf(h).lastCommand).toBe("a-1:ignored");
+      const issued = h.clock.t;
+      h.clock.t += 2000;
+      startBattle(h); // a new battle started after the command was issued
+      writeControl(h, { t: h.clock.t, command: { id: "a-2", kind: "win", at: issued } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(assistOf(h).lastCommand).toBe("a-2:ignored");
+      writeControl(h, { command: { id: "a-3", kind: "win", at: h.clock.t } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["victory"]);
+      expect(assistOf(h).lastCommand).toBe("a-3");
+    });
+
+    it("ignores a control.json left from an earlier session; applies only later writes and echoes their t", () => {
+      const fs = new MemFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: 5, speed: 8, skipSeen: true, command: { id: "old", kind: "win", at: 1_000_000 } }));
+      h = newGame("MZ", fs);
+      onMap(h);
+      startBattle(h);
+      h.bridge._tick();
+      poll(h);
+      expect(h.bridge._frame()).toBe(1);
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(assistOf(h)).toMatchObject({ speed: 1, skipSeen: false, lastCommand: null, controlT: null });
+      writeControl(h, { speed: 2 });
+      poll(h);
+      expect(assistOf(h)).toMatchObject({ speed: 2, controlT: h.clock.t - 1000 });
+    });
+
+    it("re-maps the hotkeys when another plugin replaces Input.keyMapper", () => {
+      h = newGame();
+      const km2: Record<number, string> = { 13: "ok", 117: "otherPlugin" };
+      h.g.Input.keyMapper = km2;
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null });
+      poll(h);
+      expect(km2).toEqual({ 13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose" });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122 });
+    });
+
+    it("never auto-advances a message added without a text 101 (stale seen key is dropped)", () => {
+      h = newGame();
+      writeControl(h, { skipSeen: true, seenMessages: ["map:1:3:0#0"] });
+      h.bridge._tick();
+      showMessage(h, [cmd(101, ["", 0, 0, 2, ""]), cmd(0)], 0); // seen 101 without text: no window start
+      h.g.$gameMessage.clear();
+      h.g.$gameMessage.add("The enemy appears!"); // battle text, added directly
+      const w = new h.g.Window_Message();
+      w.startMessage();
+      w.pause = true;
+      expect(w._showFast).toBe(false);
+      expect(pressOkCount(w, 30)).toBe(0);
+    });
+
+    describe("extra updates are input-neutral", () => {
+      // one real frame: the engine's updateInputData, then updateScene (hooked)
+      const holdFrames = (speed: number, frames: number, down: (hh: Harness) => void) => {
+        const hh = newGame();
+        onMap(hh);
+        writeControl(hh, { speed });
+        hh.bridge._tick();
+        const sm = hh.g.SceneManager, I = hh.g.Input, TI = hh.g.TouchInput;
+        const seen = { ok: 0, okTriggered: 0, okLong: 0, touch: 0, touchTriggered: 0 };
+        sm.onSceneUpdate = () => {
+          if (I.isRepeated("ok")) seen.ok++;
+          if (I.isTriggered("ok")) seen.okTriggered++;
+          if (I.isLongPressed("ok")) seen.okLong++;
+          if (TI.isRepeated()) seen.touch++;
+          if (TI.isTriggered()) seen.touchTriggered++;
+        };
+        down(hh);
+        for (let f = 0; f < frames; f++) { sm.updateInputData(); sm.updateScene(); }
+        return { seen, inputTime: I._pressedTime, touchTime: TI._pressedTime, updates: sm.sceneUpdates };
+      };
+
+      it("a 6-frame OK hold at x8 yields exactly one OK repeat-trigger, same as x1", () => {
+        const x1 = holdFrames(1, 6, (hh) => hh.g.Input.keyDown(13));
+        const x8 = holdFrames(8, 6, (hh) => hh.g.Input.keyDown(13));
+        expect(x1.seen).toMatchObject({ ok: 1, okTriggered: 1, okLong: 0 });
+        expect(x8.seen).toEqual(x1.seen);
+        expect(x8.inputTime).toBe(x1.inputTime);
+        expect(x8.inputTime).toBe(5);
+        expect(x8.updates).toBe(48);
+      });
+
+      it("a 6-frame touch hold at x8 yields exactly one repeat-trigger, same as x1", () => {
+        const x1 = holdFrames(1, 6, (hh) => hh.g.TouchInput.touchDown());
+        const x8 = holdFrames(8, 6, (hh) => hh.g.TouchInput.touchDown());
+        expect(x1.seen).toMatchObject({ touch: 1, touchTriggered: 1 });
+        expect(x8.seen).toEqual(x1.seen);
+        expect(x8.touchTime).toBe(x1.touchTime);
+      });
+
+      it("a long hold repeats at the engine's real-frame rate at x8", () => {
+        const x1 = holdFrames(1, 40, (hh) => hh.g.Input.keyDown(13));
+        const x8 = holdFrames(8, 40, (hh) => hh.g.Input.keyDown(13));
+        expect(x1.seen.ok).toBe(4); // frame 1, then pressedTime 24, 30, 36
+        expect(x8.seen).toEqual(x1.seen);
+      });
     });
 
     it("does not run a command when the battle is already ending", () => {

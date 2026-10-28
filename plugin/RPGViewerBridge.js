@@ -103,9 +103,12 @@
   var ctrlSpeed = null, ctrlSkip = null;
   var lastControlKey = null, lastControlText = null, lastControlPollT = -Infinity;
   var lastCommandId = null, lastCommand = null, pendingCommand = null;
+  var controlT = null;        // "t" of the last applied control.json (null = none applied this session)
+  var battleStartT = -Infinity; // when the current battle was set up: older commands never apply to it
   var effectiveSpeed = 1;
   var pendingMsgKey = null;   // seen key of the message command101 just set up
   var inFrame = false;
+  var extraUpdate = false;    // inside an extra (sped-up) scene update: input queries report nothing new
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -480,7 +483,10 @@
       assist: {
         speed: assist.speed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
         troopId: inBattle && G.$gameTroop && typeof G.$gameTroop._troopId === "number" ? G.$gameTroop._troopId : null,
+        canEscape: inBattle && canEscapeNow(),
+        canLose: inBattle && !!(G.BattleManager && G.BattleManager._canLose),
         lastCommand: lastCommand,
+        controlT: controlT,
         hotkeys: effectiveHotkeys()
       }
     };
@@ -600,6 +606,7 @@
     var c;
     try { c = JSON.parse(stripBom(String(text))); } catch (ignore) { return; } // half-written / bad JSON: keep the old settings
     if (!c || typeof c !== "object" || c.v !== 1) return;
+    controlT = typeof c.t === "number" && isFinite(c.t) ? c.t : null;
     if (typeof c.speed === "number" && SPEED_OK[c.speed] === true) {
       if (ctrlSpeed === null || c.speed !== ctrlSpeed) assist.speed = c.speed;
       ctrlSpeed = c.speed;
@@ -621,25 +628,56 @@
     var cmd = c.command;
     if (cmd && typeof cmd === "object" && typeof cmd.id === "string" && cmd.id && cmd.id !== lastCommandId && COMMAND_KINDS[cmd.kind] === true) {
       lastCommandId = cmd.id; // at most once, even when stale
-      if (typeof c.t === "number" && isFinite(c.t) && now() - c.t <= COMMAND_MAX_AGE_MS) {
-        pendingCommand = { id: cmd.id, kind: cmd.kind, t: c.t };
+      // issue time of the command itself (older viewers: the control file's t)
+      var at = typeof cmd.at === "number" && isFinite(cmd.at) ? cmd.at : c.t;
+      if (commandFresh(at)) {
+        pendingCommand = { id: cmd.id, kind: cmd.kind, t: at };
       } else {
         lastCommand = cmd.id + ":ignored";
       }
     }
   }
 
+  // Issued within the last 10 s and not before the current battle started.
+  function commandFresh(at) {
+    return typeof at === "number" && isFinite(at) && now() - at <= COMMAND_MAX_AGE_MS && at >= battleStartT;
+  }
+
+  // mtime:size of control.json (null when stat gives no usable mtime).
+  function controlKey() {
+    if (typeof fs.statSync !== "function") return null;
+    var st = fs.statSync(CONTROL);
+    var m = st && typeof st.mtimeMs === "number" ? st.mtimeMs : (st && st.mtime && typeof st.mtime.getTime === "function" ? st.mtime.getTime() : null);
+    return typeof m === "number" && isFinite(m) ? m + ":" + st.size : null;
+  }
+
+  // At startup: remember the control file left from an earlier session without applying it;
+  // only a file written after startup is applied (the viewer rewrites it when controlT is not its own).
+  function baselineControl() {
+    if (!fs.existsSync(CONTROL)) return;
+    var key = controlKey();
+    lastControlKey = key;
+    lastControlText = key === null ? String(fs.readFileSync(CONTROL, "utf8")) : null;
+  }
+
+  // Our hotkeys vanished from Input.keyMapper (another plugin replaced it): map them again.
+  function keyMapIntact() {
+    var km = G.Input && G.Input.keyMapper;
+    if (!km || typeof km !== "object") return true;
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var k = hotkeys[HOTKEY_NAMES[i]];
+      if (k !== null && km[k] === undefined) return false;
+    }
+    return true;
+  }
+
   function pollControl() {
     var t = now();
     if (t - lastControlPollT < CONTROL_POLL_MS) return;
     lastControlPollT = t;
+    try { if (!keyMapIntact()) applyKeyMap(); } catch (ek) { reportError(ek); }
     if (!fs.existsSync(CONTROL)) return;
-    var key = null;
-    if (typeof fs.statSync === "function") {
-      var st = fs.statSync(CONTROL);
-      var m = st && typeof st.mtimeMs === "number" ? st.mtimeMs : (st && st.mtime && typeof st.mtime.getTime === "function" ? st.mtime.getTime() : null);
-      if (typeof m === "number" && isFinite(m)) key = m + ":" + st.size;
-    }
+    var key = controlKey();
     if (key !== null && key === lastControlKey) return;
     var text = String(fs.readFileSync(CONTROL, "utf8"));
     if (key === null && text === lastControlText) return; // no usable mtime: compare contents
@@ -694,8 +732,8 @@
       var actors = G.$gameParty.aliveMembers();
       for (i = 0; i < actors.length; i++) kill(actors[i]);
       BM.processDefeat();
-    } else if (kind === "escape") {
-      if (typeof BM.canEscape === "function" && BM.canEscape() && typeof BM.processEscape === "function") {
+    } else if (kind === "escape") { // only reached when canEscapeNow()
+      if (typeof BM.processEscape === "function") {
         var ratio = BM._escapeRatio;
         BM._escapeRatio = 1; // the player asked to escape: never fail the roll
         try { BM.processEscape(); } finally { BM._escapeRatio = ratio; }
@@ -705,20 +743,32 @@
     }
   }
 
+  function canEscapeNow() {
+    try {
+      var BM = G.BattleManager;
+      return !!(BM && typeof BM.canEscape === "function" && BM.canEscape());
+    } catch (e) { reportError(e); return false; }
+  }
+
   // Runs at the start of a frame; waits while a message is open (the battle end adds its own messages).
   function runPendingCommand() {
     var c = pendingCommand;
     if (!c) return;
     var BM = G.BattleManager;
-    if (now() - c.t > COMMAND_MAX_AGE_MS || !inBattleNow() || !BM || battleEnding(BM)) {
+    if (!commandFresh(c.t) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
       pendingCommand = null;
       lastCommand = c.id + ":ignored";
       return;
     }
     if (!BM._phase || BM._phase === "init" || messageBusy()) return;
     pendingCommand = null;
-    lastCommand = c.id;
-    runCommand(c.kind);
+    try {
+      runCommand(c.kind);
+      lastCommand = c.id;
+    } catch (e) {
+      lastCommand = c.id + ":failed";
+      reportError(e);
+    }
   }
 
   function hotkeyCommand(kind) {
@@ -826,6 +876,13 @@
     return !!(m && m.isBusy && m.isBusy());
   }
 
+  // A message without text never reaches Window_Message.startMessage: its seen key must not linger.
+  function messageHasText() {
+    var m = G.$gameMessage;
+    if (!m || typeof m.hasText !== "function") return true; // cannot tell: keep the key
+    return !!m.hasText();
+  }
+
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
   // ---------------------------------------------------------------- hooks
@@ -884,7 +941,9 @@
             });
           }
         } catch (e) { reportError(e); }
-        return orig.apply(this, arguments);
+        var r = orig.apply(this, arguments);
+        try { if (pendingMsgKey !== null && !messageHasText()) pendingMsgKey = null; } catch (e2) { pendingMsgKey = null; reportError(e2); }
+        return r;
       };
     });
 
@@ -1002,6 +1061,7 @@
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
         var r = orig.apply(this, arguments);
+        try { battleStartT = now(); } catch (eb) { reportError(eb); }
         try { emit("battle", { phase: "start", troopId: troopId }); } catch (e) { reportError(e); }
         return r;
       };
@@ -1104,6 +1164,47 @@
     win._lineShowFast = true;
   }
 
+  function hookInputQuery(owner, ownerName, name) {
+    hook(owner, ownerName, name, function (orig) {
+      return function () {
+        if (extraUpdate) return false;
+        return orig.apply(this, arguments);
+      };
+    });
+  }
+
+  function pressedTime(o) { return o && typeof o._pressedTime === "number" ? o._pressedTime : null; }
+
+  // Updates 2..n of a sped-up frame. They are input-neutral: the queries above answer false, and
+  // _pressedTime (key repeat / long press timing) advances once per real frame, not once per update.
+  function extraUpdates(sm, orig, args, n) {
+    var I = G.Input, TI = G.TouchInput;
+    var it = null, tt = null, latest = null;
+    try { it = pressedTime(I); tt = pressedTime(TI); latest = I ? I._latestButton : null; } catch (e0) { reportError(e0); }
+    extraUpdate = true;
+    try {
+      for (var i = 1; i < n; i++) {
+        var again = false;
+        try {
+          again = repeatable(sm);
+          // clears this frame's triggers (also TouchInput cancel / wheel); _pressedTime is restored below
+          if (again && typeof sm.updateInputData === "function") sm.updateInputData();
+        } catch (e) { again = false; reportError(e); }
+        if (!again) break;
+        orig.apply(sm, args);
+      }
+    } finally {
+      extraUpdate = false;
+      try {
+        if (it !== null && I) {
+          // a button newly pressed meanwhile (gamepads are polled): trigger it on the next real frame
+          I._pressedTime = I._latestButton === latest ? it : -1;
+        }
+        if (tt !== null && TI) TI._pressedTime = tt;
+      } catch (e1) { reportError(e1); }
+    }
+  }
+
   function installAssist() {
     applyKeyMap();
 
@@ -1114,15 +1215,7 @@
         try {
           var n = frameStart(this);
           var r = orig.apply(this, arguments);
-          for (var i = 1; i < n; i++) {
-            var again = false;
-            try {
-              again = repeatable(this);
-              if (again && typeof this.updateInputData === "function") this.updateInputData(); // a key press counts once
-            } catch (e) { again = false; reportError(e); }
-            if (!again) break;
-            orig.apply(this, arguments);
-          }
+          if (n > 1) extraUpdates(this, orig, arguments, n);
           return r;
         } finally {
           inFrame = false;
@@ -1130,12 +1223,20 @@
       };
     });
 
+    // During extra updates every press / repeat / long-press query answers false.
+    var inputQueries = ["isTriggered", "isRepeated", "isLongPressed"];
+    for (var q = 0; q < inputQueries.length; q++) {
+      hookInputQuery(G.Input, "Input", inputQueries[q]);
+      hookInputQuery(G.TouchInput, "TouchInput", inputQueries[q]);
+    }
+
     var WM = G.Window_Message && G.Window_Message.prototype;
     hook(WM, "Window_Message", "startMessage", function (orig) {
       return function () {
         var key = pendingMsgKey;
         pendingMsgKey = null;
         try {
+          if (!messageHasText()) key = null;
           this._rpgvWait = 0;
           this._rpgvSkip = !!(assist.skipSeen && key !== null && seenMessages[key] === true && !choicePending());
         } catch (e) { this._rpgvSkip = false; reportError(e); }
@@ -1176,6 +1277,7 @@
   try {
     if (fs.existsSync(LIVE_TMP)) fs.unlinkSync(LIVE_TMP); // left over from a crash mid-write
   } catch (e) { /* harmless: overwritten on next snapshot */ }
+  try { baselineControl(); } catch (e) { reportError(e); }
   try {
     loadMeta();
     raiseMetaFromLog();
