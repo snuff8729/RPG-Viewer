@@ -2,7 +2,10 @@ import { formatText } from "../text/escape";
 import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
 import { locationKey } from "../index/locations";
-import { coarseShotKey, nextShot, visibleScene, type ScreenScene, type ScreenShot } from "../addons/screenPictures";
+import {
+  coarseShotKey, DEFAULT_SCREEN, nextShot, visibleScene, type PictureContext, type ScreenScene, type ScreenShot,
+} from "../addons/screenPictures";
+import { applyPictureOp, composedScene, pictureOp, stackPictures, type PictureVars, type StackPicture } from "./pictureStack";
 import { noticeSourceLabel } from "../addons/notices";
 import type { GameData, Location } from "../types";
 import { branchLabel, isContinuation } from "./history";
@@ -37,8 +40,20 @@ export type ReaderItem =
   | { kind: "battlelog"; key: string; seq: number; text: string; action?: BattleAction; screen?: ScreenShot }
   /** 1.9.0 알림 문구(티커·코멘트 등). text = 제어 문자 처리한 글, source = 보일 출처 이름 */
   | { kind: "notice"; key: string; seq: number; text: string; source: string }
-  /** 1.10.0 기록 사이에 바뀐 화면 그림(다른 플러그인이 잠깐 띄운 컷인 등) — 새로 보일 그림이 있을 때만 */
+  /**
+   * 1.10.0 기록 사이에 바뀐 화면 그림(다른 플러그인이 잠깐 띄운 컷인 등) — 새로 보일 그림이 있을 때만.
+   * 화면 그림 따라 그리기가 꺼졌으면 대사 없이 바뀐 그림 명령 묶음(다시 쌓은 그림, key = 묶음 첫 기록)도.
+   */
   | { kind: "screen"; key: string; seq: number; screen: ScreenShot };
+
+/**
+ * 그림 명령 기록으로 다시 쌓은 화면(pictureStack)을 그릴 때 쓰는 것. ctx = 그림 구분(없으면 게임 화면 크기만),
+ * vars = 변수로 정한 위치에 쓸 지금 게임 변수(같은 갈래만).
+ */
+export interface ComposeOptions { ctx?: PictureContext | null; vars?: PictureVars | null }
+
+/** 그림 명령 기록 사이가 이보다 길면(ms) 앞의 묶음을 따로 보인다(잠깐 띄웠다 지운 그림) */
+export const PICTURE_RUN_GAP_MS = 800;
 
 export type BattleResult = "win" | "lose" | "escape" | "abort";
 const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
@@ -105,7 +120,7 @@ function fromRecord(
   switch (r.type) {
     case "message": return messageItem(r, data);
     case "scroll": return { kind: "scroll", key: `r${r.seq}`, seq: r.seq, lines: lines(r.text, data) };
-    case "picture": return pictureItem(r, []);
+    case "picture": return null; // readerItems가 따로 다룬다(pictureRecord)
     case "plugin": return pluginItem(r, data, overrides);
     case "choice": {
       // historyText.pickedFallbackText와 같은 규칙: 취소(-2)는 `취소`, 그 밖은 `{n}번째 선택지`
@@ -175,11 +190,22 @@ function battleItem(
  * 플러그인 줄은 모두 넣고 tech로 표시만 한다(숨기기는 화면이 정한다).
  * opts.battles = false면 전투 묶음을, opts.notices = false면 알림 문구(1.9.0, 전투 안의 것도)를 뺀다.
  * scenes(화면 그림 따라 그리기, scenesBySeq): 주면 보이는 이벤트 그림·스탠딩이 앞에 보인 것과 달라진 대사에 screen을 붙인다(nextShot).
+ * 그림 표시 기록(231)은 따로 항목을 만들지 않는다(글자 그림만 남는다): 그림 명령 기록으로 화면 그림을 다시 쌓아(pictureStack)
+ * 그림이 없는 대사(화면 그림 따라 그리기가 꺼졌거나 그 전 기록)에 같은 방식으로 screen을 붙인다. 대사 없이 바뀐 묶음
+ * (선택·장면 구분·전투 앞, 또는 PICTURE_RUN_GAP_MS 넘게 쉰 뒤)은 화면 항목으로 보인다(scenes가 없을 때만). opts.compose: ComposeOptions.
  */
 export function readerItems(
   items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
-  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean } = {},
+  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean; compose?: ComposeOptions } = {},
 ): ReaderItem[] {
+  const pctx: PictureContext = opts?.compose?.ctx ?? { screen: data?.screenSize ?? DEFAULT_SCREEN };
+  const vars = opts?.compose?.vars ?? null;
+  /** 그림 명령으로 다시 쌓은 화면 그림(번호 → 그림) */
+  let stack: ReadonlyMap<number, StackPicture> = new Map();
+  /** shown이 이 묶음으로 정해졌으면 그 묶음(같으면 다시 계산하지 않는다) */
+  let composedFor: ReadonlyMap<number, StackPicture> | null = null;
+  /** 아직 보이지 않은 그림 명령 묶음: 첫·끝 기록 seq와 끝 기록 시각 */
+  let pending: { first: number; last: number; t: number } | null = null;
   /** 바로 앞에 이어진 플러그인 기록들(글자 그림 설명용) */
   let plugins: RecordOf<"plugin">[] = [];
   /** 마지막으로 보인 그림의 열쇠(nextShot). "" = 아무것도 없음, null = 모름 */
@@ -196,7 +222,44 @@ export function readerItems(
     shown = key;
     shownCoarse = scene ? coarseShotKey(nextShot(null, scene).shot) : null;
     lastScreen = null;
+    composedFor = null;
+    if (scene) pending = null; // 실제 화면 그림이 다시 쌓은 것보다 앞선다
     return shot;
+  };
+  /** 다시 쌓은 화면 그림에서 새로 보일 그림(shotAt과 같은 비교) */
+  const composedShot = (): ScreenShot | null => {
+    pending = null;
+    if (composedFor === stack) return null;
+    composedFor = stack;
+    const scene = composedScene(stackPictures(stack), pctx);
+    const { shot, key } = nextShot(shown, scene);
+    shown = key;
+    shownCoarse = coarseShotKey(nextShot(null, scene).shot);
+    lastScreen = null;
+    return shot;
+  };
+  /** 대사의 그림: 실제 화면 그림(scenes)이 있으면 그것, 없으면 다시 쌓은 것 */
+  const messageShot = (seq: number): ScreenShot | null => (scenes?.has(seq) ? shotAt(seq, true) : composedShot());
+  /** 대사 없이 바뀐 그림 명령 묶음을 화면 항목으로(화면 그림 따라 그리기 기록이 없을 때만) */
+  const flushPending = (out: ReaderItem[]) => {
+    const p = pending;
+    if (!p) return;
+    if (scenes) { pending = null; return; }
+    const shot = composedShot();
+    if (shot) out.push({ kind: "screen", key: `r${p.first}`, seq: p.last, screen: shot });
+  };
+  /** 그림 명령 기록 하나를 쌓는다. 글자 그림(이름 없는 표시)은 항목으로 돌려준다. */
+  const pictureRecord = (rec: RecordOf<"picture">, out: ReaderItem[]): ReaderItem | null => {
+    const op = pictureOp(rec, data, pctx.screen, vars);
+    const t = typeof rec.t === "number" ? rec.t : 0;
+    if (op && pending && t - pending.t > PICTURE_RUN_GAP_MS) flushPending(out);
+    const next = applyPictureOp(stack, op);
+    if (next !== stack) {
+      stack = next;
+      pending = pending ? { first: pending.first, last: rec.seq, t } : { first: rec.seq, last: rec.seq, t };
+    }
+    const text = op ? op.op === "show" && !op.pic : rec.op === undefined && !rec.name;
+    return text ? pictureItem(rec, plugins) : null;
   };
   /**
    * 1.10.1 화면 기록(대사 사이에 바뀐 그림): 보이는 그림(10% 넘게 보이는 것)의 이름·대략적인 위치가 지금 보이는 것과
@@ -214,6 +277,7 @@ export function readerItems(
     shownCoarse = coarse;
     shown = key;
     lastScreen = null;
+    composedFor = null;
     return shot;
   };
   const battles = opts?.battles !== false;
@@ -235,25 +299,33 @@ export function readerItems(
           }
           // 알림 문구는 다른 플러그인이 띄운 것이라 이어진 플러그인 기록(글자 그림 설명)을 끊지 않는다
           if (rec?.type === "notice" && !notices) continue;
-          const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);
+          // 그림 명령(231·232·235)은 화면 그림을 다시 쌓기만 한다(따로 보이지 않는다). 글자 그림만 항목이 된다.
+          const r = rec?.type === "picture" ? pictureRecord(rec, out) : fromRecord(rec, data, choiceText, model, overrides);
           if (rec?.type !== "notice") plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
-          // 화면 그림을 기록하는 중이면 그림 표시(231)는 다음 대사의 화면이 실제 모습으로 보여 주므로 따로 넣지 않는다(글자 띄우기는 남긴다)
-          if (r?.kind === "picture" && r.name && shown !== null) continue;
+          // 갈래 시작(이어진 갈래 제외)은 앞의 그림을 모른다
+          if (rec?.type === "branchStart" && r) { flushPending(out); stack = new Map(); composedFor = null; }
           if (!r) continue;
           if (r.kind === "battle" && !battles) continue;
-          if (r.kind === "message" || r.kind === "battlelog") {
-            const shot = shotAt(r.seq, r.kind === "message");
+          // 대사 없이 바뀐 그림 묶음은 선택·장면 구분·스크롤 글·전투 앞에 따로 보인다
+          if (r.kind === "choice" || r.kind === "chapter" || r.kind === "scroll" || r.kind === "battle") flushPending(out);
+          if (r.kind === "message") {
+            const shot = messageShot(r.seq);
+            if (shot) r.screen = shot;
+          } else if (r.kind === "battlelog") {
+            const shot = shotAt(r.seq, false);
             if (shot) r.screen = shot;
           }
           out.push(r);
         } else if (it.kind === "repeat") {
           plugins = [];
+          flushPending(out);
           // 접힌 반복 대화는 화면 그림을 붙이지 않는다(접혀 있어 안 보이므로 다음 대사가 보인다)
           out.push(messageItem(it.record, data, it.count));
         } else if (it.kind === "battle") {
           plugins = [];
           // `전투 기록 보기`를 끄면 전투는 통째로 빠진다(그 안의 그림도 앞뒤 대사의 그림 비교에 넣지 않는다)
           if (!battles || !it.start) continue;
+          flushPending(out);
           const screen = it.repeat > 0 ? null : shotAt(it.start.seq, false);
           const inner: ReaderItem[] = [];
           // 다시 본 같은 전투는 접혀 있어 그림을 붙이지 않는다
@@ -262,6 +334,7 @@ export function readerItems(
             convert(it.items, inner);
             shown = saved;
             shownCoarse = savedCoarse;
+            composedFor = null;
             for (const x of inner) if ((x.kind === "message" || x.kind === "battlelog") && x.screen) delete x.screen;
           } else {
             convert(it.items, inner);

@@ -109,6 +109,30 @@ describe("RPGViewerBridge", () => {
     });
   });
 
+  it("logs resolved Show Picture values, Move Picture targets and Erase Picture (1.15.0)", () => {
+    h = newGame();
+    h.g.$gameVariables.setValue(7, 300);
+    h.g.$gameVariables.setValue(8, 40);
+    const list = [
+      cmd(231, [2, "Body", 1, 0, 408, 312, 100, 100, 0, 0]),
+      cmd(231, [3, "Eyes", 0, 1, 7, 8, 50, 60, 200, 1]),
+      cmd(232, [2, "", 1, 0, 400, 300, 100, 100, 255, 0, 30, false]),
+      cmd(235, [3]),
+      cmd(0),
+    ];
+    h.addMapEvent(3, [list], 0);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 3);
+    for (let i = 0; i < 4; i++) h.runCommand(interp, i);
+    const pics = h.readLog().filter((r) => r.type === "picture");
+    expect(pics[0]).toMatchObject({ pictureId: 2, name: "Body", origin: 1, x: 408, y: 312, scaleX: 100, scaleY: 100, opacity: 0, blend: 0 });
+    expect(pics[0].op).toBeUndefined();
+    expect(pics[1]).toMatchObject({ pictureId: 3, name: "Eyes", origin: 0, x: 300, y: 40, scaleX: 50, scaleY: 60, opacity: 200, blend: 1 });
+    expect(pics[2]).toMatchObject({ op: "move", pictureId: 2, name: "", origin: 1, x: 400, y: 300, opacity: 255, cmd: 2 });
+    expect(pics[3]).toMatchObject({ op: "erase", pictureId: 3, name: "", cmd: 3 });
+    expect(pics[3].x).toBeUndefined();
+  });
+
   it("unknown list resolves to a null source", () => {
     h = newGame();
     const interp = h.newInterpreter();
@@ -984,7 +1008,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.13.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.15.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1736,13 +1760,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.13\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.15\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.13.0");
+    expect(h.bridge.VERSION).toBe("1.15.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

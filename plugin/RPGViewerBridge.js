@@ -42,7 +42,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.13.0",
+    VERSION: "1.15.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1094,6 +1094,26 @@
 
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
+  // 1.15.0: resolved values of a Show / Move Picture command (parameters [id, name, origin, designation, x, y,
+  // scaleX, scaleY, opacity, blend, ...]): variable-designated positions are read from the game variables now.
+  function pictureFields(f, p) {
+    var num = function (v) { return typeof v === "number" && isFinite(v) ? v : null; };
+    var x = null, y = null;
+    if (p[3] === 1) {
+      var gv = typeof $gameVariables !== "undefined" ? $gameVariables : null;
+      if (gv && typeof gv.value === "function") { x = num(gv.value(p[4])); y = num(gv.value(p[5])); }
+    } else {
+      x = num(p[4]); y = num(p[5]);
+    }
+    if (x === null || y === null) return;
+    f.origin = p[2] === 1 ? 1 : 0;
+    f.x = x; f.y = y;
+    f.scaleX = num(p[6]) === null ? 100 : p[6];
+    f.scaleY = num(p[7]) === null ? 100 : p[7];
+    f.opacity = num(p[8]) === null ? 255 : p[8];
+    f.blend = num(p[9]) === null ? 0 : p[9];
+  }
+
   // ---------------------------------------------------------------- screen pictures (1.6.0 / 1.7.0)
   // The pictures on screen are read directly when a message's text starts drawing instead of hooking
   // showPicture & co (plugins computing standing pictures end up there however they do it).
@@ -2041,7 +2061,39 @@
           var i = cmdAt(this, 231);
           if (i >= 0 && run !== null) {
             var p = this._list[i].parameters || [];
-            emit("picture", { src: srcOf(this), cmd: i, pictureId: p[0], name: p[1] == null ? "" : String(p[1]) });
+            var f = { src: srcOf(this), cmd: i, pictureId: p[0], name: p[1] == null ? "" : String(p[1]) };
+            pictureFields(f, p);
+            emit("picture", f);
+          }
+        } catch (e) { reportError(e); }
+        return orig.apply(this, arguments);
+      };
+    });
+
+    // 1.15.0: Move Picture (232) logs its final target, Erase Picture (235) the picture id, so the viewer can
+    // rebuild layered pictures from commands alone (name "" keeps older viewers from showing them).
+    hook(GI, "Game_Interpreter", "command232", function (orig) {
+      return function () {
+        try {
+          var i = cmdAt(this, 232);
+          if (i >= 0 && run !== null) {
+            var p = this._list[i].parameters || [];
+            var f = { src: srcOf(this), cmd: i, pictureId: p[0], name: "", op: "move" };
+            pictureFields(f, p);
+            emit("picture", f);
+          }
+        } catch (e) { reportError(e); }
+        return orig.apply(this, arguments);
+      };
+    });
+
+    hook(GI, "Game_Interpreter", "command235", function (orig) {
+      return function () {
+        try {
+          var i = cmdAt(this, 235);
+          if (i >= 0 && run !== null) {
+            var p = this._list[i].parameters || [];
+            emit("picture", { src: srcOf(this), cmd: i, pictureId: p[0], name: "", op: "erase" });
           }
         } catch (e) { reportError(e); }
         return orig.apply(this, arguments);

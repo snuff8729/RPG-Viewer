@@ -49,7 +49,9 @@ export function choiceFlow(args: {
       for (const i of list) {
         if (i.kind === "message" || i.kind === "scroll") {
           if (!(i.kind === "message" && i.repeat !== undefined)) messages += Array.isArray(i.lines) ? i.lines.length : 0;   // 반복 항목은 줄 수에서 제외
-        } else if (i.kind === "picture") pictures++;
+        }
+        // 그림: 글자 그림·화면 항목, 그림이 붙은 대사(그림 명령은 대사에 합쳐 보인다)
+        if (i.kind === "picture" || i.kind === "screen" || (i.kind === "message" && i.screen)) pictures++;
         else if (i.kind === "battle" && i.repeat === 0) {
           // 전투 안의 대사(전투 로그 줄은 세지 않는다)
           for (const x of i.items) {

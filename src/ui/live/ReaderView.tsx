@@ -7,6 +7,11 @@ import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
+import { hasLayeredPictures } from "@/core/live/pictureStack";
+import { Info, X } from "lucide-react";
+import { setGameSettingsOpen } from "../addons/settingsOpen";
+import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -107,16 +112,31 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
-  const pictureCtx = usePictureContext(records, picturesOn);
+  // 그림 표시 명령 기록이 있으면(그림 따라 그리기가 꺼졌어도) 그림 명령으로 화면을 다시 쌓아 보인다
+  const hasPictureRecords = useMemo(() => path.some(r => r.type === "picture" && r.op === undefined && !!r.name), [path]);
+  const pictureCtx = usePictureContext(records, picturesOn, hasPictureRecords);
   // 대사마다 보이는 이벤트 그림·스탠딩(화면 장식·숨김·가려진 그림 제외)
-  const pictures = useMemo(() => (pictureCtx ? scenesBySeq(picturesBySeq(path), pictureCtx) : null), [pictureCtx, path]);
+  const pictures = useMemo(() => (picturesOn && pictureCtx ? scenesBySeq(picturesBySeq(path), pictureCtx) : null), [picturesOn, pictureCtx, path]);
+  // 변수로 정한 그림 위치: 지금 게임의 같은 갈래 기록이면 지금 변수 값으로(변수가 바뀔 때만 다시 만든다)
+  const liveBranch = liveNow?.branch ?? null;
+  const varsKey = liveNow ? JSON.stringify(liveNow.variables ?? {}) : "";
+  const vars = useMemo(() => {
+    if (liveBranch === null || !varsKey) return null;
+    try { return { branch: liveBranch, values: JSON.parse(varsKey) as Record<string, number> }; } catch { return null; }
+  }, [liveBranch, varsKey]);
   const items = useMemo(() => {
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
-    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, { battles: battlesShown, notices: noticesShown });
+    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, {
+      battles: battlesShown, notices: noticesShown, compose: { ctx: pictureCtx, vars },
+    });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
     return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || it.kind !== "screen"));
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, screenShown]);
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, screenShown, pictureCtx, vars]);
+  // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
+  const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
+  const layered = useMemo(() => !picturesOn && hasLayeredPictures(path), [picturesOn, path]);
+  const closeHint = () => { setHintClosed(true); dismissLayeredHint(gameKey); };
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
@@ -422,6 +442,18 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {layered && !hintClosed && (
+        <Alert className="mx-auto max-w-2xl shrink-0">
+          <Info />
+          <AlertDescription>
+            이 게임은 그림 여러 장을 겹쳐서 캐릭터를 그려요. 게임 설정에서 '화면 그림 따라 그리기'를 켜면 게임 화면 그대로 기록돼요.
+          </AlertDescription>
+          <AlertAction className="flex gap-1">
+            <Button size="xs" variant="outline" onClick={() => setGameSettingsOpen(true)}>게임 설정</Button>
+            <Button size="icon-xs" variant="ghost" aria-label="안내 닫기" onClick={closeHint}><X /></Button>
+          </AlertAction>
+        </Alert>
+      )}
       <div ref={scroller} onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className="min-h-0 flex-1 overflow-y-auto">
         <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
           {empty ? (
@@ -474,7 +506,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
           <Switch id="reader-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
           <Label htmlFor="reader-auto-follow">자동으로 맨 아래로</Label>
         </div>
-        {picturesOn && (
+        {(picturesOn || hasPictureRecords) && (
           <div className="flex items-center gap-2">
             <Switch id="reader-screen-pictures" checked={screenShown} onCheckedChange={setScreenShown} />
             <Label htmlFor="reader-screen-pictures">그림 보기</Label>

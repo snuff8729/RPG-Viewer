@@ -41,16 +41,18 @@ describe("readerItems", () => {
   it("builds the novel-style flow for branch 1", () => {
     const items = build(1);
     expect(items.map(i => i.kind)).toEqual([
-      "chapter", "message", "message", "message", "picture", "message", "choice", "message", "message", "message", "chapter",
+      "chapter", "message", "message", "message", "message", "choice", "message", "message", "message", "chapter",
     ]);
     expect(items[0]).toMatchObject({ kind: "chapter", text: "— 1회차 갈래 1 시작 —" });
     expect(items[1]).toMatchObject({ kind: "message", key: "r2", speaker: "촌장", face: "People1", faceIndex: 3 });
     expect(items[2]).toMatchObject({ speaker: "레나" });
     expect(items[3]).toMatchObject({ speaker: "" });
-    expect(items[4]).toMatchObject({ kind: "picture", name: "village_map" });
-    expect(items[6]).toMatchObject({ kind: "choice", label: "네, 도울게요", key: "r9" });
-    expect(items[9]).toMatchObject({ seq: 13, repeat: 2 });
-    expect(items[10]).toMatchObject({ kind: "chapter", text: "— 숲 입구 —" });
+    // the Show Picture line is rebuilt into the next message's picture
+    const m = items[4];
+    expect(m.kind === "message" && m.screen?.pictures.map(p => p.name)).toEqual(["village_map"]);
+    expect(items[5]).toMatchObject({ kind: "choice", label: "네, 도울게요", key: "r9" });
+    expect(items[8]).toMatchObject({ seq: 13, repeat: 2 });
+    expect(items[9]).toMatchObject({ kind: "chapter", text: "— 숲 입구 —" });
     expect(items.some(i => (i.kind as string) === "state")).toBe(false);
   });
 
@@ -127,10 +129,9 @@ describe("readerItems text pictures", () => {
     expect(out.some(i => i.kind === "picture")).toBe(false);
   });
 
-  it("never captions a named picture", () => {
+  it("never captions a named picture (it joins the rebuilt screen instead of its own item)", () => {
     const out = readerItems([plugin(1, 0, "D_TEXT 안녕"), pic(2, 1, "village_map")], data, new Map(), model);
-    expect(out.at(-1)).toMatchObject({ name: "village_map" });
-    expect(out.at(-1)).not.toHaveProperty("caption");
+    expect(out.some(i => i.kind === "picture")).toBe(false);
   });
 });
 
@@ -188,8 +189,17 @@ describe("readerItems screen pictures", () => {
   it("while capturing, Show Picture lines give way to the screen; text pictures stay", () => {
     const pic = (seq: number, name: string) => ({ ...rec, seq, type: "picture", src, cmd: seq * 10, pictureId: 5, name }) as LogRecord;
     const before = run([pic(1, "cg"), msg(2, { pics: [A] }), pic(3, "cg2"), msg(4, { pics: [B] })]);
-    expect(before.map(i => i.kind)).toEqual(["picture", "message", "message"]);
+    expect(before.map(i => i.kind)).toEqual(["message", "message"]);
+    expect(screens(before)).toEqual(["110", "120"]); // the snapshots win over the rebuilt stack
+    // without the add-on the Show Picture lines are rebuilt into the message's picture instead of showing alone
     const off = run([pic(1, "cg"), msg(2, { pics: [A] }), pic(3, "cg2")], false);
-    expect(off.map(i => i.kind)).toEqual(["picture", "message", "picture"]);
+    expect(off.map(i => i.kind)).toEqual(["message"]);
+    expect(screens(off)).toEqual(["5"]);
+  });
+
+  it("an add-on game's message without a snapshot (older lines) falls back to the rebuilt stack", () => {
+    const pic = (seq: number, name: string) => ({ ...rec, seq, type: "picture", src, cmd: seq * 10, pictureId: 5, name }) as LogRecord;
+    const out = run([pic(1, "cg"), msg(2), msg(3, { pics: [A] })]);
+    expect(screens(out)).toEqual(["5", "110"]);
   });
 });

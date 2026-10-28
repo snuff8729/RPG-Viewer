@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { PictureRolesSection } from "./PictureRolesSection";
 import { NoticeHooksSection } from "./NoticeHooksSection";
 import { AdapterCard } from "./AdapterCard";
+import { useGameSettingsOpen } from "./settingsOpen";
 import { useGame } from "@/app/GameProvider";
 import { Badge } from "@/components/ui/badge";
 import type { GameData } from "@/core/types";
@@ -61,8 +62,9 @@ function availableHere(addon: AddonDef, data: GameData | null | undefined): bool
 export function GameSettingsSheet() {
   const { isOn, setOn, savedInFolder, adapters } = useAddons();
   const { data } = useGame();
+  const [open, setOpen] = useGameSettingsOpen();
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button variant="outline" size="sm"><Settings2 />게임 설정</Button>
       </SheetTrigger>

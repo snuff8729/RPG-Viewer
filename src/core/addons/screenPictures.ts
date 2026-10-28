@@ -312,13 +312,15 @@ export interface ScreenScene { cg: ScreenPicture[]; stand: ScreenPicture[] }
  * 그림 묶음 → 보이는 화면. 화면 장식·숨김과 투명도 0은 빼고, 위에(뒤 번호로) 화면의 95% 이상을 덮는
  * 불투명(255·보통 합성) 그림 아래에 완전히 가려진 그림도 뺀다(덮는 그림의 투명한 부분은 알 수 없어 아래 그림만 가린다고 본다).
  */
-export function sceneOf(pics: ScreenPicture[] | null | undefined, ctx: PictureContext): ScreenScene {
+export function sceneOf(
+  pics: ScreenPicture[] | null | undefined, ctx: PictureContext, roleFor?: ((p: ScreenPicture) => PictureRole) | null,
+): ScreenScene {
   const scene: ScreenScene = { cg: [], stand: [] };
   try {
     const drawn: { p: ScreenPicture; role: "cg" | "stand"; rect: Rect | null }[] = [];
     for (const p of [...(pics ?? [])].sort((a, b) => a.id - b.id)) {
       if (!p || p.opacity <= 0) continue;
-      const role = roleOf(p, ctx);
+      const role = roleFor ? roleFor(p) : roleOf(p, ctx);
       if (role === "cg" || role === "stand") drawn.push({ p, role, rect: pictureRect(p, ctx.sizeOf) });
     }
     const covers = drawn.map(d => d.rect !== null && d.p.opacity >= 255 && d.p.blendMode === 0 && coverage(d.rect, ctx.screen) >= OCCLUDE_COVER);
