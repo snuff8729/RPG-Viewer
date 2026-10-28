@@ -545,7 +545,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.3", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.4", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -669,15 +669,52 @@ describe("RPGViewerBridge", () => {
     expect(h.g.$gameSwitches.value(1)).toBe(true);
   });
 
+  it("flushes dialogue records at the end of the frame, once per frame", () => {
+    h = newGame();
+    const raw = () => h.fs.files.get(LOG_PATH) ?? "";
+    const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["hi"]), cmd(0)];
+    h.addMapEvent(3, [list], 0);
+    const interp = h.g.$gameMap._interpreter;
+    interp.setup(list, 3);
+    h.runCommand(interp, 0);
+    expect(raw()).not.toContain('"type":"message"'); // not before the frame ends
+    h.bridge._runScheduled();
+    expect(raw()).toContain('"type":"message"');
+    const before = raw();
+    h.bridge._runScheduled(); // nothing scheduled -> no-op
+    expect(raw()).toBe(before);
+  });
+
+  it("writes live.json at once when runningCmd changes, keeps the floor otherwise", () => {
+    h = newGame();
+    h.bridge._tick();
+    const live = () => JSON.parse(h.fs.files.get(LIVE_PATH)!);
+    h.clock.t += 10;
+    h.g.$gameSwitches.setValue(8, true);
+    h.bridge._tick();
+    expect(live().t).toBe(1_000_000); // other change: still floored
+    const list = [cmd(121, [1, 1, 0]), cmd(0)];
+    h.addMapEvent(1, [list]);
+    h.g.$gameMap._interpreter.setup(list, 1);
+    h.g.$gameMap._interpreter._index = 1;
+    h.clock.t += 10;
+    h.bridge._tick();
+    expect(live()).toMatchObject({ t: 1_000_020, runningCmd: 1 });
+    h.clock.t += 10;
+    h.g.$gameMap._interpreter._index = 0;
+    h.bridge._tick();
+    expect(live()).toMatchObject({ t: 1_000_030, runningCmd: 0 });
+  });
+
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.3"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.4"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.3");
+    expect(h.bridge.VERSION).toBe("1.0.4");
   });
 
   it("uses ES2015-compatible syntax only", () => {

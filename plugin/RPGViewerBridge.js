@@ -21,10 +21,11 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.3",
+    VERSION: "1.0.4",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
+    _runScheduled: function () {},
     _hooks: []
   };
   G.RPGViewerBridge = bridge;
@@ -132,6 +133,24 @@
     var rec = makeRecord(type, now());
     for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) rec[k] = fields[k];
     pushLine(rec);
+    if (IMMEDIATE[type] === true) scheduleFlush();
+  }
+
+  // Dialogue-flow records reach disk at the end of the current frame instead of the next 250ms tick.
+  var IMMEDIATE = { message: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
+  var flushScheduled = false;
+  function runScheduled() {
+    if (!flushScheduled) return;
+    flushScheduled = false;
+    try { flush(); } catch (e) { reportError(e); }
+  }
+  function scheduleFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    if (T) return; // tests run it through bridge._runScheduled()
+    try {
+      setTimeout(runScheduled, 0);
+    } catch (e) { flushScheduled = false; /* the 250ms tick still flushes */ }
   }
 
   function reportError(e) {
@@ -344,6 +363,7 @@
     return !!((G.Scene_Title && scene instanceof G.Scene_Title) || (G.Scene_Boot && scene instanceof G.Scene_Boot));
   }
 
+  var lastUrgentKey = null;
   function writeLive(force) {
     if (inTitleScene()) return;
     var snap = buildSnapshot();
@@ -351,7 +371,11 @@
     var body = JSON.stringify(snap);
     var t = now();
     // changes: at most once per second; unchanged: heartbeat every 2 seconds
-    if (!force && t - lastLiveT < (body === lastLiveBody ? 2000 : 1000)) return;
+    // running / runningCmd / choice / mapId changes skip the 1s floor
+    var urgentKey = JSON.stringify([snap.running, snap.runningCmd, snap.choice, snap.mapId]);
+    var urgent = lastUrgentKey !== null && urgentKey !== lastUrgentKey;
+    if (!force && !urgent && t - lastLiveT < (body === lastLiveBody ? 2000 : 1000)) return;
+    lastUrgentKey = urgentKey;
     lastLiveBody = body;
     lastLiveT = t;
     snap.t = t;
@@ -373,6 +397,7 @@
   bridge._flushNow = function () { try { flush(); } catch (e) { reportError(e); } };
   bridge._snapshotNow = function () { try { writeLive(true); } catch (e) { reportError(e); } };
   bridge._tick = tick;
+  bridge._runScheduled = runScheduled;
 
   // ---------------------------------------------------------------- engine helpers
   function resolveSource(list, eventId) {
