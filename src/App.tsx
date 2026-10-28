@@ -16,6 +16,8 @@ import { useExplorerState } from "@/ui/useExplorerState";
 import { SearchDialog } from "@/ui/SearchDialog";
 import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider, useLive } from "@/app/LiveProvider";
+import { AddonsProvider } from "@/app/AddonsProvider";
+import { GameSettingsSheet } from "@/ui/addons/GameSettingsSheet";
 import { popupGameKey } from "@/app/popup";
 import { useAutoReopen } from "@/app/useAutoReopen";
 import { PlayView } from "@/ui/live/PlayView";
@@ -126,6 +128,7 @@ function Shell() {
             <LaunchButton />
             <BackupButton />
             <AssistPanel />
+            <GameSettingsSheet />
           </div>
         </header>
         <main className="flex-1 p-4">
@@ -147,9 +150,11 @@ export default function App() {
   return (
     <TooltipProvider>
       <GameProvider>
-        <LiveProvider>
-          <Shell />
-        </LiveProvider>
+        <AddonsProvider>
+          <LiveProvider>
+            <Shell />
+          </LiveProvider>
+        </AddonsProvider>
       </GameProvider>
     </TooltipProvider>
   );

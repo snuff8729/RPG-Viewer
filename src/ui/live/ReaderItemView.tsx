@@ -8,6 +8,9 @@ import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
 import { useAsset } from "../script/useAssetUrl";
 import { PluginLine } from "./PluginLine";
 import { usePluginShowAll } from "./pluginDisplay";
+import { samePictures, type ScreenPicture } from "@/core/addons/screenPictures";
+import { ScreenPictures } from "../addons/ScreenPictures";
+import { useScreenPicturesShown } from "../addons/screenDisplay";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
@@ -30,6 +33,12 @@ function Picture({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
     return <AssetPlaceholder view={a} kind="pictures" name={name} pictureId={item.pictureId} className="mx-auto w-fit max-w-full" />;
   }
   return <img src={a.url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
+}
+
+/** 화면 그림 따라 그리기: 이 대사에서 바뀐 화면 그림(`그림 보기`를 껐으면 숨긴다). */
+function Screen({ pictures }: { pictures: ScreenPicture[] }) {
+  const [shown] = useScreenPicturesShown();
+  return shown ? <div className="mb-3"><ScreenPictures pictures={pictures} /></div> : null;
 }
 
 /** 플러그인 명령 줄. 기술 명령은 `플러그인 명령 모두 보기`를 켰을 때만. */
@@ -55,7 +64,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
           </Collapsible>
         );
       }
-      return <MessageLines item={item} />;
+      return item.screen ? <><Screen pictures={item.screen} /><MessageLines item={item} /></> : <MessageLines item={item} />;
     case "scroll":
       return (
         <div className="space-y-0.5 text-center">
@@ -88,7 +97,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     case "chapter": return a.text === (b as typeof a).text;
     case "message": {
       const m = b as typeof a;
-      return a.repeat === m.repeat && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines);
+      return a.repeat === m.repeat && samePictures(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines);
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
     case "picture": {

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
+import { useAddons } from "@/app/AddonsProvider";
+import { picturesBySeq } from "@/core/addons/screenPictures";
+import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchLabel, branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
@@ -96,13 +99,17 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const path = useMemo(() => (branch === null ? [] : branchPath(records, model, branch)), [records, model, branch]);
   const { overrides } = usePluginOverrides();
   const [showAllPlugins] = usePluginShowAll();
+  // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
+  const picturesOn = useAddons().isOn("screenPictures");
+  const [screenShown, setScreenShown] = useScreenPicturesShown();
+  const pictures = useMemo(() => (picturesOn ? picturesBySeq(path) : null), [picturesOn, path]);
   const items = useMemo(() => {
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
-    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides);
+    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures);
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만
     return showAllPlugins ? all : all.filter(it => it.kind !== "plugin" || !it.tech);
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins]);
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures]);
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
@@ -460,6 +467,12 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
           <Switch id="reader-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
           <Label htmlFor="reader-auto-follow">자동으로 맨 아래로</Label>
         </div>
+        {picturesOn && (
+          <div className="flex items-center gap-2">
+            <Switch id="reader-screen-pictures" checked={screenShown} onCheckedChange={setScreenShown} />
+            <Label htmlFor="reader-screen-pictures">그림 보기</Label>
+          </div>
+        )}
       </div>
     </div>
   );

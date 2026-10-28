@@ -10,6 +10,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { AssistPanel } from "./AssistPanel";
+import { GameSettingsSheet } from "../addons/GameSettingsSheet";
 import { BackupButton } from "./BackupButton";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { LaunchButton } from "./LaunchButton";
@@ -46,6 +47,7 @@ function PlayTopBar({ popup }: { popup: boolean }) {
         <LaunchButton />
         <BackupButton />
         <AssistPanel />
+        <GameSettingsSheet />
       </div>
     </header>
   );

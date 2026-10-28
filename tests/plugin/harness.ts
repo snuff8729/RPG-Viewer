@@ -149,6 +149,32 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Map.prototype.event = function (id: number) { return this._events[id]; };
   Game_Map.prototype.events = function () { return this._events.filter((e: any) => !!e); };
 
+  // ---- Game_Screen / Game_Picture (fields as in rpg_objects.js / rmmz_objects.js; battle pictures use the upper half)
+  function Game_Picture(this: any) {
+    this._name = ""; this._origin = 0; this._x = 0; this._y = 0; this._scaleX = 100; this._scaleY = 100;
+    this._opacity = 255; this._blendMode = 0; this._targetX = 0; this._targetY = 0; this._targetScaleX = 100;
+    this._targetScaleY = 100; this._targetOpacity = 255; this._duration = 0; this._tone = null; this._toneTarget = null;
+    this._toneDuration = 0; this._angle = 0;
+  }
+  Game_Picture.prototype.show = function (name: string, origin: number, x: number, y: number, sx: number, sy: number, op: number, blend: number) {
+    Object.assign(this, { _name: name, _origin: origin, _x: x, _y: y, _scaleX: sx, _scaleY: sy, _opacity: op, _blendMode: blend,
+      _targetX: x, _targetY: y, _targetScaleX: sx, _targetScaleY: sy, _targetOpacity: op, _duration: 0 });
+  };
+  Game_Picture.prototype.move = function (origin: number, x: number, y: number, sx: number, sy: number, op: number, blend: number, duration: number) {
+    Object.assign(this, { _origin: origin, _targetX: x, _targetY: y, _targetScaleX: sx, _targetScaleY: sy, _targetOpacity: op, _blendMode: blend, _duration: duration });
+  };
+  function Game_Screen(this: any) { this._pictures = []; }
+  Game_Screen.prototype.maxPictures = function () { return 100; };
+  Game_Screen.prototype.realPictureId = function (id: number) { return g.$gameParty.inBattle() ? id + 100 : id; };
+  Game_Screen.prototype.picture = function (id: number) { return this._pictures[this.realPictureId(id)]; };
+  Game_Screen.prototype.showPicture = function (id: number, name: string, origin: number, x: number, y: number, sx: number, sy: number, op: number, blend: number) {
+    const p = new (Game_Picture as any)();
+    p.show(name, origin, x, y, sx, sy, op, blend);
+    this._pictures[this.realPictureId(id)] = p;
+  };
+  Game_Screen.prototype.movePicture = function (id: number, ...args: number[]) { const p = this.picture(id); if (p) p.move(...args); };
+  Game_Screen.prototype.erasePicture = function (id: number) { this._pictures[this.realPictureId(id)] = null; };
+
   // ---- Game_Interpreter
   function Game_Interpreter(this: any) { this.clear(); }
   Game_Interpreter.prototype.clear = function () {
@@ -347,10 +373,11 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       g.$gameTroop._interpreter = new (Game_Interpreter as any)();
       g.$gameMap = new (Game_Map as any)();
       g.$gamePlayer = new (Game_Player as any)();
+      g.$gameScreen = new (Game_Screen as any)();
     },
     setupNewGame() { this.createGameObjects(); g.$gamePlayer.reserveTransfer(1, 3, 4); },
     makeSaveContents(): any {
-      return { switches: g.$gameSwitches, variables: g.$gameVariables, selfSwitches: g.$gameSelfSwitches, party: g.$gameParty, map: g.$gameMap, player: g.$gamePlayer };
+      return { switches: g.$gameSwitches, variables: g.$gameVariables, selfSwitches: g.$gameSelfSwitches, party: g.$gameParty, map: g.$gameMap, player: g.$gamePlayer, screen: g.$gameScreen };
     },
     extractSaveContents(c: any) {
       if (c.switches) g.$gameSwitches = c.switches;
@@ -359,6 +386,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       if (c.party) g.$gameParty = c.party;
       if (c.map) g.$gameMap = c.map;
       if (c.player) g.$gamePlayer = c.player;
+      if (c.screen) g.$gameScreen = c.screen;
     },
     saveGame(id: number): any {
       saves[id] = this.makeSaveContents();
@@ -378,7 +406,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
-    Game_Event, Game_Map, Game_Interpreter, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
+    Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
     SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message,
     $dataCommonEvents: [null], $dataTroops: [null],
   });

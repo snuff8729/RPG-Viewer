@@ -58,6 +58,8 @@ export interface GameData {
   weapons: (NamedEntry | null)[];
   armors: (NamedEntry | null)[];
   errors: LoadError[];
+  /** 게임 화면 크기(MZ System.json advanced, MV는 plugins.js 파라미터, 없으면 816×624). 없으면 기본 크기로 본다. */
+  screenSize?: { width: number; height: number };
   /** TemplateEvent 플러그인의 템플릿 맵 id(템플릿 이벤트를 풀었을 때만). */
   templateMapId?: number;
   /** TemplateEvent KeepEventId: 맵 이벤트 호출(TE_CALL_MAP_EVENT)이 부른 이벤트 id를 유지(셀프 스위치가 부른 이벤트에). 없으면 false. */

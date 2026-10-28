@@ -6,6 +6,7 @@ import { loadGame } from "../loader/loadGame";
 import type { GameData } from "../types";
 import { branchPath, buildHistory, foldTimeline } from "./history";
 import { lastSeqOf, readerItems } from "./reader";
+import { picturesBySeq } from "../addons/screenPictures";
 import type { HistoryItem, LogRecord } from "./types";
 
 let data: GameData;
@@ -130,5 +131,34 @@ describe("readerItems text pictures", () => {
     const out = readerItems([plugin(1, 0, "D_TEXT 안녕"), pic(2, 1, "village_map")], data, new Map(), model);
     expect(out.at(-1)).toMatchObject({ name: "village_map" });
     expect(out.at(-1)).not.toHaveProperty("caption");
+  });
+});
+
+describe("readerItems screen pictures", () => {
+  const src = { source: "map", mapId: 1, eventId: 2, page: 0 } as const;
+  const msg = (seq: number, extra: Record<string, unknown> = {}) =>
+    ({ ...rec, seq, type: "message", src, cmd: seq * 10, face: "", faceIndex: 0, speaker: "", text: `line ${seq}`, ...extra }) as LogRecord;
+  const A = [110, "stand/a", 0, 0, 0, 100, 100, 255, 0];
+  const B = [120, "stand/b", 0, 0, 0, 100, 100, 255, 0];
+  const run = (recs: LogRecord[], on = true) => readerItems(recs.map(item), data, new Map(), model, null, on ? picturesBySeq(recs) : null);
+  const screens = (out: ReturnType<typeof readerItems>) =>
+    out.filter(i => i.kind === "message").map(i => (i.kind === "message" && i.screen ? i.screen.map(p => p.id).join("+") : "-"));
+
+  it("attaches the stack only where it changes, again after an empty screen", () => {
+    const out = run([msg(1, { pics: [A] }), msg(2, { picsSame: true }), msg(3, { pics: [A, B] }), msg(4, { pics: [] }), msg(5, { pics: [A] })]);
+    expect(screens(out)).toEqual(["110", "-", "110+120", "-", "110"]);
+  });
+
+  it("nothing without the add-on or without snapshots", () => {
+    expect(screens(run([msg(1, { pics: [A] })], false))).toEqual(["-"]);
+    expect(screens(run([msg(1), msg(2)]))).toEqual(["-", "-"]);
+  });
+
+  it("while capturing, Show Picture lines give way to the screen; text pictures stay", () => {
+    const pic = (seq: number, name: string) => ({ ...rec, seq, type: "picture", src, cmd: seq * 10, pictureId: 5, name }) as LogRecord;
+    const before = run([pic(1, "cg"), msg(2, { pics: [A] }), pic(3, "cg2"), msg(4, { pics: [B] })]);
+    expect(before.map(i => i.kind)).toEqual(["picture", "message", "message"]);
+    const off = run([pic(1, "cg"), msg(2, { pics: [A] }), pic(3, "cg2")], false);
+    expect(off.map(i => i.kind)).toEqual(["picture", "message", "picture"]);
   });
 });

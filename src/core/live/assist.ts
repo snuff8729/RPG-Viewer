@@ -166,14 +166,18 @@ export function seenSets(coverage: Coverage, index: GameIndex): SeenSets {
   return { seenMessages, seenPages };
 }
 
-/** control.json 본문(계약 v1). 예외를 던지지 않는다. */
-export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCommand | null, now: number): string {
+/**
+ * control.json 본문(계약 v1). 예외를 던지지 않는다.
+ * flags: 켜진 애드온이 싣는 값(예: capturePictures). 기본 필드를 덮어쓰지는 못한다.
+ */
+export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCommand | null, now: number, flags: Record<string, unknown> = {}): string {
   const n = normalizeAssist(s);
   const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
   const cmd = isObj(command) && typeof command.id === "string" && (command.kind === "win" || command.kind === "lose" || command.kind === "escape")
     ? { id: command.id, kind: command.kind, at: Number.isFinite(command.at) ? command.at : 0 }
     : null;
   return JSON.stringify({
+    ...(isObj(flags) ? flags : {}),
     v: 1, t: Number.isFinite(now) ? now : 0,
     speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: n.hotkeys,
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
