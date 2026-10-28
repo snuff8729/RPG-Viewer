@@ -12,6 +12,7 @@ import { PluginLine } from "./PluginLine";
 import { usePluginShowAll } from "./pluginDisplay";
 import { sameShot, type ScreenShot } from "@/core/addons/screenPictures";
 import { ScreenPictures } from "../addons/ScreenPictures";
+import { CutinPictures } from "../addons/CutinPictures";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
@@ -46,6 +47,12 @@ function Picture({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
 function Screen({ shot }: { shot: ScreenShot }) {
   const [shown] = useScreenPicturesShown();
   return shown ? <div className="mb-3"><ScreenPictures shot={shot} /></div> : null;
+}
+
+/** 컷인(대사 사이에 잠깐 띄웠다 지운 그림, `그림 보기`를 껐으면 숨긴다). 전투 안에서는 전투 기록을 접어도 보인다. */
+function Cutin({ item }: { item: Extract<ReaderItem, { kind: "cutin" }> }) {
+  const [shown] = useScreenPicturesShown();
+  return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} /></div> : null;
 }
 
 /** 플러그인 명령 줄. 기술 명령은 `플러그인 명령 모두 보기`를 켰을 때만. */
@@ -204,6 +211,8 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
       return <NoticeLine text={item.text} source={item.source} />;
     case "screen":
       return <Screen shot={item.screen} />;
+    case "cutin":
+      return <Cutin item={item} />;
   }
 }, (a, b) => sameItem(a.item, b.item));
 
@@ -260,5 +269,9 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
       return a.text === p.text && a.source === p.source;
     }
     case "screen": return sameShot(a.screen, (b as typeof a).screen);
+    case "cutin": {
+      const p = b as typeof a;
+      return a.best === p.best && a.frames.length === p.frames.length && a.frames.every((f, i) => sameShot(f, p.frames[i]));
+    }
   }
 }
