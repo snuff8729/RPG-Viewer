@@ -200,7 +200,7 @@ describe("picture groups", () => {
     expect(a.shot).toEqual({ kind: "stand", pictures: [BODY] });
     expect(nextShot(a.key, sc([], [BODY])).shot).toBeNull();
     const b = nextShot(a.key, sc([CG], [BODY]));
-    expect(b.shot).toEqual({ kind: "cg", pictures: [CG, BODY] });
+    expect(b.shot).toEqual({ kind: "cg", pictures: [CG, BODY], cg: [CG] });
     expect(nextShot(b.key, sc([], [])).key).toBe("");
     expect(nextShot(b.key, null)).toEqual({ shot: null, key: null });
   });

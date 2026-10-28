@@ -4,6 +4,7 @@ import { useAddons } from "@/app/AddonsProvider";
 import {
   DEFAULT_SCREEN, hudKeys, pngSize, snapshotCounts, type AlphaStats, type PicSize, type PictureContext, type ScreenPicture,
 } from "@/core/addons/screenPictures";
+import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
 import { blobAlphaStats } from "./imageStats";
 import type { LogRecord } from "@/core/live/types";
 
@@ -29,7 +30,8 @@ function commandPictureNames(records: LogRecord[]): Set<string> {
  */
 export function usePictureContext(records: LogRecord[], on: boolean, compose = false): PictureContext | null {
   const { data, assets } = useGame();
-  const { pictureRoles, spriteRoles, defaultRole } = useAddons();
+  const { pictureRoles, spriteRoles, defaultRole, hiddenImages } = useAddons();
+  const hidden = useMemo(() => hiddenImageMatcher(hiddenImages), [hiddenImages]);
   const screen = data?.screenSize ?? DEFAULT_SCREEN;
   const counts = useMemo(() => (on ? snapshotCounts(records) : null), [on, records]);
   // 보일 수 있는 그림 이름들(크기·투명도 통계를 읽는다)
@@ -81,6 +83,6 @@ export function usePictureContext(records: LogRecord[], on: boolean, compose = f
     const sizeOf = (name: string) => cache?.get(name) ?? null;
     const statsOf = (name: string) => stats?.get(name) ?? null;
     void version; // 크기·통계를 더 읽으면 다시 만든다
-    return { screen, roles: pictureRoles, spriteRoles, sizeOf, statsOf, hud: counts ? hudKeys(counts, screen, sizeOf) : null, defaultRole };
-  }, [counts, compose, assets, screen, pictureRoles, spriteRoles, version, defaultRole]);
+    return { screen, roles: pictureRoles, spriteRoles, sizeOf, statsOf, hud: counts ? hudKeys(counts, screen, sizeOf) : null, defaultRole, hidden };
+  }, [counts, compose, assets, screen, pictureRoles, spriteRoles, version, defaultRole, hidden]);
 }
