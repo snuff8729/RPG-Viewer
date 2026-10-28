@@ -9,6 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useGame } from "@/app/GameProvider";
+import { useLive } from "@/app/LiveProvider";
+import { NowGroup } from "./live/NowGroup";
 import type { Route } from "@/app/route";
 import type { Location, MapInfo, PageEntry } from "@/core/types";
 import { openPage } from "./navigation";
@@ -44,18 +46,25 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
   route: Route; showEmpty: boolean; onShowEmptyChange: (v: boolean) => void;
 }) {
   const { data, index } = useGame();
+  const { live, connection } = useLive();
+  const [follow, setFollow] = useState(true);
   const [openMaps, setOpenMaps] = useState<Set<number>>(new Set());
 
   // 현재 route의 맵과 그 상위 맵을 펼친다 (딥링크·검색 이동 대응).
   const activeMapId = route.kind === "page" && route.location.source === "map" ? route.location.mapId : null;
+  // 따라가기가 켜져 있으면 게임 속 맵도 같은 방식으로 펼친다(맵이 바뀔 때만 다시 펼침).
+  const liveMapId = follow && connection === "connected" && live ? live.mapId : null;
   useEffect(() => {
-    if (activeMapId === null || !data) return;
+    if (!data) return;
     const parentOf = new Map<number, number>();
     for (const m of data.mapInfos) if (m) parentOf.set(m.id, m.parentId);
     const chain: number[] = [];
-    for (let id: number | undefined = activeMapId; id !== undefined && id > 0 && !chain.includes(id); id = parentOf.get(id)) chain.push(id);
+    for (const start of [activeMapId, liveMapId]) {
+      for (let id: number | undefined = start ?? undefined; id !== undefined && id > 0 && !chain.includes(id); id = parentOf.get(id)) chain.push(id);
+    }
+    if (chain.length === 0) return;
     setOpenMaps((prev) => (chain.every((id) => prev.has(id)) ? prev : new Set([...prev, ...chain])));
-  }, [activeMapId, data]);
+  }, [activeMapId, liveMapId, data]);
 
   const model = useMemo(() => {
     if (!data || !index) return null;
@@ -181,6 +190,7 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
         </div>
       </SidebarHeader>
       <SidebarContent>
+        <NowGroup showEmpty={showEmpty} follow={follow} onFollowChange={setFollow} />
         <SidebarGroup>
           <SidebarGroupLabel>맵</SidebarGroupLabel>
           <SidebarGroupContent>
