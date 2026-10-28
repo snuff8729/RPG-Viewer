@@ -8,6 +8,7 @@ import {
   createFsMiddleware, createWindowsPicker, encodePowerShell, isInside, parsePickerOutput, pickerCommand, PICKER_SCRIPT,
   resolveInRoot, safeSegments, type ExecFileFn, type PickFolder,
 } from "../../scripts/fsApi";
+import { AssetStore } from "../../src/core/assets/assets";
 import { loadGame } from "../../src/core/loader/loadGame";
 import { ServerFolder, openFolderOnServer, pickFolderOnServer, type FetchFn } from "../../src/app/serverFolder";
 
@@ -226,6 +227,46 @@ describe("loading a game through the server", () => {
       if (!opened.ok || !("session" in opened)) throw new Error("open failed");
       const r = await loadGame(new ServerFolder(opened.session, fetchFn));
       expect(r.ok).toBe(true);
+    } finally {
+      await srv.close();
+    }
+  });
+});
+
+describe("image previews through the server", () => {
+  it("loads pictures and faces with awkward names, mixed encryption and NFD names", async () => {
+    const dest = path.join(tmp, "fixture-mz");
+    fs.cpSync(path.resolve(__dirname, "../fixtures/sample-mz"), dest, { recursive: true });
+    const png = fs.readFileSync(path.join(dest, "img/faces/actor1.png"));
+    const enc = fs.readFileSync(path.join(dest, "img/faces/People1.png_"));
+    const names = ["!Door", "$Big", "日本語の絵", "한글 그림", "ＦＵＬＬ", "a#b", "50%", "a+b", "a&b", "[x]", "(y)", "sp ace", "sub/inner", "Sub2/深い/x", "dot.name", "x'y"];
+    for (const n of names) touch(`fixture-mz/img/pictures/${n}.png`, png);
+    touch("fixture-mz/img/pictures/EncAsPng.png", enc); // 암호문인데 .png
+    touch("fixture-mz/img/pictures/Late.rpgmvp", enc); // 다른 암호 확장자
+    touch(`fixture-mz/img/pictures/${"가방".normalize("NFD")}.png`, png); // macOS에서 온 이름
+    touch("fixture-mz/img/pictures/Big.png", Buffer.concat([png, Buffer.alloc(8 * 1024 * 1024)]));
+
+    const srv = await startServer();
+    try {
+      const fetchFn = fetchVia(srv.port);
+      const opened = await openFolderOnServer(dest, fetchFn);
+      if (!opened.ok || !("session" in opened)) throw new Error("open failed");
+      const folder = new ServerFolder(opened.session, fetchFn);
+      const r = await loadGame(folder);
+      if (!r.ok) throw new Error("load failed");
+      const store = new AssetStore(folder, r.data);
+      const sig = async (kind: "faces" | "pictures", n: string) => {
+        const b = await store.load(kind, n);
+        return b ? [...new Uint8Array(await b.arrayBuffer()).slice(0, 4)] : null;
+      };
+      const PNG = [0x89, 0x50, 0x4e, 0x47];
+      const all = [...names, "EncAsPng", "Late", "가방", "Big", "SUB/INNER"];
+      const got = await Promise.all(all.map((n) => sig("pictures", n)));
+      expect(Object.fromEntries(all.map((n, i) => [n, got[i]]))).toEqual(Object.fromEntries(all.map((n) => [n, PNG])));
+      expect(await sig("faces", "People1")).toEqual(PNG);
+      expect(await sig("faces", "Actor1")).toEqual(PNG);
+      expect(await sig("pictures", "village_map")).toEqual(PNG);
+      expect(await sig("pictures", "nope")).toBeNull();
     } finally {
       await srv.close();
     }

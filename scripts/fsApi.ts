@@ -54,7 +54,7 @@ function realpath(p: string): string | null {
   try { return fs.realpathSync.native(p); } catch { return null; }
 }
 
-/** 디렉터리 안 이름을 대소문자 무시로 찾는다(정확히 있으면 그것). */
+/** 디렉터리 안 이름을 대소문자·유니코드 정규화 무시로 찾는다(정확히 있으면 그것). */
 function childName(dir: string, name: string): string | null {
   try {
     fs.lstatSync(path.join(dir, name));
@@ -62,8 +62,10 @@ function childName(dir: string, name: string): string | null {
   } catch { /* 아래에서 대소문자 무시 */ }
   let names: string[];
   try { names = fs.readdirSync(dir); } catch { return null; }
-  const lw = name.toLowerCase();
-  return names.find((n) => n.toLowerCase() === lw) ?? null;
+  // 유니코드 정규화(NFC/NFD: macOS에서 만든 파일 등)도 맞춘다.
+  const key = (s: string) => s.normalize("NFC").toLowerCase();
+  const lw = key(name);
+  return names.find((n) => key(n) === lw) ?? null;
 }
 
 export type Resolved =
