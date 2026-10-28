@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { loadGame, type LoadResult } from "@/core/loader/loadGame";
 import { buildIndex } from "@/core/index/buildIndex";
 import { AssetStore } from "@/core/assets/assets";
@@ -42,6 +42,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
     if (await open(new DirectoryHandleFolder(h))) await saveRecent(h);
   }, [open]);
   const openFiles = useCallback(async (f: FileList) => { await open(new FileListFolder(f)); }, [open]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as { __rpgViewer?: Record<string, unknown> };
+    w.__rpgViewer = {
+      openFolder: async (folder: GameFolder) => { await open(folder); },
+      openFixture: async (name: "sample-mz" | "sample-mv") => {
+        const { loadFixtureOverHttp } = await import("./devFixture");
+        await open(await loadFixtureOverHttp(name));
+      },
+    };
+    return () => { delete w.__rpgViewer; };
+  }, [open]);
 
   const value = useMemo(() => ({ ...state, openHandle, openFiles }), [state, openHandle, openFiles]);
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

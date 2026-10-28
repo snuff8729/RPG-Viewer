@@ -12,6 +12,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { StartScreen } from "@/ui/StartScreen";
 import { AppSidebar } from "@/ui/AppSidebar";
 import { ErrorsBadge } from "@/ui/ErrorsBadge";
+import { EventView } from "@/ui/EventView";
 
 function Shell() {
   const { status, data, index } = useGame();
@@ -51,6 +52,7 @@ function Shell() {
         </header>
         <main className="flex-1 p-4">
           {route.kind === "home" && <p className="text-sm text-muted-foreground">왼쪽에서 이벤트를 선택하세요</p>}
+          {route.kind === "page" && <EventView route={route} />}
         </main>
       </SidebarInset>
     </SidebarProvider>
