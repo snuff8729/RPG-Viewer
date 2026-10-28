@@ -1,8 +1,7 @@
-import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
+import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
-import { eventStyle, sectionStyle } from "./sectionStyle";
-
-const LEGEND: Section[] = ["now", "item", "repeat", "exit", "talk", "locked"];
+import { MapLegend } from "./MapLegend";
+import { eventStyle } from "./sectionStyle";
 const GRID_MAX = 60;
 
 function GridLines({ width, height }: { width: number; height: number }) {
@@ -78,13 +77,7 @@ export function MapGrid({ width, height, events, player, numbers, onPick }: {
             <title>내 위치</title>
           </circle>
         </svg>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {LEGEND.map((k) => {
-            const st = sectionStyle(k);
-            return <span key={k} className="flex items-center gap-1"><span className={`size-2 rounded-full ${st.bg}`} />{st.label}</span>;
-          })}
-          <span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-foreground" />내 위치</span>
-        </div>
+        <MapLegend />
       </CardContent>
     </Card>
   );

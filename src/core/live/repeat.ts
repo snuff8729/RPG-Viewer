@@ -511,3 +511,35 @@ export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: Li
     return [];
   }
 }
+
+/**
+ * 명령 목록(선택지 갈래 안 포함, 순서대로)의 스위치·변수·셀프 스위치 쓰기를 live 복사본에 차례로 적용하다가
+ * test가 want("met"/"unmet")가 되는 때가 있으면 true. 같은 페이지를 다시 하면 그 조건이 맞게 되는지 볼 때 쓴다.
+ * 분기는 따지지 않는다(낙관적). live는 바꾸지 않는다. 예외를 던지지 않는다.
+ */
+export function writesCanMake(
+  list: unknown, live: LiveSnapshot, mapId: number, eventId: number, data: GameData,
+  test: ConditionTest | undefined, want: "met" | "unmet",
+): boolean {
+  try {
+    if (!test || !isObj(live)) return false;
+    const sim: Sim = {
+      data, mapId, eventId, state: cloneLive(live), randomVars: new Set(),
+      random: false, choiceDependent: false, estimated: false, unknown: false, steps: 0, call: null, active: [],
+    };
+    const ctx = { mapId, eventId };
+    for (const cmd of arr<EventCommand | null>(list)) {
+      if (!isObj(cmd)) continue;
+      const p = arr<any>(cmd.parameters);
+      if (cmd.code === 121) {
+        for (let id = num(p[0]); id <= num(p[1]) && id - num(p[0]) < 10_000; id++) setSwitch(sim.state, id, num(p[2]) === 0);
+      } else if (cmd.code === 122) applyVariables(sim, p);
+      else if (cmd.code === 123) setSelf(sim.state, `${mapId},${eventId},${p[0]}`, num(p[1]) === 0);
+      else continue;
+      if (evaluate(test, sim.state, ctx) === want) return true;
+    }
+  } catch {
+    /* 모름 */
+  }
+  return false;
+}

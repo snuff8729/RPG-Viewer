@@ -60,7 +60,7 @@ export function targetOf(map: MapData | undefined, ev: ChecklistEvent): { x: num
 }
 
 /**
- * 맵에 표시를 그릴 이벤트: 새 대화·아이템·반복·출구·조사 가능·다 봄(흐리게), 그리고 showLocked일 때 잠김.
+ * 맵에 표시를 그릴 이벤트: 안 본 내용·아이템·반복·출구·다 봄 (다시 가능)·다 봄(흐리게), 그리고 showLocked일 때 잠김.
  * 이야기·자동 진행은 그리지 않는다.
  */
 export function mapMarkers(listed: readonly ChecklistEvent[], showLocked: boolean): ChecklistEvent[] {

@@ -1,6 +1,7 @@
 import type { Ref } from "react";
 import { ChevronRight, MapPin } from "lucide-react";
 import { hintBody, type ChecklistEvent, type LockedPage } from "@/core/live/mapChecklist";
+import type { RemainingLine } from "@/core/live/remainingLines";
 import { openPage } from "@/ui/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +11,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { HowToView } from "./HowToView";
 import { eventStyle } from "./sectionStyle";
 
-/** `새 대화 N · 선택지 N` (0인 쪽 생략) */
+/** `안 본 내용 있음 N · 선택지 N` (0인 쪽 생략) */
 function newText(unseen: number, unpicked: number): string {
-  return [unseen > 0 ? `새 대화 ${unseen}` : "", unpicked > 0 ? `선택지 ${unpicked}` : ""].filter(Boolean).join(" · ");
+  return [unseen > 0 ? `안 본 내용 있음 ${unseen}` : "", unpicked > 0 ? `선택지 ${unpicked}` : ""].filter(Boolean).join(" · ");
 }
 
 function Toggle({ label, className }: { label: string; className?: string }) {
@@ -54,6 +55,35 @@ function Locked({ lp }: { lp: LockedPage }) {
   );
 }
 
+/** 남은 대사 한 줄: 첫 줄과 가는 길(선택지 → 조건 …). 조건이 필요하면 그 조건을 만드는 법 */
+function LineItem({ line }: { line: RemainingLine }) {
+  const req = line.needs?.find((n) => n.req)?.req;
+  return (
+    <li>
+      <span>“{line.text}”</span>
+      <span className="block text-xs text-muted-foreground">{line.how.length > 0 ? line.how.join(" → ") : "처음부터 바로"}</span>
+      {req && (
+        <Collapsible className="mt-0.5 ml-3">
+          <Toggle label="조건 만드는 법" className="text-xs text-muted-foreground" />
+          {/* 접혀 있으면 내용이 마운트되지 않아 howTo도 계산하지 않는다 */}
+          <CollapsibleContent className="mt-1">
+            <HowToView req={req} />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </li>
+  );
+}
+
+function Lines({ lines, total }: { lines: RemainingLine[]; total: number }) {
+  return (
+    <ul className="space-y-1 text-sm">
+      {lines.map((l, i) => <LineItem key={i} line={l} />)}
+      {total > lines.length && <li className="text-xs text-muted-foreground">외 {total - lines.length}개 더</li>}
+    </ul>
+  );
+}
+
 export function ChecklistCard({ ev, number, highlighted, selected, route, onLocate, ref }: {
   ev: ChecklistEvent; /** 맵 번호(1부터, 고정). 이야기·자동 진행은 없음 */ number?: number; highlighted: boolean;
   /** 맵에서 고른 이벤트 */
@@ -67,7 +97,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
   const st = eventStyle(ev);
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
-  /** 조사·대화 가능 카드와 아직 안 해 본 조사 지점에 보이는 플러그인 명령 글 */
+  /** 다 봄 (다시 가능) 카드와 아직 안 해 본 조사 지점에 보이는 플러그인 명령 글 */
   // (이게 뭔지 줄에 이미 그 글이 나오면 다시 쓰지 않는다)
   const hint = (ev.section === "talk" || ev.untried) && ev.pluginHint && !ev.describe.includes(hintBody(ev.pluginHint).slice(0, 20))
     ? ev.pluginHint : undefined;
@@ -81,7 +111,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           {ev.exit && <Badge variant="outline" className={cn(st.text, st.border)}>→ {ev.exit.mapName}</Badge>}
           {ev.moves && <Badge variant="secondary">돌아다님</Badge>}
           {ev.untried && <Badge>아직 안 해 봄</Badge>}
-          {ev.unseen > 0 && <Badge>새 대화 {ev.unseen}</Badge>}
+          {ev.unseen > 0 && <Badge>안 본 내용 있음 {ev.unseen}</Badge>}
           {ev.unpicked > 0 && <Badge>선택지 {ev.unpicked}</Badge>}
           {ev.section !== "repeat" && ev.repeat.length > 0 && <Badge variant="secondary">반복하면 달라짐</Badge>}
           {ev.auto && <Badge variant="outline">자동</Badge>}
@@ -97,8 +127,22 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           </p>
         )}
       </CardHeader>
-      {(ev.repeat.length > 0 || lockedPages > 0 || ev.gains.length > 0 || hint) && (
+      {(ev.repeat.length > 0 || lockedPages > 0 || ev.gains.length > 0 || hint || ev.remainingLines.length > 0 || ev.later > 0) && (
         <CardContent className="space-y-2 px-4">
+          {ev.remainingLines.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-sm font-medium">남은 내용</p>
+              <Lines lines={ev.remainingLines} total={ev.unseen} />
+            </div>
+          )}
+          {ev.later > 0 && (
+            <Collapsible defaultOpen={ev.remainingLines.length === 0 && ev.later <= 3}>
+              <Toggle label={`조건이 맞으면 볼 수 있음 (${ev.later})`} />
+              <CollapsibleContent className="mt-1 ml-4">
+                <Lines lines={ev.laterLines} total={ev.later} />
+              </CollapsibleContent>
+            </Collapsible>
+          )}
           {ev.gains.length > 0 && (
             <ul className="space-y-0.5 text-sm">
               {ev.gains.map((g, i) => <li key={i}>{g}</li>)}

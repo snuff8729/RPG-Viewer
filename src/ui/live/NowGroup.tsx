@@ -14,7 +14,7 @@ import { nowItems } from "./sidebarItems";
 import { sectionStyle } from "./sectionStyle";
 import { useMapChecklist } from "./useMapChecklist";
 
-/** 사이드바 "지금": 이 맵에서 지금 할 것(새 대화·아이템·반복). 연결되지 않았으면 아무것도 그리지 않는다. */
+/** 사이드바 "지금": 이 맵에서 지금 할 것(안 본 내용·아이템·반복). 연결되지 않았으면 아무것도 그리지 않는다. */
 export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollowChange: (v: boolean) => void }) {
   const { data } = useGame();
   const { live, connection } = useLive();
@@ -46,7 +46,7 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
                 <span className="truncate">{e.title}</span>
                 <span className="ml-auto flex shrink-0 gap-1">
                   {e.section === "now" && e.untried && <Badge variant="secondary" className="text-xs">아직 안 해 봄</Badge>}
-                  {(e.section === "now" || e.section === "exit") && e.unseen > 0 && <Badge variant="secondary" className="text-xs">새 대화</Badge>}
+                  {(e.section === "now" || e.section === "exit") && e.unseen > 0 && <Badge variant="secondary" className="text-xs">안 본 내용</Badge>}
                   {e.section === "now" && e.unpicked > 0 && <Badge variant="secondary" className="text-xs">선택지 {e.unpicked}</Badge>}
                   {e.section === "item" && <Badge variant="secondary" className="text-xs">아이템</Badge>}
                   {e.section === "repeat" && <Badge variant="outline" className="text-xs">반복</Badge>}

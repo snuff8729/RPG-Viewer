@@ -6,7 +6,7 @@ import { nowItems, placesToGo } from "./sidebarItems";
 const ev = (eventId: number, section: ChecklistEvent["section"], hasLoc = true): ChecklistEvent => ({
   eventId, name: `E${eventId}`, title: `T${eventId}`, x: 0, y: 0, section, activePage: 0,
   location: hasLoc ? { source: "map", mapId: 1, eventId, page: 0 } : null,
-  auto: false, unseen: 0, unpicked: 0, repeat: [], locked: [], interactable: true, gains: [], story: false, describe: "", moves: false,
+  auto: false, unseen: 0, unpicked: 0, remainingLines: [], laterLines: [], later: 0, repeat: [], locked: [], interactable: true, gains: [], story: false, describe: "", moves: false,
 });
 const checklist = (events: ChecklistEvent[]): MapChecklist =>
   ({ mapId: 1, mapName: "M", width: 1, height: 1, player: { x: 0, y: 0 }, events, remaining: events.length });

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Maximize, Minus, Plus } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
-import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
+import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blocked } from "@/core/map/passage";
 import type { Route } from "@/core/map/route";
 import { drawOpsForTile, shadowOps, tileAt, type DrawOp } from "@/core/map/tiles";
@@ -13,7 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
 import { fitZoom, MAX_ZOOM, MIN_ZOOM } from "./mapZoom";
-import { eventStyle, sectionStyle } from "./sectionStyle";
+import { MapLegend } from "./MapLegend";
+import { eventStyle } from "./sectionStyle";
 import type { LoadedTiles } from "./useMapTiles";
 
 /** 시트 원본 칸 크기. 그리기 명령은 이 단위로 만들고 캔버스 변환으로 줄인다. */
@@ -22,7 +23,6 @@ const T = 48;
 const MAX_AREA = 16_000_000;
 /** 한 프레임에 그리는 시간(ms). 넘으면 다음 프레임으로 넘겨 큰 맵에서도 화면이 멈추지 않게 한다 */
 const SLICE_MS = 10;
-const LEGEND: Section[] = ["now", "item", "repeat", "exit", "talk", "locked"];
 /** 합성 방법(0 보통, 1 더하기, 2 곱하기, 3 스크린) → 캔버스 합성 */
 const BLEND: GlobalCompositeOperation[] = ["source-over", "lighter", "multiply", "screen"];
 
@@ -474,13 +474,7 @@ export function MapCanvas({ tiles, events, listed, numbers, player, route, selec
             />
           </div>
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {LEGEND.map((k) => {
-            const st = sectionStyle(k);
-            return <span key={k} className="flex items-center gap-1"><span className={`size-2 rounded-full ${st.bg}`} />{st.label}</span>;
-          })}
-          <span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-foreground" />내 위치</span>
-        </div>
+        <MapLegend />
       </CardContent>
     </Card>
   );
