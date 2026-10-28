@@ -89,6 +89,8 @@ export interface GameData {
   enabledPlugins?: string[];
   /** plugins.js MenuCommonEvent가 메뉴 화면에서 실행하는 커먼 이벤트 id(예전 기록의 메뉴 그림 판정용). 없으면 없음. */
   menuCommonEvents?: number[];
+  /** plugins.js CommonEventBeforeAfterMenu가 메뉴를 닫은 뒤 맵에서 실행하는 커먼 이벤트 id. 없으면 없음. */
+  afterMenuCommonEvent?: number;
 }
 
 // ---- 해석 결과 ----

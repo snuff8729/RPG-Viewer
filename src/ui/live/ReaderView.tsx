@@ -107,7 +107,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
 
   // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
   const { menuPicturesShown } = useAddons();
-  const menuEvents = useMemo(() => menuCommonEventsOf(data?.menuCommonEvents, data?.commonEvents), [data]);
+  const menuEvents = useMemo(() => menuCommonEventsOf(data?.menuCommonEvents, data?.commonEvents, data?.afterMenuCommonEvent), [data]);
   const path = useMemo(
     () => (branch === null ? [] : withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuEvents)),
     [records, model, branch, menuPicturesShown, menuEvents],
