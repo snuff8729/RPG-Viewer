@@ -128,10 +128,11 @@ interface Episode { key: string | null; lastCmd: number; records: EpisodeRecord[
 /** 경로 기록을 화면용 타임라인으로 접는다(반복 대화, 상태 변경 묶음, 잦은 변수 제외, 갈래 지점). */
 /** opts.noisy: 기록 전체 기준 잦은 변수(noisyVariables(전체 기록)). 없으면 경로에서 계산한다. */
 export function foldTimeline(
-  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; noisy?: Set<number> },
+  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number> },
 ): HistoryItem[] {
   const records = bySeq(Array.isArray(path) ? path : []);
   const uncertain = (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false;
+  const changed = (seq: number) => opts?.changedSeqs?.has(seq) ?? false;
   const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
 
   // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들
@@ -153,7 +154,7 @@ export function foldTimeline(
   let group: RecordOf<"state">[] = [];
 
   const push = (item: HistoryItem) => { items.push(item); lastRepeatKey = null; };
-  const pushRecord = (record: LogRecord) => push({ kind: "record", record, uncertain: uncertain(record.seq) });
+  const pushRecord = (record: LogRecord) => push({ kind: "record", record, uncertain: uncertain(record.seq), changed: changed(record.seq) });
 
   const flushGroup = () => {
     if (group.length === 0) return;

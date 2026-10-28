@@ -37,6 +37,8 @@ export interface LiveContextValue {
   noisy: Set<number>;
   /** coverage.uncertainSeqs — foldTimeline opts.uncertainSeqs로 넘긴다. */
   uncertainSeqs: Set<number>;
+  /** coverage.changedSeqs — foldTimeline opts.changedSeqs로 넘긴다. */
+  changedSeqs: Set<number>;
   /** model.latestBranch */
   latestBranch: number | null;
   /** 뷰어에 들어 있는 플러그인 버전 */
@@ -185,7 +187,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const model = useMemo(() => buildHistory(derivedRecords), [derivedRecords]);
   const noisy = useMemo(() => noisyVariables(derivedRecords), [derivedRecords]);
   const coverage = useMemo<Coverage>(
-    () => (data ? computeCoverage(derivedRecords, data) : { seen: new Set(), picks: new Map(), uncertainSeqs: new Set() }),
+    () => (data ? computeCoverage(derivedRecords, data) : { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() }),
     [derivedRecords, data],
   );
   // 연결이 끊기면 null → 조건 판정 "?" (fresh가 바뀔 때만 다시 계산)
@@ -207,7 +209,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LiveContextValue>(() => ({
     supported, install, refreshInstall, doInstall, doUninstall,
     connection, lastSeenT, records: derivedRecords, badLines, model, coverage, live, lastLive, missing,
-    noisy, uncertainSeqs: coverage.uncertainSeqs, latestBranch: model.latestBranch, bundledVersion,
+    noisy, uncertainSeqs: coverage.uncertainSeqs, changedSeqs: coverage.changedSeqs, latestBranch: model.latestBranch, bundledVersion,
   }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, derivedRecords, badLines, model, coverage, live, lastLive, missing, noisy]);
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;

@@ -18,7 +18,7 @@ const PAGE = 500;
 /** 기록 탭 — 회차·갈래 선택, 지금 선택지, 접힌 타임라인. */
 export function HistoryView() {
   const { data, index } = useGame();
-  const { records, model, noisy, uncertainSeqs, latestBranch, connection, install } = useLive();
+  const { records, model, noisy, uncertainSeqs, changedSeqs, latestBranch, connection, install } = useLive();
   const [picked, setPicked] = useState<number | null>(null);
   const [shown, setShown] = useState(PAGE);
   const selected = picked !== null && model.branches.has(picked) ? picked : latestBranch;
@@ -31,8 +31,8 @@ export function HistoryView() {
 
   const items = useMemo(() => {
     if (selected === null) return [];
-    return foldTimeline(path, model, { uncertainSeqs, noisy });
-  }, [path, selected, model, noisy, uncertainSeqs]);
+    return foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
+  }, [path, selected, model, noisy, uncertainSeqs, changedSeqs]);
 
   const choiceText = useMemo(() => {
     if (!data || selected === null) return new Map<number, string>();

@@ -104,6 +104,13 @@ describe("foldTimeline", () => {
     expect(items[1]).toMatchObject({ kind: "record", uncertain: true, record: { seq: 2 } });
     expect(items[2]).toMatchObject({ kind: "record", uncertain: false });
   });
+  it("marks changed records", () => {
+    const recs = [start, msg(2, 1, 0), msg(3, 2, 0)] as LogRecord[];
+    const items = foldTimeline(recs, buildHistory(recs), { changedSeqs: new Set([3]) });
+    expect(items[1]).toMatchObject({ kind: "record", changed: false, uncertain: false, record: { seq: 2 } });
+    expect(items[2]).toMatchObject({ kind: "record", changed: true, record: { seq: 3 } });
+    expect(foldTimeline(recs, buildHistory(recs), {})[1]).toMatchObject({ kind: "record", changed: false });
+  });
   it("noisy-only state does not split a dialogue episode", () => {
     const noisyState = (seq: number) => ({ ...base, seq, t: 0, type: "state", src: null, cmd: null,
       changes: [{ kind: "variable", id: 7, value: seq }] }) as LogRecord;
