@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGame } from "@/app/GameProvider";
-import { loadRecent, type RecentEntry } from "@/app/recent";
+import { loadHandle, useRecentGames } from "@/app/recent";
+import type { RecentItem } from "@/app/recentList";
+import { RecentGames } from "./RecentGames";
 import { fsApiInfo, openFolderOnServer, pickFolderOnServer, type FsApiInfo } from "@/app/serverFolder";
 import { fsAccessSupport, type FsAccessWindow } from "./fsAccess";
 
@@ -13,7 +15,7 @@ type PermHandle = FileSystemDirectoryHandle & { requestPermission?: (d: { mode: 
 
 export function StartScreen() {
   const { status, error, openHandle, openFiles, openServer } = useGame();
-  const [recent, setRecent] = useState<RecentEntry | null>(null);
+  const recent = useRecentGames();
   const [server, setServer] = useState<FsApiInfo>({ available: false, pick: false });
   /** 기본 폴더 선택 창이 실패하면 이후엔 브라우저 선택 창을 쓴다. */
   const [nativeFailed, setNativeFailed] = useState(false);
@@ -25,7 +27,6 @@ export function StartScreen() {
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
 
   useEffect(() => {
-    void loadRecent().then(setRecent);
     void fsApiInfo().then(setServer);
   }, []);
 
@@ -56,30 +57,32 @@ export function StartScreen() {
     await openServer(r.session);
   };
 
-  const reopen = async () => {
-    if (!recent) return;
+  const reopen = async (it: RecentItem) => {
     setDenied(false);
     setOpenError(null);
-    if (recent.kind === "server") {
-      const r = await openFolderOnServer(recent.path);
+    if (it.kind === "server") {
+      if (!it.path) return;
+      setPicking(true);
+      let r: Awaited<ReturnType<typeof openFolderOnServer>>;
+      try { r = await openFolderOnServer(it.path); } finally { setPicking(false); }
       if (!r.ok) { setOpenError(r.error); return; }
       if ("session" in r) await openServer(r.session);
       return;
     }
+    const handle = await loadHandle(it.key);
+    if (!handle) { setOpenError("폴더 정보를 찾을 수 없어요. 게임 폴더를 다시 골라 주세요."); return; }
     try {
-      const perm = await (recent.handle as PermHandle).requestPermission?.({ mode: "read" });
+      const perm = await (handle as PermHandle).requestPermission?.({ mode: "read" });
       if (perm !== "granted") { setDenied(true); return; }
     } catch { setDenied(true); return; }
-    await openHandle(recent.handle);
+    await openHandle(handle);
   };
 
-  // 서버 경로는 서버가 있을 때만 다시 열 수 있다.
-  const showRecent = recent !== null && (recent.kind === "handle" || server.available);
   const showAccessWarning = access.message !== null && !native;
 
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle>RPG Viewer</CardTitle>
           <CardDescription>RPG Maker MV/MZ 게임 폴더를 열어 대사와 장면을 한눈에 보세요.</CardDescription>
@@ -100,11 +103,12 @@ export function StartScreen() {
               <Button onClick={() => void pick()} disabled={picking}>
                 {picking ? "폴더 선택 창에서 고르는 중…" : "게임 폴더 열기"}
               </Button>
-              {showRecent && (
-                <Button variant="outline" onClick={() => void reopen()} disabled={picking}>
-                  최근 게임 다시 열기: {recent.name}
-                </Button>
-              )}
+              <RecentGames
+                items={recent}
+                serverAvailable={server.available}
+                busy={picking}
+                onOpen={(it) => void reopen(it)}
+              />
             </>
           )}
           <input

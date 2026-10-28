@@ -5,7 +5,8 @@ import { AssetStore } from "@/core/assets/assets";
 import { DirectoryHandleFolder, FileListFolder } from "@/core/fs/browserFolders";
 import type { GameFolder } from "@/core/fs/folder";
 import type { GameData, GameIndex } from "@/core/types";
-import { saveRecent, saveRecentServer } from "./recent";
+import { rememberGame } from "./recent";
+import { recentKey, type RecentInput } from "./recentList";
 import { ServerFolder, type ServerSession } from "./serverFolder";
 
 /** 화면용 오류: 로더가 돌려준 실패 + 로드/색인 중 예기치 못한 예외(internal). */
@@ -22,6 +23,8 @@ export interface GameState {
   folder?: GameFolder;
   /** 뷰어 서버로 연 게임의 실제 폴더 경로(실행·백업이 그대로 쓴다). 브라우저로 열었으면 없음. */
   gamePath?: string;
+  /** 최근·고정 목록에서 이 게임의 key(다시 열 수 있게 연 게임만). */
+  recentKey?: string;
   error?: OpenError;
 }
 export interface GameContextValue extends GameState {
@@ -38,13 +41,28 @@ const GameContext = createContext<GameContextValue | null>(null);
 export function GameProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<GameState>({ status: "idle" });
 
-  const open = useCallback(async (folder: GameFolder, gamePath?: string): Promise<boolean> => {
+  /** 연다. source가 있으면 최근 게임으로 기억한다(다시 열 수 없는 파일 목록은 없음). */
+  const open = useCallback(async (
+    folder: GameFolder,
+    source?: { kind: "server"; path: string; name: string } | { kind: "handle"; handle: FileSystemDirectoryHandle },
+  ): Promise<boolean> => {
     setState({ status: "loading" });
     try {
       const result = await loadGame(folder);
       if (!result.ok) { setState({ status: "error", error: result }); return false; }
       const index = buildIndex(result.data);
-      setState({ status: "ready", data: result.data, index, assets: new AssetStore(folder, result.data), folder, ...(gamePath ? { gamePath } : {}) });
+      const title = result.data.system.gameTitle;
+      // ui/live/readPosition.ts의 gameKeyOf와 같은 모양.
+      const gameKey = `${title}|${result.data.dataRoot}`;
+      const input: RecentInput | null = !source ? null
+        : source.kind === "server" ? { kind: "server", path: source.path, name: source.name, title, gameKey }
+          : { kind: "handle", name: source.handle.name, title, gameKey };
+      setState({
+        status: "ready", data: result.data, index, assets: new AssetStore(folder, result.data), folder,
+        ...(source?.kind === "server" ? { gamePath: source.path } : {}),
+        ...(input ? { recentKey: recentKey(input) } : {}),
+      });
+      if (input) await rememberGame(input, source?.kind === "handle" ? source.handle : undefined);
       return true;
     } catch (e) {
       setState({ status: "error", error: { ok: false, reason: "internal", message: e instanceof Error ? e.message : String(e) } });
@@ -53,14 +71,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openHandle = useCallback(async (h: FileSystemDirectoryHandle) => {
-    if (await open(new DirectoryHandleFolder(h))) await saveRecent(h);
+    await open(new DirectoryHandleFolder(h), { kind: "handle", handle: h });
   }, [open]);
   const openFiles = useCallback(async (f: FileList) => { await open(new FileListFolder(f)); }, [open]);
-  const openServer = useCallback(async (session: ServerSession) => {
-    const ok = await open(new ServerFolder(session), session.root);
-    if (ok) await saveRecentServer(session.root, session.name);
-    return ok;
-  }, [open]);
+  const openServer = useCallback(
+    (session: ServerSession) => open(new ServerFolder(session), { kind: "server", path: session.root, name: session.name }),
+    [open],
+  );
   const close = useCallback(() => {
     setState({ status: "idle" });
     if (window.location.hash) {

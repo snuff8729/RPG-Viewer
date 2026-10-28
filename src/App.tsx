@@ -18,6 +18,7 @@ import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider } from "@/app/LiveProvider";
 import { AssistPanel } from "@/ui/live/AssistPanel";
 import { LaunchButton } from "@/ui/live/LaunchButton";
+import { PinGameButton } from "@/ui/PinGameButton";
 import { BackupButton } from "@/ui/live/BackupButton";
 import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
@@ -94,6 +95,7 @@ function Shell() {
             </BreadcrumbList>
           </Breadcrumb>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <PinGameButton />
             <LaunchButton />
             <BackupButton />
             <AssistPanel />
