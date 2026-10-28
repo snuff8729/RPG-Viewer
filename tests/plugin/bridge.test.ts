@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { cmd, createHarness, LIVE_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
+import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
 
 let h: Harness;
 afterEach(() => { h?.bridge?._flushNow(); });
@@ -217,6 +217,19 @@ describe("RPGViewerBridge", () => {
     });
   }
 
+  for (const engine of ["MZ", "MV"] as const) {
+    it(`flushes the log right after a successful save (${engine})`, async () => {
+      h = newGame(engine);
+      h.g.$gameSwitches.setValue(1, true);
+      await h.g.DataManager.saveGame(1);
+      // read the file directly: no _flushNow()
+      const onDisk = (h.fs.files.get(LOG_PATH) ?? "").trim().split("\n").map((l) => JSON.parse(l));
+      expect(onDisk.map((r) => r.type)).toEqual(["branchStart", "state", "save"]);
+      expect(onDisk[1].seq).toBe(h.saves[1].rpgViewer.seq);
+      expect(JSON.parse(h.fs.readFileSync(META_PATH)).nextSeq).toBe(4);
+    });
+  }
+
   it("does not log a load when loading fails", async () => {
     h = newGame("MZ");
     await expect(h.g.DataManager.loadGame(9)).rejects.toThrow("no save");
@@ -235,8 +248,8 @@ describe("RPGViewerBridge", () => {
     h.g.DataManager.extractSaveContents({ rpgViewer: { run: 5, branch: 9, seq: 40 } });
     h.g.DataManager.setupNewGame();
     const log = h.readLog();
-    expect(log[0]).toMatchObject({ run: 5, branch: 10, reason: "load", parentBranch: 9, fromSeq: 40 });
-    expect(log[1]).toMatchObject({ run: 6, branch: 11, reason: "newGame" });
+    expect(log[0]).toMatchObject({ seq: 41, run: 5, branch: 10, reason: "load", parentBranch: 9, fromSeq: 40 });
+    expect(log[1]).toMatchObject({ seq: 42, run: 6, branch: 11, reason: "newGame" });
   });
 
   it("continues seq across restarts via meta.json", () => {
@@ -287,20 +300,80 @@ describe("RPGViewerBridge", () => {
     });
   });
 
-  it("snapshots only on change or every 2 seconds", () => {
+  it("snapshots on change at most once per second, heartbeat every 2 seconds", () => {
     h = newGame();
+    const liveT = () => JSON.parse(h.fs.files.get(LIVE_PATH)!).t;
     h.bridge._tick();
-    const first = h.fs.files.get(LIVE_PATH);
-    expect(JSON.parse(first!).t).toBe(1_000_000);
+    expect(liveT()).toBe(1_000_000);
     h.clock.t += 500;
-    h.bridge._tick();
-    expect(JSON.parse(h.fs.files.get(LIVE_PATH)!).t).toBe(1_000_000);
+    h.bridge._tick(); // unchanged, < 2s
+    expect(liveT()).toBe(1_000_000);
     h.g.$gameSwitches.setValue(8, true);
+    h.bridge._tick(); // changed but < 1s since last write -> throttled
+    expect(liveT()).toBe(1_000_000);
+    h.clock.t += 499;
     h.bridge._tick();
-    expect(JSON.parse(h.fs.files.get(LIVE_PATH)!)).toMatchObject({ t: 1_000_500, switches: [8] });
-    h.clock.t += 2000;
+    expect(liveT()).toBe(1_000_000);
+    h.clock.t += 1;
+    h.bridge._tick(); // 1000ms since last write -> change written
+    expect(JSON.parse(h.fs.files.get(LIVE_PATH)!)).toMatchObject({ t: 1_001_000, switches: [8] });
+    h.clock.t += 1999;
     h.bridge._tick();
-    expect(JSON.parse(h.fs.files.get(LIVE_PATH)!).t).toBe(1_002_500);
+    expect(liveT()).toBe(1_001_000);
+    h.clock.t += 1;
+    h.bridge._tick(); // heartbeat
+    expect(liveT()).toBe(1_003_000);
+  });
+
+  it("does not write live.json on the title screen and a title transfer starts no run", () => {
+    h = newGame();
+    h.g.SceneManager._scene = new h.g.Scene_Title(); // "To Title" after play
+    h.bridge._snapshotNow();
+    h.clock.t += 5000;
+    h.bridge._tick();
+    expect(h.readLive()).toBeUndefined();
+    h.g.SceneManager._scene = new h.g.Scene_Map();
+    h.bridge._snapshotNow();
+    expect(h.readLive()).toMatchObject({ run: 1 });
+
+    h = createHarness();
+    h.g.SceneManager._scene = new h.g.Scene_Boot();
+    h.g.DataManager.setupNewGame(); // boot call: deferred
+    h.g.SceneManager._scene = new h.g.Scene_Title();
+    h.g.$gamePlayer.performTransfer();
+    expect(h.readLog()).toEqual([]);
+  });
+
+  it("removes a leftover live.json.tmp on startup", () => {
+    const fs = new MemFs();
+    fs.mkdirSync("/game/www/rpg-viewer");
+    fs.writeFileSync(LIVE_PATH + ".tmp", "{");
+    h = createHarness({ fs });
+    expect(fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
+  });
+
+  it("writes an identical error message once and rate-limits different ones", () => {
+    h = newGame();
+    const interp = h.newInterpreter();
+    const failWith = (m: string) => { h.g.$gameMap.event = () => { throw new Error(m); }; interp.setup([cmd(0)], 1); };
+    failWith("same");                  // t0: written
+    h.clock.t += 1500; failWith("same");  // same message again: suppressed
+    h.clock.t += 100; failWith("other");  // different, > 1s since last write: written
+    h.clock.t += 100; failWith("third");  // < 1s since last write: rate-limited
+    h.clock.t += 5000; failWith("other"); // repeat of the last written message: suppressed
+    const errors = h.readLog().filter((r) => r.type === "error").map((r) => r.message);
+    expect(errors).toEqual(["same", "other"]);
+  });
+
+  it("marks the install flag non-enumerable", () => {
+    h = createHarness();
+    const d = Object.getOwnPropertyDescriptor(h.g.Game_Interpreter.prototype, "__rpgvInstalled");
+    expect(d).toMatchObject({ value: true, enumerable: false });
+  });
+
+  it("documents the save-preview caveat in the header", () => {
+    const header = readFileSync(PLUGIN_PATH, "utf8").split("*/")[0];
+    expect(header).toContain("extractSaveContents");
   });
 
   it("never throws from hooks", () => {

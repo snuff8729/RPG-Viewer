@@ -7,6 +7,12 @@
  * 게임 폴더의 rpg-viewer/ 아래에 플레이 기록(log.jsonl)과
  * 현재 상태(live.json)를 남깁니다. 게임 화면과 진행에는 영향을 주지 않습니다.
  * 플러그인 명령이나 파라미터는 없습니다.
+ *
+ * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
+ * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
+ * 불필요한 갈래(branchStart)가 생길 수 있습니다.
+ * (Plugins that call DataManager.extractSaveContents for save previews
+ * may create spurious branches in the log.)
  */
 (function () {
   "use strict";
@@ -55,7 +61,7 @@
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
   var deferredNewGame = false;
-  var lastErrorT = -Infinity;
+  var lastErrorT = -Infinity, lastErrorMessage = null;
   var lastLiveBody = null, lastLiveT = 0;
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
@@ -119,10 +125,12 @@
 
   function reportError(e) {
     try {
+      var message = e && e.message ? String(e.message) : String(e);
+      if (message === lastErrorMessage) return; // a hook failing every frame: write it once
       var t = now();
       if (t - lastErrorT < 1000) return;
       lastErrorT = t;
-      var message = e && e.message ? String(e.message) : String(e);
+      lastErrorMessage = message;
       emit("error", { message: message });
     } catch (ignore) { /* never throw */ }
   }
@@ -229,12 +237,21 @@
     };
   }
 
+  // Title (or boot) scene: objects may still hold the previous play; let live.json go stale.
+  function inTitleScene() {
+    var scene = G.SceneManager && G.SceneManager._scene;
+    if (!scene) return false;
+    return !!((G.Scene_Title && scene instanceof G.Scene_Title) || (G.Scene_Boot && scene instanceof G.Scene_Boot));
+  }
+
   function writeLive(force) {
+    if (inTitleScene()) return;
     var snap = buildSnapshot();
     if (!snap) return;
     var body = JSON.stringify(snap);
     var t = now();
-    if (!force && body === lastLiveBody && t - lastLiveT < 2000) return;
+    // changes: at most once per second; unchanged: heartbeat every 2 seconds
+    if (!force && t - lastLiveT < (body === lastLiveBody ? 2000 : 1000)) return;
     lastLiveBody = body;
     lastLiveT = t;
     snap.t = t;
@@ -324,7 +341,7 @@
   function install() {
     var GI = G.Game_Interpreter && G.Game_Interpreter.prototype;
     if (!GI || GI.__rpgvInstalled) return;
-    GI.__rpgvInstalled = true;
+    Object.defineProperty(GI, "__rpgvInstalled", { value: true, enumerable: false });
 
     hook(GI, "Game_Interpreter", "setup", function (orig) {
       return function (list, eventId) {
@@ -468,7 +485,7 @@
         var was = false;
         try {
           was = !!this.isTransferring();
-          if (was && run === null && deferredNewGame) startBranch("newGame", meta.nextRun++, null, null);
+          if (was && run === null && deferredNewGame && !inTitleScene()) startBranch("newGame", meta.nextRun++, null, null);
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
         try {
@@ -531,6 +548,7 @@
           if (s && isCount(s.run) && isCount(s.branch) && typeof s.seq === "number") {
             if (meta.nextRun <= s.run) meta.nextRun = s.run + 1;
             if (meta.nextBranch <= s.branch) meta.nextBranch = s.branch + 1;
+            if (meta.nextSeq <= s.seq) meta.nextSeq = s.seq + 1; // save from a reset/copied log
             startBranch("load", s.run, s.branch, s.seq);
           } else {
             startBranch("unknownSave", meta.nextRun++, null, null);
@@ -540,13 +558,19 @@
       };
     });
 
+    // A save's stamp references seq numbers that may still be buffered: flush right after a
+    // successful save so the stamped seq is on disk (and meta.json is current) before a crash.
     function afterSuccess(type, slot, result) {
+      var done = function () {
+        emit(type, { slot: slot });
+        if (type === "save") flush();
+      };
       if (result && typeof result.then === "function") {
         result.then(function () {
-          try { emit(type, { slot: slot }); } catch (e) { reportError(e); }
+          try { done(); } catch (e) { reportError(e); }
         }, function () { /* failure is the game's to handle */ });
       } else if (result) {
-        emit(type, { slot: slot });
+        done();
       }
     }
     hook(DM, "DataManager", "saveGame", function (orig) {
@@ -565,6 +589,9 @@
     });
   }
 
+  try {
+    if (fs.existsSync(LIVE_TMP)) fs.unlinkSync(LIVE_TMP); // left over from a crash mid-write
+  } catch (e) { /* harmless: overwritten on next snapshot */ }
   try {
     loadMeta();
     install();

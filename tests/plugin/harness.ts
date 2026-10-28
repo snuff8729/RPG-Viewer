@@ -191,6 +191,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   // ---- Managers
   function Scene_Boot(this: any) {}
+  function Scene_Title(this: any) {}
+  function Scene_Map(this: any) {}
   const SceneManager = { _scene: null as any };
   const BattleManager = {
     setup(troopId: number) { g.$gameTroop._troopId = troopId; g.$gameParty._inBattle = true; },
@@ -237,7 +239,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
-    Game_Event, Game_Map, Game_Interpreter, Scene_Boot, SceneManager, BattleManager, DataManager,
+    Game_Event, Game_Map, Game_Interpreter, Scene_Boot, Scene_Title, Scene_Map, SceneManager, BattleManager, DataManager,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
