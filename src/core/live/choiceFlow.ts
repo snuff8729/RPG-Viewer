@@ -50,6 +50,12 @@ export function choiceFlow(args: {
         if (i.kind === "message" || i.kind === "scroll") {
           if (!(i.kind === "message" && i.repeat !== undefined)) messages += Array.isArray(i.lines) ? i.lines.length : 0;   // 반복 항목은 줄 수에서 제외
         } else if (i.kind === "picture") pictures++;
+        else if (i.kind === "battle" && i.repeat === 0) {
+          // 전투 안의 대사(전투 로그 줄은 세지 않는다)
+          for (const x of i.items) {
+            if (x.kind === "scroll" || (x.kind === "message" && x.repeat === undefined)) messages += Array.isArray(x.lines) ? x.lines.length : 0;
+          }
+        }
       }
       if (messages === 0 && pictures === 0) return;   // 반복 항목만 있는 구간은 요약 없이 건너뛴다
       out.push({ kind: "segment", key: `s${list[0].key}`, items: list, messages, pictures });
@@ -88,6 +94,10 @@ export function choiceFlow(args: {
         } else if (h.kind === "repeat") {
           const it = take(`r${h.record.seq}`);
           if (it) { seg.push(it); if (it.kind === "message") lastMsg = it; }
+        } else if (h.kind === "battle") {
+          // 전투는 묶음째 구간에 넣는다(안의 선택은 선택 지점으로 드러내지 않는다)
+          const it = h.start ? take(`r${h.start.seq}`) : null;
+          if (it) seg.push(it);
         } else if (h.kind === "record") {
           const r = h.record;
           if (r.type === "choices") {

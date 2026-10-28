@@ -10,6 +10,7 @@ export function itemKind(item: HistoryItem): Kind | null {
     case "repeat": return "message";
     case "stateGroup": return "state";
     case "fork": return null;
+    case "battle": return "battle";
     case "record":
       switch (item.record.type) {
         case "message": case "scroll": return "message";
@@ -26,11 +27,18 @@ export function itemKind(item: HistoryItem): Kind | null {
 
 /** hidePlugin: 숨길 플러그인 명령 기록(기술 명령이고 `플러그인 명령 모두 보기`가 꺼짐) */
 export function filterItems(items: HistoryItem[], enabled: Set<Kind>, hidePlugin?: (r: RecordOf<"plugin">) => boolean): HistoryItem[] {
-  return items.filter(it => {
-    if (hidePlugin && it.kind === "record" && it.record.type === "plugin" && hidePlugin(it.record)) return false;
+  const out: HistoryItem[] = [];
+  for (const it of items) {
+    if (hidePlugin && it.kind === "record" && it.record.type === "plugin" && hidePlugin(it.record)) continue;
     const k = itemKind(it);
-    return k === null || enabled.has(k);
-  });
+    if (k !== null && !enabled.has(k)) continue;
+    // 전투 묶음 안은 숨길 플러그인 명령만 거른다(묶음이 보이면 그 안의 대사·상태 변경은 그대로 보인다)
+    if (it.kind === "battle" && hidePlugin) {
+      const inner = filterItems(it.items, new Set(ALL_KINDS), hidePlugin);
+      out.push(inner.length === it.items.length ? it : { ...it, items: inner });
+    } else out.push(it);
+  }
+  return out;
 }
 
 const KEY = "rpgv.historyKinds";

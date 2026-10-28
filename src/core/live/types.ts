@@ -22,7 +22,17 @@ export type LogRecord = RecordBase & (
   /** 1.5.0+: name = 명령 이름(MV 첫 토큰·MZ 명령), args = MV 나머지 토큰 / MZ 인자 객체, plugin = MZ 플러그인 이름 */
   | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string; plugin?: string; name?: string; args?: string[] | Record<string, unknown> }
   | { type: "transfer"; mapId: number; x: number; y: number }
-  | { type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" }
+  /**
+   * 전투 시작·끝. 1.8.0+: 시작에 troopName·enemies·canEscape·canLose, 끝에 result "abort"(전투 중단)·rewards(승리 보상)·
+   * dropped(줄 수 제한으로 안 남긴 전투 로그 줄 수). pics/picsSame: 화면 그림 따라 그리기가 켜졌을 때(message와 같은 모양).
+   */
+  | {
+    type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" | "abort";
+    troopName?: string; enemies?: string[]; canEscape?: boolean; canLose?: boolean;
+    rewards?: { exp: number; gold: number; items: string[] }; dropped?: number; pics?: unknown[]; picsSame?: true;
+  }
+  /** 1.8.0+: 전투 로그 한 줄(제어 문자 그대로). 이야기 기록이 아니다. pics: 그림이 바뀌었을 때만 */
+  | { type: "battlelog"; text: string; pics?: unknown[] }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }
   | { type: "save"; slot: number }
   | { type: "load"; slot: number }
@@ -91,7 +101,12 @@ export type HistoryItem =
   | { kind: "record"; record: LogRecord; uncertain: boolean; changed: boolean }
   | { kind: "repeat"; record: RecordOf<"message">; count: number }
   | { kind: "stateGroup"; records: RecordOf<"state">[]; count: number }
-  | { kind: "fork"; atSeq: number; branches: number[] };
+  | { kind: "fork"; atSeq: number; branches: number[] }
+  /**
+   * 전투 한 번: 시작 기록부터 끝 기록(없으면 진행 중이거나 끊김)까지. items = 그 사이 기록을 접은 것(전투 로그·대사·상태 변경…),
+   * logLines = 전투 로그 줄 수, repeat = 앞에서 본 것과 같은 전투(적 무리·결과·로그·대사가 같음)를 이어서 다시 본 횟수(0 = 처음).
+   */
+  | { kind: "battle"; start: RecordOf<"battle">; end: RecordOf<"battle"> | null; items: HistoryItem[]; logLines: number; repeat: number };
 
 export interface PickInfo { picked: number; run: number; branch: number; seq: number; aftermath: string[] }
 export interface Coverage {

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderItemView } from "./ReaderItemView";
+import { useBattlesShown } from "./battleDisplay";
 import { usePluginOverrides } from "./pluginDisplay";
 import { choiceTexts } from "./historyText";
 
@@ -83,15 +84,16 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const { data } = useGame();
   const { records, model, noisy, uncertainSeqs, changedSeqs, coverage } = useLive();
   const { overrides } = usePluginOverrides();
+  const [battlesShown] = useBattlesShown();
 
   const flow = useMemo(() => {
     if (!data) return [];
     const path = branchPath(records, model, branch);
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
     const choiceText = choiceTexts(path, data);
-    const reader = readerItems(folded, data, choiceText, model, overrides);
+    const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown });
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown]);
 
   if (!data) return null;
 

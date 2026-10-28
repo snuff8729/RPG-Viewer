@@ -75,6 +75,7 @@ export function parsePics(v: unknown): ScreenPicture[] | null {
  * - 둘 다 없는 대사(기능이 꺼졌거나 구버전·전투 중)는 모름 — 지도에 넣지 않고 앞의 묶음도 잊는다.
  * - 갈래 시작(branchStart)은 앞의 묶음을 잊는다(플러그인도 갈래마다 처음부터 쓴다).
  * - 선택지(choices)의 `pics`는 묶음만 바꾼다.
+ * - 1.8.0 전투 시작·끝(battle)·전투 로그(battlelog)도 pics/picsSame이 있으면 그 seq에 넣는다(없으면 묶음은 그대로).
  */
 export function picturesBySeq(path: LogRecord[]): Map<number, ScreenPicture[]> {
   const out = new Map<number, ScreenPicture[]>();
@@ -87,6 +88,13 @@ export function picturesBySeq(path: LogRecord[]): Map<number, ScreenPicture[]> {
       if (r.type === "choices") {
         const p = parsePics(o.pics);
         if (p) cur = p;
+        continue;
+      }
+      // 1.8.0 전투: 시작·끝은 pics/picsSame, 전투 로그 줄은 그림이 바뀌었을 때만 pics. 둘 다 없으면 묶음은 그대로(지도에 안 넣음)
+      if (r.type === "battle" || r.type === "battlelog") {
+        const p = parsePics(o.pics);
+        if (p) cur = p;
+        if (cur && (p || o.picsSame === true)) out.set(r.seq, cur);
         continue;
       }
       if (r.type !== "message") continue;
@@ -325,7 +333,7 @@ export function seenPictures(records: LogRecord[], ctx: PictureContext, limit = 
     // 끝에서부터 pics가 있는 기록만 모은다(picsSame은 앞의 것과 같다)
     for (let i = list.length - 1; i >= 0 && recent.length < limit; i--) {
       const o = list[i] as unknown as Record<string, unknown> | null;
-      if (!o || (o.type !== "message" && o.type !== "choices")) continue;
+      if (!o || (o.type !== "message" && o.type !== "choices" && o.type !== "battle" && o.type !== "battlelog")) continue;
       const p = parsePics(o.pics);
       if (p) recent.push(p);
     }

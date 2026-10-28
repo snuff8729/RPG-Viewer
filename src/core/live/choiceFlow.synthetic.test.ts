@@ -69,7 +69,7 @@ describe("choiceFlow synthetic", () => {
   });
 
   it("resyncs when reader has an extra or missing entry", () => {
-    const extra = run(recs(0, ["x"]), 1, [], r => [{ kind: "battle", key: "r999", seq: 999 }, ...r]);
+    const extra = run(recs(0, ["x"]), 1, [], r => [{ kind: "battlelog", key: "r999", seq: 999, text: "x" }, ...r]);
     const missing = run(recs(0, ["x"]), 1, [], r => r.filter(i => i.key !== "r2"));
     expect(extra.some(i => i.kind === "choice")).toBe(true);
     expect(missing.some(i => i.kind === "choice")).toBe(true);

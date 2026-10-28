@@ -428,6 +428,7 @@ describe("RPGViewerBridge", () => {
   it("records battle start and end", () => {
     h = newGame();
     h.g.BattleManager.setup(7, true, false);
+    h.g.BattleManager._escaped = true;
     h.g.BattleManager.endBattle(1);
     expect(h.readLog().slice(1)).toEqual([
       expect.objectContaining({ type: "battle", phase: "start", troopId: 7 }),
@@ -983,7 +984,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.7.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.8.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1616,13 +1617,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.7\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.8\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.7.0");
+    expect(h.bridge.VERSION).toBe("1.8.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
@@ -1740,7 +1741,7 @@ describe("screen picture capture (1.6.0 / 1.7.0)", () => {
     expect(m[2].branch).not.toBe(m[0].branch);
   });
 
-  it("a choice without a message carries changed pictures; skipped in battle", () => {
+  it("a choice without a message carries changed pictures; battle messages too (1.8.0)", () => {
     h = newGame();
     setCapture(h, true);
     talk(h);
@@ -1756,8 +1757,7 @@ describe("screen picture capture (1.6.0 / 1.7.0)", () => {
     h.g.BattleManager.setup(4);
     talk(h);
     const last = messages(h).at(-1);
-    expect(last).not.toHaveProperty("pics");
-    expect(last).not.toHaveProperty("picsSame");
+    expect(last).toMatchObject({ picsSame: true });
   });
 
   for (const engine of ["MZ", "MV"] as const) {

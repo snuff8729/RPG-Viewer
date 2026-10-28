@@ -17,6 +17,10 @@ export function readStats(items: ReaderItem[], readSeq: number): ReadStats {
     if (s <= readSeq) { lastReadIdx = i; return; }
     if (firstUnreadIdx === -1) firstUnreadIdx = i;
     if (it.kind === "scroll" || (it.kind === "message" && it.repeat === undefined)) unread++;
+    // 전투 안의 대사도 센다(전투 로그 줄과 다시 본 같은 전투는 세지 않는다)
+    else if (it.kind === "battle" && it.repeat === 0) {
+      for (const x of it.items) if (x.kind === "scroll" || (x.kind === "message" && x.repeat === undefined)) unread++;
+    }
   });
   return { lastReadIdx, firstUnreadIdx, unread };
 }
