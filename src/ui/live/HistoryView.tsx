@@ -30,6 +30,7 @@ export function HistoryView() {
   const [shown, setShown] = useState(PAGE);
   const [kinds, setKinds] = useState<Set<Kind>>(loadKinds);
   const selected = picked !== null && model.branches.has(picked) ? picked : latestBranch;
+  const empty = records.length === 0 || selected === null;
 
   // 경로는 한 번만 계산해 타임라인과 선택 문구가 함께 쓴다
   const path = useMemo(
@@ -79,6 +80,30 @@ export function HistoryView() {
     setAtBottom(near);
     if (near) setFresh(0);
   }, []);
+  // "이전 기록 더 보기"로 앞쪽에 항목이 붙어도 읽던 위치를 유지
+  const anchor = useRef<{ h: number; top: number } | null>(null);
+  const showMore = () => {
+    const el = scroller.current;
+    if (el) anchor.current = { h: el.scrollHeight, top: el.scrollTop };
+    setShown(s => s + PAGE);
+  };
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const a = anchor.current;
+    anchor.current = null;
+    if (el && a) el.scrollTop = a.top + (el.scrollHeight - a.h);
+  }, [shown]);
+  // 하단 카드가 접히고 펼쳐져 영역 높이가 바뀌면 바닥 여부를 다시 판단
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (nearBottom.current) el.scrollTop = el.scrollHeight;
+      onScroll();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [onScroll]);
   useLayoutEffect(() => {
     const key = `${selected}|${[...kinds].join(",")}`;
     const grew = filtered.length - prevLen.current;
@@ -97,7 +122,6 @@ export function HistoryView() {
   };
 
   if (!data) return null;
-  const empty = records.length === 0 || selected === null;
   const installed = install?.state === "installed" && connection !== "noPlugin";
   const ctx: TimelineCtx | null = empty ? null : {
     data, model, selected, choiceText, onJump,
@@ -131,7 +155,7 @@ export function HistoryView() {
           {ctx ? (
             <>
               {visible.length < filtered.length && (
-                <Button variant="outline" size="sm" onClick={() => setShown(s => s + PAGE)}>이전 기록 더 보기</Button>
+                <Button variant="outline" size="sm" onClick={showMore}>이전 기록 더 보기</Button>
               )}
               {visible.map((item, i) => <TimelineItem key={`${filtered.length - visible.length + i}`} item={item} ctx={ctx} />)}
             </>

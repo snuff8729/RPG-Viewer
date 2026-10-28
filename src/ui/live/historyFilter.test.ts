@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HistoryItem } from "@/core/live/types";
-import { filterItems, itemKind, type Kind } from "./historyFilter";
+import { ALL_KINDS, filterItems, itemKind, loadKinds, saveKinds, type Kind } from "./historyFilter";
 
 const base = { v: 1 as const, seq: 1, t: 0, run: 1, branch: 1 };
 const rec = (r: object): HistoryItem => ({ kind: "record", record: { ...base, ...r } as never, uncertain: false, changed: false });
@@ -27,5 +27,32 @@ describe("historyFilter", () => {
     const items = [rec({ type: "message" }), rec({ type: "picture" }), rec({ type: "branchStart" }), rec({ type: "state" })];
     const out = filterItems(items, new Set<Kind>(["picture"]));
     expect(out).toEqual([items[1], items[2]]);
+  });
+});
+
+describe("loadKinds/saveKinds", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const store = (impl: object) => vi.stubGlobal("localStorage", impl);
+
+  it("defaults to all kinds when empty or malformed", () => {
+    store({ getItem: () => null });
+    expect(loadKinds().size).toBe(ALL_KINDS.length);
+    store({ getItem: () => "{not json" });
+    expect(loadKinds().size).toBe(ALL_KINDS.length);
+  });
+  it("defaults to all kinds when storage throws or is missing", () => {
+    store({ getItem: () => { throw new Error("denied"); } });
+    expect(loadKinds().size).toBe(ALL_KINDS.length);
+    vi.stubGlobal("localStorage", undefined);
+    expect(loadKinds().size).toBe(ALL_KINDS.length);
+  });
+  it("round-trips and ignores unknown kinds; save does not throw", () => {
+    let saved = "";
+    store({ getItem: () => '["picture","bogus"]', setItem: (_k: string, v: string) => { saved = v; } });
+    expect([...loadKinds()]).toEqual(["picture"]);
+    saveKinds(new Set<Kind>(["message"]));
+    expect(saved).toBe('["message"]');
+    store({ setItem: () => { throw new Error("quota"); } });
+    expect(() => saveKinds(new Set<Kind>(["message"]))).not.toThrow();
   });
 });
