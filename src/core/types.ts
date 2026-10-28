@@ -91,6 +91,8 @@ export interface GameData {
   menuCommonEvents?: number[];
   /** plugins.js CommonEventBeforeAfterMenu가 메뉴를 닫은 뒤 맵에서 실행하는 커먼 이벤트 id. 없으면 없음. */
   afterMenuCommonEvent?: number;
+  /** plugins.js BY_PictureClassify의 그림 하위 폴더 규칙(파일 이름에 token이 들면 folder/ 안). 없으면 없음. */
+  pictureFolders?: { token: string; folder: string }[];
 }
 
 // ---- 해석 결과 ----
