@@ -102,22 +102,21 @@
   // meta.json can lag behind the log (it is written on a timer): raise the counters above
   // whatever the last ~64KB of the log shows so new records never reuse a seq.
   var TAIL_BYTES = 65536;
+  // Limitation: a single line longer than 64KB cannot be recovered from the tail (the cut first
+  // line is dropped); records are far smaller than that in practice.
   function readLogTail() {
-    var text = null, partial = false;
-    try {
-      if (typeof fs.statSync === "function" && typeof fs.openSync === "function" && typeof fs.readSync === "function") {
-        var size = fs.statSync(LOG).size;
-        var start = Math.max(0, size - TAIL_BYTES);
-        var len = size - start;
-        var buf = Buffer.alloc(len);
-        var fd = fs.openSync(LOG, "r");
-        try { fs.readSync(fd, buf, 0, len, start); } finally { try { fs.closeSync(fd); } catch (ec) { /* ignore */ } }
-        text = buf.toString("utf8");
-        partial = start > 0;
-      }
-    } catch (e) { text = null; partial = false; }
-    if (text === null) {
-      text = String(fs.readFileSync(LOG, "utf8"));
+    var text, partial = false;
+    if (typeof fs.statSync === "function" && typeof fs.openSync === "function" && typeof fs.readSync === "function") {
+      var size = fs.statSync(LOG).size;
+      var start = Math.max(0, size - TAIL_BYTES);
+      var len = size - start;
+      var buf = typeof Buffer.alloc === "function" ? Buffer.alloc(len) : new Buffer(len);
+      var fd = fs.openSync(LOG, "r");
+      try { fs.readSync(fd, buf, 0, len, start); } finally { try { fs.closeSync(fd); } catch (ec) { /* ignore */ } }
+      text = buf.toString("utf8");
+      partial = start > 0;
+    } else {
+      text = String(fs.readFileSync(LOG, "utf8")); // no fd API at all: nothing better available
       if (text.length > TAIL_BYTES) { text = text.slice(-TAIL_BYTES); partial = true; }
     }
     var lines = text.split("\n");
@@ -137,7 +136,7 @@
           if (isCount(r.branch) && r.branch >= meta.nextBranch) meta.nextBranch = r.branch + 1;
         } catch (e2) { /* skip broken line */ }
       }
-    } catch (e3) { /* keep what we have */ }
+    } catch (e3) { reportError(e3); /* skip recovery; never read the whole log */ }
   }
 
   var lastMetaJson = null;

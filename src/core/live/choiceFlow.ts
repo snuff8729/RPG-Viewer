@@ -45,14 +45,13 @@ export function choiceFlow(args: {
     const flushSeg = () => {
       const list = seg;
       seg = [];
-      let boxes = 0, messages = 0, pictures = 0;
+      let messages = 0, pictures = 0;
       for (const i of list) {
         if (i.kind === "message" || i.kind === "scroll") {
-          boxes++;
           if (!(i.kind === "message" && i.repeat !== undefined)) messages += Array.isArray(i.lines) ? i.lines.length : 0;   // 반복 항목은 줄 수에서 제외
         } else if (i.kind === "picture") pictures++;
       }
-      if (boxes === 0 && pictures === 0) return;
+      if (messages === 0 && pictures === 0) return;   // 반복 항목만 있는 구간은 요약 없이 건너뛴다
       out.push({ kind: "segment", key: `s${list[0].key}`, items: list, messages, pictures });
     };
 

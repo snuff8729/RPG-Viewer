@@ -478,6 +478,55 @@ describe("RPGViewerBridge", () => {
     expect(rec).toMatchObject({ run: 4, branch: 5 });
   });
 
+  describe("fd tail read", () => {
+    class FdFs extends MemFs {
+      reads: { len: number; pos: number }[] = [];
+      closed = 0;
+      failRead = false;
+      statSync(p: string) { return { size: Buffer.byteLength(this.readFileSync(p)) }; }
+      openSync(p: string) { this.readFileSync(p); return 7; }
+      readSync(_fd: number, buf: Buffer, off: number, len: number, pos: number) {
+        this.reads.push({ len, pos });
+        if (this.failRead) throw new Error("EIO");
+        Buffer.from(this.readFileSync(LOG_PATH)).copy(buf, off, pos, pos + len);
+        return len;
+      }
+      closeSync() { this.closed++; }
+    }
+    const bigLog = () => {
+      const lines = Array.from({ length: 4000 }, (_, i) => JSON.stringify({ v: 1, seq: i + 1, run: 1, branch: 1, type: "state", pad: "한".repeat(5) }));
+      lines.push(JSON.stringify({ v: 1, seq: 5000, run: 3, branch: 4, type: "state" }));
+      return lines.join("\n") + "\n";
+    };
+
+    it("reads only the last 64KB, drops the cut first line, closes the fd", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      const text = bigLog();
+      fs.files.set(LOG_PATH, text);
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+      const size = Buffer.byteLength(text);
+      h = newGame("MZ", fs);
+      expect(fs.reads).toEqual([{ len: 65536, pos: size - 65536 }]);
+      expect(fs.closed).toBe(1);
+      expect(h.readLog().at(-1)).toMatchObject({ seq: 5001, run: 4, branch: 5 });
+    });
+
+    it("closes the fd when readSync throws and does not read the whole log", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      fs.files.set(LOG_PATH, bigLog());
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+      fs.failRead = true;
+      const spy = vi.spyOn(fs, "readFileSync");
+      h = newGame("MZ", fs);
+      expect(fs.closed).toBe(1);
+      const logReads = spy.mock.calls.filter((c) => c[0] === LOG_PATH).length;
+      expect(logReads).toBeLessThanOrEqual(2); // statSync/openSync helpers only, no readFileSync of the log by the plugin
+      expect(h.g.$gameMap).toBeDefined();
+    });
+  });
+
   it("writes meta.json on the tick, not on scheduled flushes", () => {
     h = newGame();
     h.bridge._tick();

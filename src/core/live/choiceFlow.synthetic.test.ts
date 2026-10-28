@@ -84,8 +84,10 @@ describe("choiceFlow synthetic", () => {
 
   it("falls back to the reader label when picked is out of range", () => {
     const c = choiceOf(run(recs(5, ["x", "y"]), 1, []));
-    expect(c.options.slice(0, 2).every(o => !o.picked)).toBe(true);
-    expect(c.options.filter(o => o.picked).length).toBeLessThanOrEqual(1);
+    const picked = c.options.filter(o => o.picked);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].label.length).toBeGreaterThan(0);
+    expect(c.options.slice(0, 2).map(o => o.picked)).toEqual([false, false]);
   });
 
   it("counts lines, not boxes", () => {
