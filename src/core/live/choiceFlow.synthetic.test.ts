@@ -51,6 +51,11 @@ describe("choiceFlow synthetic", () => {
     ]);
   });
 
+  it("same-branch picks at another seq are not elsewhere", () => {
+    const c = choiceOf(run(recs(0, ["x", "y"]), 1, [{ picked: 0, branch: 1, seq: 4 }, { picked: 1, branch: 1, seq: 30 }]));
+    expect(c.options.map(o => o.elsewhere)).toEqual([[], []]);
+  });
+
   it("clips question to 40 chars", () => {
     expect(choiceOf(run(recs(0, ["x"]), 1, [])).question?.text).toBe("가".repeat(40) + "…");
   });
