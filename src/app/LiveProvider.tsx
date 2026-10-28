@@ -9,6 +9,8 @@ import { conditionsKey } from "@/core/live/interactable";
 import { computeMissing } from "@/core/live/missing";
 import { getInstallStatus, install as installPlugin, livePaths, pluginVersionOf, uninstall as uninstallPlugin, type InstallResult, type InstallStatus } from "@/core/live/installer";
 import { LogTail, readLive } from "@/core/live/tail";
+import { mergeSeenArchive, parseSeenArchive, type SeenArchive } from "@/core/live/seenArchive";
+import { logEditPaths } from "./logEdit";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
 import type { GameIndex } from "@/core/types";
 import {
@@ -57,6 +59,8 @@ export interface LiveContextValue {
   caughtUp: boolean;
   /** 기록 파일이 초기화(LogTail reset)될 때마다 1씩 오른다. records·model과 같은 파생 순간 값. */
   logEpoch: number;
+  /** 기록 파일과 본 기록 보관(seen-archive.json)을 처음부터 다시 읽는다(갈래 영구 삭제·되돌리기 뒤). */
+  reloadLog(): void;
 }
 
 /**
@@ -106,6 +110,20 @@ interface TailEntry {
   epoch: number;
   /** 읽은 위치를 지운 epoch(파생 순간에 지운다) */
   clearedEpoch: number;
+  /** rpg-viewer/seen-archive.json(갈래 영구 삭제로 지운 기록의 진행도). 기록보다 먼저 읽는다. */
+  archive: SeenArchive | null;
+  /** 누적기 진행도 + 보관을 합친 값(같은 입력이면 같은 객체) */
+  merged: { cov: Coverage; archive: SeenArchive | null; out: Coverage } | null;
+}
+
+/** 누적기 진행도에 본 기록 보관을 합친다(입력이 같으면 이전 객체). */
+function mergedCoverage(entry: TailEntry): Coverage {
+  const cov = entry.acc.coverage();
+  const m = entry.merged;
+  if (m && m.cov === cov && m.archive === entry.archive) return m.out;
+  const out = mergeSeenArchive(cov, entry.archive);
+  entry.merged = { cov, archive: entry.archive, out };
+  return out;
 }
 
 /** 게임 보조(control.json) — useLive()와 나눠 두어 설정이 바뀌어도 다른 화면은 다시 그리지 않는다. */
@@ -211,6 +229,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // 누적기: 폴링 효과가 게임(폴더·데이터)마다 새로 만든다. 파생 스로틀이 여기서 읽는다.
   const accRef = useRef<TailEntry | null>(null);
   const genCounter = useRef(0);
+  /** 바뀌면 기록·보관을 처음부터 다시 읽는다 */
+  const [reloadKey, setReloadKey] = useState(0);
+  const reloadLog = useCallback(() => setReloadKey(k => k + 1), []);
 
   // 폴링: 자기 재예약 setTimeout(setInterval 아님). 숨겨진 탭이면 건너뛴다. more면 바로 다시.
   useEffect(() => {
@@ -219,7 +240,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const tail = new LogTail(wfolder, paths.logFile);
     const acc = createAccumulator(data);
     const gen = ++genCounter.current;
-    const entry: TailEntry = { acc, gen, gameKey: gameKeyOf(data), caughtUp: false, epoch: 0, clearedEpoch: 0 };
+    const entry: TailEntry = { acc, gen, gameKey: gameKeyOf(data), caughtUp: false, epoch: 0, clearedEpoch: 0, archive: null, merged: null };
+    let archiveRead = false;
     accRef.current = entry;
     let bad = 0;
     let liveModified: number | null = null;
@@ -232,6 +254,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       let again = false;
       try {
         if (document.visibilityState === "visible") {
+          if (!archiveRead) {
+            // 본 기록 보관을 기록보다 먼저 읽는다(진행도가 잠깐이라도 줄어 보이지 않게)
+            let text: string | null = null;
+            try { text = await wfolder.readText(logEditPaths(dataRoot).archive); } catch { text = null; }
+            if (cancelled) return;
+            entry.archive = parseSeenArchive(text);
+            archiveRead = true;
+          }
           const res = await tail.poll();
           if (cancelled) return;
           if (res.changed) {
@@ -279,7 +309,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       if (timer !== undefined) clearTimeout(timer);
       if (accRef.current === entry) accRef.current = null;
     };
-  }, [wfolder, dataRoot, data]);
+  }, [wfolder, dataRoot, data, reloadKey]);
 
   // DEV 시뮬레이터
   useEffect(() => {
@@ -315,7 +345,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       const v = acc.version;
       setDerived((prev) => (prev && prev.gen === gen && prev.version === v && prev.caughtUp === caughtUp && prev.epoch === epoch
         ? prev
-        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: acc.coverage(), noisy: acc.noisy(), caughtUp, epoch }));
+        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: mergedCoverage(cur), noisy: acc.noisy(), caughtUp, epoch }));
     }, wait);
     return () => clearTimeout(id);
   }, [tailGen, tailVersion, tailCaughtUp]);
@@ -360,8 +390,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     supported, install, refreshInstall, doInstall, doUninstall,
     connection, records: derivedRecords, badLines, model, coverage, live, missing,
     noisy, uncertainSeqs: coverage.uncertainSeqs, changedSeqs: coverage.changedSeqs, latestBranch: model.latestBranch, bundledVersion,
-    caughtUp, logEpoch,
-  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, derivedRecords, badLines, model, coverage, live, missing, noisy, caughtUp, logEpoch]);
+    caughtUp, logEpoch, reloadLog,
+  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, derivedRecords, badLines, model, coverage, live, missing, noisy, caughtUp, logEpoch, reloadLog]);
 
   const statusValue = useMemo<LiveStatusValue>(() => ({ lastSeenT, lastLive, logStats }), [lastSeenT, lastLive, logStats]);
 

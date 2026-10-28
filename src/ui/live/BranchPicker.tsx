@@ -23,6 +23,8 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/co
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import type { DeleteRequest } from "@/app/logEdit";
+import { DeleteBranchesDialog, UndoDeleteDialog } from "./BranchDeleteDialogs";
 import { useBranchPrefs } from "./branchPrefs";
 import { branchName, firstPickText, lastLineText } from "./branchText";
 import { usePluginOverrides } from "./pluginDisplay";
@@ -42,6 +44,8 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
   const [showHidden, setShowHidden] = useState(false);
   const [renaming, setRenaming] = useState<{ id: number; text: string } | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [deleting, setDeleting] = useState<DeleteRequest | null>(null);
+  const [undoOpen, setUndoOpen] = useState(false);
 
   const summaries = useMemo(() => summarizeBranches(records, model, { overrides }), [records, model, overrides]);
   const current = representative(model, selected);
@@ -51,6 +55,10 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
   );
   const tidyCount = useMemo(() => tidyOldCount(summaries, prefs, KEEP_RECENT, latestBranch), [summaries, prefs, latestBranch]);
   const nameOf = (id: number) => branchName(summaries.get(id), prefs, data, branchLabel(model, id));
+  const pinnedIds = useMemo(
+    () => [...summaries.keys()].filter(id => prefs.branches[String(id)]?.pinned === true),
+    [summaries, prefs],
+  );
 
   const pick = (id: number) => { onSelect(id); setOpen(false); };
   const set = (id: number, patch: Parameters<typeof updatePref>[2]) => updatePrefs(p => updatePref(p, id, patch, Date.now()));
@@ -85,6 +93,7 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
           onPin={() => set(row.id, { pinned: !row.pinned })}
           onHide={() => set(row.id, { hidden: !isHidden(s, prefs) })}
           onHideUpTo={() => askUpTo(row.id)}
+          onDelete={() => { setOpen(false); setDeleting({ mode: "delete", ids: [row.id] }); }}
         />
         {row.shorts.length > 0 && (
           <Collapsible className="ml-4">
@@ -116,12 +125,30 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
               <Switch id="branch-show-hidden" checked={showHidden} onCheckedChange={setShowHidden} />
               <Label htmlFor="branch-show-hidden">숨긴 갈래 보기 ({list.hiddenCount})</Label>
             </div>
-            <Button
-              variant="ghost" size="sm" disabled={tidyCount === 0}
-              onClick={() => { setOpen(false); setConfirm({ kind: "tidy", count: tidyCount }); }}
-            >
-              오래된 갈래 정리
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost" size="sm" disabled={tidyCount === 0}
+                onClick={() => { setOpen(false); setConfirm({ kind: "tidy", count: tidyCount }); }}
+              >
+                오래된 갈래 정리
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="갈래 영구 삭제 메뉴"><EllipsisVertical /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    variant="destructive" disabled={pinnedIds.length === 0}
+                    onSelect={() => { setOpen(false); setDeleting({ mode: "keep", ids: pinnedIds }); }}
+                  >
+                    고정한 갈래만 남기고 삭제…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => { setOpen(false); setUndoOpen(true); }}>
+                    마지막 삭제 되돌리기…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
           <div className="max-h-[60svh] overflow-y-auto">
             <div className="space-y-3 p-2">
@@ -178,14 +205,17 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <DeleteBranchesDialog request={deleting} onClose={() => setDeleting(null)} nameOf={nameOf} />
+      <UndoDeleteDialog open={undoOpen} onClose={() => setUndoOpen(false)} />
     </>
   );
 }
 
-function Row({ s, row, name, selected, latest, line, choice, onPick, onRename, onPin, onHide, onHideUpTo }: {
+function Row({ s, row, name, selected, latest, line, choice, onPick, onRename, onPin, onHide, onHideUpTo, onDelete }: {
   s: BranchSummary; row: BranchRow; name: string; selected: boolean; latest: boolean;
   line: string | null; choice: string | null;
-  onPick(): void; onRename(): void; onPin(): void; onHide(): void; onHideUpTo(): void;
+  onPick(): void; onRename(): void; onPin(): void; onHide(): void; onHideUpTo(): void; onDelete(): void;
 }) {
   return (
     <Item
@@ -216,6 +246,8 @@ function Row({ s, row, name, selected, latest, line, choice, onPick, onRename, o
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onHide}>{row.hidden ? "다시 보이기" : "숨기기"}</DropdownMenuItem>
             <DropdownMenuItem onSelect={onHideUpTo}>이 갈래와 이전 갈래 모두 숨기기</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={onDelete}>영구 삭제…</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </ItemActions>

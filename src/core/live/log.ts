@@ -7,12 +7,18 @@ export function parseLogText(text: string): { records: LogRecord[]; badLines: nu
   for (const raw of String(text ?? "").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
-    let value: unknown;
-    try { value = JSON.parse(line); } catch { badLines++; continue; }
-    if (isRecord(value)) records.push(value);
+    const r = parseLogLine(line);
+    if (r) records.push(r);
     else badLines++;
   }
   return { records, badLines };
+}
+
+/** 기록 한 줄(앞뒤 공백 제거, 비어 있지 않음) → 기록. 해석 못 하면 null. 예외를 던지지 않는다. */
+export function parseLogLine(line: string): LogRecord | null {
+  let value: unknown;
+  try { value = JSON.parse(line); } catch { return null; }
+  return isRecord(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is LogRecord {
