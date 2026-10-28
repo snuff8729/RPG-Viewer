@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { GameProvider, useGame } from "@/app/GameProvider";
 import { useRoute } from "@/app/route";
@@ -13,11 +13,26 @@ import { StartScreen } from "@/ui/StartScreen";
 import { AppSidebar } from "@/ui/AppSidebar";
 import { ErrorsBadge } from "@/ui/ErrorsBadge";
 import { EventView } from "@/ui/EventView";
+import { SearchDialog } from "@/ui/SearchDialog";
 
 function Shell() {
   const { status, data, index } = useGame();
   const [route] = useRoute();
   const [showEmpty, setShowEmpty] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const ready = status === "ready";
+
+  useEffect(() => {
+    if (!ready) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ready]);
 
   if (status !== "ready" || !data || !index) return <StartScreen />;
 
@@ -47,7 +62,7 @@ function Shell() {
             <span className="text-sm">{data.system.gameTitle}</span>
             <Badge variant="secondary">{data.engine}</Badge>
             <ErrorsBadge />
-            <Button variant="outline" size="sm"><Search />검색</Button>
+            <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)}><Search />검색</Button>
           </div>
         </header>
         <main className="flex-1 p-4">
@@ -55,6 +70,7 @@ function Shell() {
           {route.kind === "page" && <EventView route={route} />}
         </main>
       </SidebarInset>
+      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </SidebarProvider>
   );
 }

@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import type { Route } from "@/app/route";
 import { locationKey } from "@/core/index/locations";
-import type { Location, PageEntry } from "@/core/types";
+import type { Location, PageEntry, Ref } from "@/core/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { openPage } from "./navigation";
 import { RefBadge } from "./RefBadge";
 import { ScriptView } from "./script/ScriptView";
+import { XrefSheet } from "./XrefSheet";
 
 function sameEvent(a: Location, b: Location): boolean {
   if (a.source === "map" && b.source === "map") return a.mapId === b.mapId && a.eventId === b.eventId;
@@ -49,6 +51,7 @@ function Callers({ id }: { id: number }) {
 
 export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }) {
   const { index } = useGame();
+  const [xrefTarget, setXrefTarget] = useState<Ref | null>(null);
   const loc = route.location;
   const pages: PageEntry[] = (index?.pages ?? [])
     .filter((p) => sameEvent(p.location, loc))
@@ -75,13 +78,14 @@ export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }
         <span className="text-sm text-muted-foreground">나타나는 조건</span>
         {current.conditions.length === 0
           ? <span className="text-sm">항상</span>
-          : current.conditions.map((c, i) => <RefBadge key={i} condition={c} />)}
+          : current.conditions.map((c, i) => <RefBadge key={i} condition={c} onRefClick={setXrefTarget} />)}
       </div>
       <Card className="max-w-3xl">
         <CardContent>
-          <ScriptView key={locationKey(current.location)} nodes={current.nodes} basePath={[]} />
+          <ScriptView key={locationKey(current.location)} nodes={current.nodes} basePath={[]} onRefClick={setXrefTarget} />
         </CardContent>
       </Card>
+      <XrefSheet refTarget={xrefTarget} onClose={() => setXrefTarget(null)} />
     </div>
   );
 }

@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { Ref, ScriptNode } from "@/core/types";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { RefBadge } from "@/ui/RefBadge";
+import { useForcedOpen } from "@/ui/highlight";
 
 type Block = Extract<ScriptNode, { kind: "choices" | "conditional" | "loop" }>;
 
@@ -13,8 +15,11 @@ type RenderBody = (nodes: ScriptNode[], basePath: number[]) => React.ReactNode;
 
 function Branch({ label, body, bp, renderBody }: { label: string; body: ScriptNode[]; bp: number[]; renderBody: RenderBody }) {
   const empty = body.length === 0;
+  const [open, setOpen] = useState(!empty);
+  const forced = useForcedOpen(bp);
+  useEffect(() => { if (forced) setOpen(true); }, [forced]);
   return (
-    <Collapsible defaultOpen={!empty} className="px-3 py-2">
+    <Collapsible open={open} onOpenChange={setOpen} className="px-3 py-2">
       <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium">
         <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
         {label}
