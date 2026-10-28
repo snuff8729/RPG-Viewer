@@ -1,6 +1,6 @@
 import type { GameFolder } from "@/core/fs/folder";
 import type { GameData } from "@/core/types";
-import { decryptImage } from "./decrypt";
+import { decodeImage } from "./decrypt";
 
 export type AssetKind = "faces" | "pictures" | "tilesets" | "characters";
 
@@ -47,14 +47,17 @@ export class AssetStore {
     return p;
   }
 
+  /**
+   * 확장자 후보를 차례로 읽어 처음으로 그릴 수 있는 것을 쓴다. 암호화 여부는 확장자가 아니라 내용(머리)으로
+   * 판단하므로, 키가 없거나 파일마다 키가 달라도, 평문/암호문이 확장자와 어긋나도 보인다.
+   * 빈 파일이나 이미지가 아닌 파일은 건너뛰고 다음 후보를 본다.
+   */
   private async read(kind: AssetKind, name: string): Promise<Blob | null> {
     for (const ext of extensionsFor(this.data)) {
       const buf = await this.folder.readBinary(`${this.data.imgRoot}/${kind}/${name}${ext}`);
       if (!buf) continue;
-      if (ext === ".png") return new Blob([buf], { type: "image/png" });
-      const keyHex = this.data.system.encryptionKey;
-      if (!keyHex) return null;
-      return new Blob([decryptImage(buf, keyHex)], { type: "image/png" });
+      const img = decodeImage(buf, this.data.system?.encryptionKey);
+      if (img) return new Blob([img.bytes], { type: img.type });
     }
     return null;
   }

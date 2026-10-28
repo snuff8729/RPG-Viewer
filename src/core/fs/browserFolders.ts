@@ -13,6 +13,9 @@ async function childNames(dir: FileSystemDirectoryHandle): Promise<string[]> {
   return names;
 }
 
+/** 대소문자·유니코드 정규화(NFC/NFD)를 무시한 이름 비교 키. */
+const nameKey = (s: string) => s.normalize("NFC").toLowerCase();
+
 /**
  * 핸들 객체는 호출마다 새로 만들어질 수 있으므로, 디렉터리는 폴더 루트 기준 경로(소문자)로 식별한다.
  * 각 디렉터리의 `소문자 이름 → 실제 이름` 표는 처음 필요할 때 한 번만 나열해 만든다.
@@ -34,12 +37,12 @@ export class DirectoryHandleFolder implements WritableGameFolder {
     if (!table) {
       table = childNames(dir).then((all) => {
         const m = new Map<string, string>();
-        for (const n of all) if (!m.has(n.toLowerCase())) m.set(n.toLowerCase(), n);
+        for (const n of all) if (!m.has(nameKey(n))) m.set(nameKey(n), n);
         return m;
       });
       this.names.set(key, table);
     }
-    return (await table).get(name.toLowerCase()) ?? null;
+    return (await table).get(nameKey(name)) ?? null;
   }
 
   private dirOf(segments: string[]): Promise<FileSystemDirectoryHandle | null> {
@@ -105,7 +108,7 @@ export class DirectoryHandleFolder implements WritableGameFolder {
   /** 새 항목 이름을 해당 디렉터리의 이름 표에 반영한다(표가 아직 없으면 나중에 실제 나열로 만들어진다). */
   private async learn(key: string, name: string): Promise<void> {
     const t = this.names.get(key);
-    if (t) (await t).set(name.toLowerCase(), name);
+    if (t) (await t).set(nameKey(name), name);
   }
 
   /** 디렉터리를 (없으면 만들며) 얻는다. */
@@ -207,7 +210,7 @@ export class DirectoryHandleFolder implements WritableGameFolder {
       const segs = path.split("/").filter(Boolean);
       segs.pop();
       const t = this.names.get(segs.join("/").toLowerCase());
-      if (t) (await t).delete(h.name.toLowerCase());
+      if (t) (await t).delete(nameKey(h.name));
       return true;
     } catch {
       return false;
