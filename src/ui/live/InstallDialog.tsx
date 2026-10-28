@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLive } from "@/app/LiveProvider";
 import type { InstallResult, InstallStatus } from "@/core/live/installer";
 import { fsAccessSupport, type FsAccessWindow } from "../fsAccess";
+import { formatBytes } from "./formatBytes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ function statusLabel(s: InstallStatus | null): string {
 type Outcome = { action: "install" | "uninstall"; result: InstallResult };
 
 export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion } = useLive();
+  const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion, logStats } = useLive();
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -65,6 +66,11 @@ export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </span>
               )}
             </div>
+            {logStats && (
+              <div className="text-muted-foreground">
+                기록 크기 {formatBytes(logStats.bytes)} · {logStats.lines}줄
+              </div>
+            )}
             {install?.state === "unsupported" && (
               <Alert variant="destructive">
                 <AlertDescription>{install.reason}</AlertDescription>
