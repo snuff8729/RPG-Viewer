@@ -6,10 +6,13 @@ import {
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
+import { mapNewCounts } from "@/core/live/interactable";
+import { liveHintsEnabled } from "./live/annotations";
 import { NowGroup } from "./live/NowGroup";
 import type { Route } from "@/app/route";
 import type { Location, MapInfo, PageEntry } from "@/core/types";
@@ -46,7 +49,7 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
   route: Route; showEmpty: boolean; onShowEmptyChange: (v: boolean) => void;
 }) {
   const { data, index } = useGame();
-  const { live, connection } = useLive();
+  const { live, connection, coverage } = useLive();
   const [follow, setFollow] = useState(true);
   const [openMaps, setOpenMaps] = useState<Set<number>>(new Set());
 
@@ -65,6 +68,12 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
     if (chain.length === 0) return;
     setOpenMaps((prev) => (chain.every((id) => prev.has(id)) ? prev : new Set([...prev, ...chain])));
   }, [activeMapId, liveMapId, data]);
+
+  const newCounts = useMemo(
+    () => (data && index && live && liveHintsEnabled(connection) && connection === "connected"
+      ? mapNewCounts(data, index, coverage, live) : new Map<number, number>()),
+    [data, index, coverage, live, connection],
+  );
 
   const model = useMemo(() => {
     if (!data || !index) return null;
@@ -121,10 +130,13 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
     const label = (
       <>
         <span className="truncate">{m.name}</span>
+        {newCounts.get(m.id) ? (
+          <Badge variant="outline" className="ml-auto shrink-0 text-xs">새 {newCounts.get(m.id)}</Badge>
+        ) : null}
         {errs && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span tabIndex={0} role="img" aria-label="오류" className="ml-auto shrink-0">
+              <span tabIndex={0} role="img" aria-label="오류" className={newCounts.get(m.id) ? "shrink-0" : "ml-auto shrink-0"}>
                 <TriangleAlert className="size-4 text-destructive" />
               </span>
             </TooltipTrigger>
