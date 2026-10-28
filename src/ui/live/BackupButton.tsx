@@ -3,9 +3,9 @@ import { ArchiveRestore } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import {
-  fetchBackups, fetchRunning, fetchSaveState, initialWatch, KIND_LABEL, loadAutoBackup, makeBackup, nextWatch,
+  fetchBackups, fetchRunning, fetchSaveState, initialWatch, isEmptyBackup, KIND_LABEL, loadAutoBackup, makeBackup, nextWatch,
   notifyBackupsChanged, onBackupsChanged, POLL_MS, removeBackup, restoreAndRestart, saveAutoBackup,
-  type BackupMeta, type WatchState,
+  type BackupList, type BackupMeta, type WatchState,
 } from "@/app/backups";
 import { gameKeyOf } from "./readPosition";
 import { GamePathDialog } from "./GamePathDialog";
@@ -89,7 +89,8 @@ export function BackupButton() {
 
   const [pathDialog, setPathDialog] = useState(false);
   const [open, setOpen] = useState(false);
-  const [backups, setBackups] = useState<BackupMeta[] | null>(null);
+  const [list, setList] = useState<BackupList | null>(null);
+  const backups = list?.backups ?? null;
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -99,7 +100,7 @@ export function BackupButton() {
   const reload = useCallback(async () => {
     if (!path) return;
     const r = await fetchBackups(path);
-    if (r.ok) setBackups(r.backups);
+    if (r.ok) setList(r);
     else setError(r.error);
   }, [path]);
 
@@ -108,7 +109,7 @@ export function BackupButton() {
     let alive = true;
     void fetchBackups(path).then((r) => {
       if (!alive) return;
-      if (r.ok) setBackups(r.backups);
+      if (r.ok) setList(r);
       else setError(r.error);
     });
     const off = onBackupsChanged(() => void reload());
@@ -215,6 +216,12 @@ export function BackupButton() {
             {notice !== null && (
               <Alert><AlertDescription>{notice}</AlertDescription></Alert>
             )}
+            {list?.saveDir !== undefined && (
+              <p className="text-xs text-muted-foreground">세이브 폴더: {list.saveDir}</p>
+            )}
+            {list?.saveFilesMissing === true && (
+              <Alert><AlertDescription>세이브 파일을 찾지 못했어요</AlertDescription></Alert>
+            )}
             <Separator />
             {backups === null ? (
               <p className="text-sm text-muted-foreground">불러오는 중…</p>
@@ -241,7 +248,9 @@ export function BackupButton() {
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-40 truncate whitespace-normal">{b.name ?? b.reason}</TableCell>
-                      <TableCell className="text-right">{b.fileCount}</TableCell>
+                      <TableCell className="text-right">
+                        {isEmptyBackup(b) ? <Badge variant="outline">비어 있음</Badge> : b.fileCount}
+                      </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
                           <Button variant="outline" size="xs" disabled={busy} onClick={() => void onAskRestore(b)}>복원</Button>

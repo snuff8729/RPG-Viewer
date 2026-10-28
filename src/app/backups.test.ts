@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { autoBackupKey, initialWatch, loadAutoBackup, MIN_GAP_MS, nextWatch, saveAutoBackup, type WatchState } from "./backups";
+import { autoBackupKey, initialWatch, isEmptyBackup, loadAutoBackup, MIN_GAP_MS, nextWatch, saveAutoBackup, type WatchState } from "./backups";
 
 function memoryStorage() {
   const m = new Map<string, string>();
@@ -67,5 +67,12 @@ describe("nextWatch", () => {
   it("does nothing while the signature stays the same", () => {
     const base = feed([["a", 0], ["a", 1]]).state;
     expect(feed([["a", 500_000], ["a", 515_000]], base).fired).toEqual([]);
+  });
+});
+
+describe("isEmptyBackup", () => {
+  it("marks backups without files", () => {
+    expect(isEmptyBackup({ fileCount: 0 })).toBe(true);
+    expect(isEmptyBackup({ fileCount: 3 })).toBe(false);
   });
 });
