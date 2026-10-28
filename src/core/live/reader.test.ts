@@ -121,9 +121,9 @@ describe("readerItems text pictures", () => {
     expect(out.at(-1)).toEqual({ kind: "picture", key: "r3", seq: 3, pictureId: 5, name: "", caption: "안녕하세요 / 또 만나요" });
   });
 
-  it("leaves the caption off when the plugin text is not right before", () => {
+  it("drops an empty picture slot when no D_TEXT is right before", () => {
     const out = readerItems([plugin(1, 0, "D_TEXT 안녕 24"), pic(2, 3, "")], data, new Map(), model);
-    expect(out.at(-1)).toEqual({ kind: "picture", key: "r2", seq: 2, pictureId: 5, name: "" });
+    expect(out.some(i => i.kind === "picture")).toBe(false);
   });
 
   it("never captions a named picture", () => {

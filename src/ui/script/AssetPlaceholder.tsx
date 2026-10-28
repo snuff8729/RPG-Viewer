@@ -6,11 +6,11 @@ import { textPictureLabel } from "@/core/text/textPicture";
 import type { AssetView } from "./useAssetUrl";
 import { missingAssetText } from "./assetText";
 
-/** 파일 이름 없는 그림(글자 그림·플러그인 그림). 없는 파일로 보지 않고 흐린 글로 적는다. */
-export function TextPictureNote({ caption, className }: { caption?: string; className?: string }) {
+/** 앞의 D_TEXT 글로 화면에 글자를 띄우는 그림(파일 없음). 없는 파일로 보지 않고 흐린 글로 적는다. */
+export function TextPictureNote({ caption, pictureId, className }: { caption: string; pictureId?: number; className?: string }) {
   return (
     <p className={cn("text-sm break-words text-muted-foreground", className)}>
-      {textPictureLabel(caption)}
+      {textPictureLabel(caption, pictureId)}
     </p>
   );
 }

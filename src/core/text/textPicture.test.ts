@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventCommand } from "../types";
-import { dTextCaption, dTextCaptionBefore, dTextOf, textPictureLabel } from "./textPicture";
+import { dTextCaption, dTextCaptionBefore, dTextOf, emptyPictureLabel, textPictureLabel } from "./textPicture";
 
 const c = (code: number, p: unknown[]): EventCommand => ({ code, indent: 0, parameters: p }) as EventCommand;
 
@@ -33,8 +33,9 @@ describe("dTextCaptionBefore", () => {
 });
 
 describe("textPictureLabel", () => {
-  it("shows the caption or a muted note", () => {
-    expect(textPictureLabel("안녕하세요")).toBe("글자 그림: 「안녕하세요」");
-    expect(textPictureLabel("")).toBe("글자·플러그인 그림 (파일 없음)");
+  it("labels on-screen text and empty picture slots", () => {
+    expect(textPictureLabel("안녕하세요", 3)).toBe("화면에 글자 띄우기 #3: 「안녕하세요」");
+    expect(textPictureLabel("안녕")).toBe("화면에 글자 띄우기: 「안녕」");
+    expect(emptyPictureLabel(7)).toBe("빈 그림 자리 #7 (화면에 보이는 것 없음)");
   });
 });

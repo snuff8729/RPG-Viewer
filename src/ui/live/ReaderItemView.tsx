@@ -24,7 +24,7 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
 function Picture({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
   const { name } = item;
   const a = useAsset("pictures", name);
-  if (!name) return <TextPictureNote caption={item.caption} className="text-center" />;
+  if (!name) return item.caption ? <TextPictureNote caption={item.caption} pictureId={item.pictureId} className="text-center" /> : null;
   if (a.status === "loading") return <Skeleton className="h-40 w-full" />;
   if (a.status !== "ok") {
     return <AssetPlaceholder view={a} kind="pictures" name={name} pictureId={item.pictureId} className="mx-auto w-fit max-w-full" />;

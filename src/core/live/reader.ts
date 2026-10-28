@@ -10,7 +10,7 @@ export type ReaderItem =
   | { kind: "chapter"; key: string; text: string }
   | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number }
   | { kind: "scroll"; key: string; seq: number; lines: string[] }
-  /** name이 ""이면 플러그인이 그린 그림(파일 없음). caption: 바로 앞 D_TEXT 플러그인 기록의 글(있을 때) */
+  /** name이 ""이면 화면에 글자 띄우기(파일 없음) — caption: 바로 앞 D_TEXT 플러그인 기록의 글. 글도 이름도 없는 빈 자리는 항목을 만들지 않는다. */
   | { kind: "picture"; key: string; seq: number; pictureId: number; name: string; caption?: string }
   /**
    * 이벤트가 실행한 플러그인 명령. tech = 기술 명령(기본으로 숨김). text = 글이면 고른 글(제어 문자 처리), 기술 명령이면 원문.
@@ -63,13 +63,15 @@ function pictureCaption(r: RecordOf<"picture">, before: RecordOf<"plugin">[]): s
   return dTextCaption(texts);
 }
 
-function pictureItem(r: RecordOf<"picture">, before: RecordOf<"plugin">[]): ReaderItem {
+function pictureItem(r: RecordOf<"picture">, before: RecordOf<"plugin">[]): ReaderItem | null {
   const item: Extract<ReaderItem, { kind: "picture" }> = { kind: "picture", key: `r${r.seq}`, seq: r.seq,
     pictureId: typeof r.pictureId === "number" ? r.pictureId : 0, name: safe(r.name),
   };
   if (!item.name) {
     const caption = pictureCaption(r, before);
-    if (caption) item.caption = caption;
+    // 글도 파일도 없는 빈 그림 자리는 화면에 보이는 것이 없으니 읽기에 넣지 않는다
+    if (!caption) return null;
+    item.caption = caption;
   }
   return item;
 }

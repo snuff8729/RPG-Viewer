@@ -37,7 +37,16 @@ export function dTextCaptionBefore(list: EventCommand[], index: number): string 
   return dTextCaption(texts);
 }
 
-/** 파일 없는 그림의 설명 문구 */
-export function textPictureLabel(caption: string | undefined): string {
-  return caption ? `글자 그림: 「${caption}」` : "글자·플러그인 그림 (파일 없음)";
+const no = (pictureId: number | undefined) => (typeof pictureId === "number" && pictureId > 0 ? ` #${pictureId}` : "");
+
+/** 앞의 D_TEXT 글이 있는 파일 없는 그림: 화면에 글자를 띄우는 명령(자막처럼). */
+export function textPictureLabel(caption: string, pictureId?: number): string {
+  return `화면에 글자 띄우기${no(pictureId)}: 「${caption}」`;
 }
+
+/** 글도 파일 이름도 없는 그림 표시: 그림 번호만 잡아 둔 빈 자리(기본 엔진에선 화면에 아무것도 안 보인다). */
+export function emptyPictureLabel(pictureId?: number): string {
+  return `빈 그림 자리${no(pictureId)} (화면에 보이는 것 없음)`;
+}
+
+export const EMPTY_PICTURE_TIP = "파일 이름 없이 그림 번호만 잡아 둔 명령이에요. 플러그인이 나중에 이 자리를 채울 수 있어요.";
