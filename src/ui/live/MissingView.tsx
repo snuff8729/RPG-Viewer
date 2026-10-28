@@ -25,7 +25,7 @@ function Item({ m }: { m: MissingItem }) {
       tabIndex={0}
       onClick={() => go(m)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(m); } }}
-      className="cursor-pointer gap-1 px-3 py-2 hover:bg-accent"
+      className="cursor-pointer gap-1 px-3 py-2 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold">{m.label}</span>
@@ -75,7 +75,7 @@ export function MissingView() {
   const { missing, connection } = useLive();
   const [reachableOnly, setReachableOnly] = useState(false);
   const { choices, pages } = splitMissing(filterReachable(missing, reachableOnly));
-  const offline = connection === "noPlugin" || connection === "waiting";
+  const offline = connection !== "connected";
   return (
     <div className="space-y-4 p-1">
       <div className="flex items-center gap-2">
