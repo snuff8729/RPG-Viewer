@@ -17,6 +17,7 @@ import { SearchDialog } from "@/ui/SearchDialog";
 import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider } from "@/app/LiveProvider";
 import { AssistPanel } from "@/ui/live/AssistPanel";
+import { LaunchButton } from "@/ui/live/LaunchButton";
 import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
 import { MissingView } from "@/ui/live/MissingView";
@@ -92,6 +93,7 @@ function Shell() {
             </BreadcrumbList>
           </Breadcrumb>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <LaunchButton />
             <AssistPanel />
           </div>
         </header>
