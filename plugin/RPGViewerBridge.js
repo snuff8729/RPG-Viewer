@@ -17,7 +17,10 @@
  * 기록합니다. 병렬 이벤트·병렬 커먼 이벤트의 것은 기록하지 않습니다.
  * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사 글자가 그려지기
  * 시작할 때 화면에 실제로 보이는 그림(스탠딩 이미지 등)의 이름·위치·크기도
- * 기록합니다(숨겨졌거나 투명한 그림은 빼고).
+ * 기록합니다(숨겨졌거나 투명한 그림은 빼고). 전투 화면의 그림도 같습니다.
+ * 전투는 시작(적 무리 이름)·전투 로그 글(공격·피해·상태·승리·경험치 등)·
+ * 결과(승리/패배/도주/중단, 보상)를 기록합니다. 전투 한 번에 최대 2000줄,
+ * 초당 50줄까지만 남깁니다(배속 중에도 전투를 느리게 하지 않음).
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -30,7 +33,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.7.0",
+    VERSION: "1.8.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -121,8 +124,14 @@
   var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
   // 1.7.0: a message record waits in the buffer (unserialized) until its text starts drawing, then takes the
   // snapshot of what is actually on screen; flushes write only up to it (at most PICS_HOLD_MS, then snapshot now).
-  var heldMsg = null;         // { rec, t } — also the buffer entry itself
+  var heldMsg = null;         // { rec, t, ms } — also the buffer entry itself (ms: how long it may wait)
   var PICS_HOLD_MS = 1000, PICS_TREE_MAX = 3000;    // inside an extra (sped-up) scene update: input queries report nothing new
+  // 1.8.0 battle log: lines shown in Window_BattleLog (addText) and battle-system messages ($gameMessage.add
+  // outside any interpreter) while a battle runs. Not story records. Bounded per battle and per second.
+  var battleLog = null;       // { lines, dropped, times, lastText, lastT, picsT } from BattleManager.setup to endBattle
+  var BATTLE_LINES_MAX = 2000, BATTLE_RATE_MAX = 50, BATTLE_RATE_MS = 1000, BATTLE_DUP_MS = 100;
+  var BATTLE_TEXT_MAX = 500, BATTLE_PICS_GAP_MS = 500, BATTLE_ENEMIES_MAX = 20, BATTLE_ITEMS_MAX = 50, BATTLE_NAME_MAX = 200;
+  var BATTLE_HOLD_MS = 5000;  // the battle start record waits for Scene_Battle (encounter effect, loading)
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -251,21 +260,22 @@
   }
 
   // hold: keep the record unserialized until finishHeld() attaches its picture snapshot
+  // (true = at most PICS_HOLD_MS, a number = at most that many ms)
   function emit(type, fields, hold) {
     if (run === null && type !== "error") return;
     closeState();
     var rec = makeRecord(type, now());
     for (var k in fields) if (Object.prototype.hasOwnProperty.call(fields, k)) rec[k] = fields[k];
     if (STORY[type] === true) noteStory(rec.branch, rec.seq, rec.run);
-    if (hold) pushHeld(rec);
+    if (hold) pushHeld(rec, typeof hold === "number" ? hold : PICS_HOLD_MS);
     else pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
   }
 
-  function pushHeld(rec) {
+  function pushHeld(rec, ms) {
     finishHeld();
     if (buffer.length >= MAX_BUFFER) buffer.shift();
-    heldMsg = { rec: rec, t: now() };
+    heldMsg = { rec: rec, t: now(), ms: ms };
     buffer.push(heldMsg);
   }
 
@@ -426,6 +436,7 @@
     branch = meta.nextBranch++;
     lastChoices = null;
     lastPicsKey = null;
+    battleLog = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
     noteStory(branch, 0, run);
@@ -441,6 +452,7 @@
     branch = b;
     lastChoices = null;
     lastPicsKey = null;
+    battleLog = null;
     deferredNewGame = false;
   }
 
@@ -448,7 +460,7 @@
   function flush(force) {
     releasePending(false);
     closeState();
-    if (heldMsg && (force === true || now() - heldMsg.t >= PICS_HOLD_MS)) finishHeld();
+    if (heldMsg && (force === true || now() - heldMsg.t >= heldMsg.ms)) finishHeld();
     var n = buffer.length;
     for (var i = 0; i < buffer.length; i++) {
       if (typeof buffer[i] !== "string") { n = i; break; } // a held message: keep it and what follows
@@ -1115,15 +1127,82 @@
     return out;
   }
   // { pics } when the pictures differ from the last snapshot written in this branch, { picsSame } when not,
-  // null when capture is off / in battle / no screen.
+  // null when capture is off / no screen. In battle (1.8.0+) the battle scene's picture sprites are read the same
+  // way (enemy / actor battler sprites carry no picture id and are never recorded).
   function picsFields() {
-    if (!capturePictures || inBattleNow()) return null;
+    if (!capturePictures) return null;
     var pics = picturesNow();
     if (pics === null) return null;
     var key = JSON.stringify(pics);
     if (key === lastPicsKey) return { picsSame: true };
     lastPicsKey = key;
     return { pics: pics };
+  }
+
+  // ---------------------------------------------------------------- battle log (1.8.0)
+  function clipName(s) {
+    var t = s == null ? "" : String(s);
+    return t.length > BATTLE_NAME_MAX ? t.slice(0, BATTLE_NAME_MAX) : t;
+  }
+
+  function battleStartFields(BM, troopId) {
+    var fields = { phase: "start", troopId: troopId };
+    var dt = G.$dataTroops && isCount(troopId) ? G.$dataTroops[troopId] : null;
+    if (dt && typeof dt.name === "string") fields.troopName = clipName(dt.name);
+    var tr = G.$gameTroop;
+    var members = tr && typeof tr.members === "function" ? tr.members() : null;
+    if (members && typeof members.length === "number") {
+      var enemies = [];
+      for (var i = 0; i < members.length && enemies.length < BATTLE_ENEMIES_MAX; i++) {
+        var e = members[i];
+        try { if (e && typeof e.name === "function") enemies.push(clipName(e.name())); } catch (ee) { reportError(ee); }
+      }
+      fields.enemies = enemies;
+    }
+    fields.canEscape = !!(BM && BM._canEscape);
+    fields.canLose = !!(BM && BM._canLose);
+    return fields;
+  }
+
+  function battleRewards(BM) {
+    var rw = BM && BM._rewards;
+    if (!rw || typeof rw !== "object") return null;
+    var items = [];
+    var list = rw.items && typeof rw.items.length === "number" ? rw.items : [];
+    for (var i = 0; i < list.length && items.length < BATTLE_ITEMS_MAX; i++) {
+      if (list[i] && typeof list[i].name === "string") items.push(clipName(list[i].name));
+    }
+    return { exp: typeof rw.exp === "number" && isFinite(rw.exp) ? rw.exp : 0, gold: typeof rw.gold === "number" && isFinite(rw.gold) ? rw.gold : 0, items: items };
+  }
+
+  // One line of battle text. Identical consecutive lines within BATTLE_DUP_MS are one line; beyond
+  // BATTLE_LINES_MAX per battle or BATTLE_RATE_MAX per second lines are only counted (end record "dropped").
+  // Buffered like any record (written by the 250 ms tick). With picture capture on, a line carries the
+  // pictures only when they changed (checked at most every BATTLE_PICS_GAP_MS, never while a message waits
+  // for its own snapshot).
+  function battleLine(text) {
+    var b = battleLog;
+    if (!b || run === null) return;
+    var s = text == null ? "" : String(text);
+    if (s === "") return;
+    if (s.length > BATTLE_TEXT_MAX) s = s.slice(0, BATTLE_TEXT_MAX);
+    var t = now();
+    if (s === b.lastText && t - b.lastT < BATTLE_DUP_MS) { b.lastT = t; return; }
+    b.lastText = s;
+    b.lastT = t;
+    if (b.lines >= BATTLE_LINES_MAX) { b.dropped++; return; }
+    while (b.times.length && t - b.times[0] >= BATTLE_RATE_MS) b.times.shift();
+    if (b.times.length >= BATTLE_RATE_MAX) { b.dropped++; return; }
+    b.times.push(t);
+    b.lines++;
+    var fields = { text: s };
+    if (capturePictures && !heldMsg && t - b.picsT >= BATTLE_PICS_GAP_MS) {
+      b.picsT = t;
+      var pf = null;
+      try { pf = picsFields(); } catch (ep) { reportError(ep); }
+      if (pf && pf.pics) fields.pics = pf.pics;
+    }
+    emit("battlelog", fields);
   }
 
   // ---------------------------------------------------------------- plugin commands
@@ -1301,7 +1380,7 @@
             };
             // capturing: the pictures are read once the text starts drawing (Window_Message.updateMessage),
             // after same-frame erases and sprite-level hides have applied
-            emit("message", mrec, capturePictures && !inBattleNow());
+            emit("message", mrec, capturePictures);
           }
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
@@ -1358,6 +1437,14 @@
           }
         } catch (e) { reportError(e); }
         return orig.apply(this, args);
+      };
+    });
+    // Battle-system messages (appeared / victory / exp / gold / drops / level up / escape / defeat) are added
+    // by BattleManager, outside any interpreter command; event Show Text runs inside one (recorded as message).
+    hook(GM, "Game_Message", "add", function (orig) {
+      return function (text) {
+        try { if (battleLog && currentCtx === null && inBattleNow()) battleLine(text); } catch (e) { reportError(e); }
+        return orig.apply(this, arguments);
       };
     });
 
@@ -1444,7 +1531,11 @@
       return function (troopId) {
         var r = orig.apply(this, arguments);
         try { battleStartT = now(); } catch (eb) { reportError(eb); }
-        try { emit("battle", { phase: "start", troopId: troopId }); } catch (e) { reportError(e); }
+        try {
+          battleLog = { lines: 0, dropped: 0, times: [], lastText: null, lastT: -Infinity, picsT: -Infinity };
+          // capturing: the start record waits for the battle scene (Scene_Battle.start) to take its pictures
+          emit("battle", battleStartFields(this, troopId), capturePictures ? BATTLE_HOLD_MS : false);
+        } catch (e) { reportError(e); }
         return r;
       };
     });
@@ -1454,8 +1545,39 @@
           var names = ["win", "escape", "lose"];
           var fields = { phase: "end", troopId: G.$gameTroop ? G.$gameTroop._troopId : 0 };
           if (names[result]) fields.result = names[result];
+          // processAbort (event command "Abort Battle") ends with 1 like a successful escape
+          if (result === 1 && !this._escaped) fields.result = "abort";
+          if (result === 0) {
+            var rw = null;
+            try { rw = battleRewards(this); } catch (er) { reportError(er); }
+            if (rw) fields.rewards = rw;
+          }
+          if (battleLog && battleLog.dropped > 0) fields.dropped = battleLog.dropped;
+          if (capturePictures) {
+            finishHeld(); // a waiting message takes its own snapshot first (the dedupe follows log order)
+            var pf = null;
+            try { pf = picsFields(); } catch (ep) { reportError(ep); }
+            if (pf && pf.pics) fields.pics = pf.pics;
+            else if (pf) fields.picsSame = true;
+          }
           emit("battle", fields);
         } catch (e) { reportError(e); }
+        battleLog = null;
+        return orig.apply(this, arguments);
+      };
+    });
+    var SB = G.Scene_Battle && G.Scene_Battle.prototype;
+    hook(SB, "Scene_Battle", "start", function (orig) {
+      return function () {
+        var r = orig.apply(this, arguments);
+        try { if (heldMsg && heldMsg.rec.type === "battle") { finishHeld(); scheduleFlush(); } } catch (e) { reportError(e); }
+        return r;
+      };
+    });
+    var WB = G.Window_BattleLog && G.Window_BattleLog.prototype;
+    hook(WB, "Window_BattleLog", "addText", function (orig) {
+      return function (text) {
+        try { if (battleLog && inBattleNow()) battleLine(text); } catch (e) { reportError(e); }
         return orig.apply(this, arguments);
       };
     });

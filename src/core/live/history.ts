@@ -203,10 +203,31 @@ function srcKey(src: Location | null | undefined): string | null {
 
 interface Episode { key: string | null; lastCmd: number; records: EpisodeRecord[] }
 
-/** 경로 기록을 화면용 타임라인으로 접는다(반복 대화, 상태 변경 묶음, 잦은 변수 제외, 갈래 지점). */
+/** 전투 묶음을 끊는 기록(전투 끝 기록이 없을 때): 갈래 시작·장소 이동·불러오기·다음 전투 시작 */
+const BATTLE_STOP = new Set(["branchStart", "transfer", "load", "save"]);
+
+/** 같은 전투인지 보는 열쇠(적 무리·결과·전투 로그·대사). 선택이 있거나 끝나지 않은 전투는 null(접지 않는다). */
+function battleSignature(start: RecordOf<"battle">, end: RecordOf<"battle"> | null, inner: LogRecord[]): string | null {
+  if (!end) return null;
+  const parts: string[] = [];
+  for (const r of inner) {
+    if (r.type === "choices" || r.type === "choice") return null;
+    if (r.type === "battlelog" || r.type === "message" || r.type === "scroll") parts.push(`${r.type}:${typeof r.text === "string" ? r.text : ""}`);
+  }
+  return `${num(start.troopId)}|${String(end.result ?? "")}|${JSON.stringify(parts)}`;
+}
+
+/** 경로 기록을 화면용 타임라인으로 접는다(반복 대화, 상태 변경 묶음, 잦은 변수 제외, 갈래 지점, 전투 묶음). */
 /** opts.noisy: 기록 전체 기준 잦은 변수(noisyVariables(전체 기록)). 없으면 경로에서 계산한다. */
 export function foldTimeline(
   path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number> },
+): HistoryItem[] {
+  return fold(path, model, opts, false);
+}
+
+function fold(
+  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number> },
+  nested: boolean,
 ): HistoryItem[] {
   const records = bySeq(Array.isArray(path) ? path : []);
   const uncertain = (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false;
@@ -262,7 +283,51 @@ export function foldTimeline(
     lastEpisode = { key: ep.key, talk: ep.records.some(r => TALK_TYPES.has(r.type)) };
   };
 
-  for (const r of records) {
+  const seenBattles = new Set<string>();
+  const forkAt = (r: LogRecord) => {
+    const children = forkChildren.get(`${r.branch}:${r.seq}`);
+    if (!children) return;
+    flushEpisode();
+    flushGroup();
+    const own = rep(r.branch);
+    const all = [own, ...children];
+    const next = children.find(id => pathBranches.has(id)) ?? own;
+    const rest = [...new Set(all.filter(id => id !== next))].sort((a, b) => a - b);
+    push({ kind: "fork", atSeq: r.seq, branches: [next, ...rest] });
+  };
+
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    if (!nested && r.type === "battle" && r.phase === "start") {
+      // 전투 한 번을 묶는다: 끝 기록까지(없으면 다음 전투·갈래 시작·이동·불러오기 앞까지)
+      let j = i + 1;
+      let end: RecordOf<"battle"> | null = null;
+      while (j < records.length) {
+        const x = records[j];
+        if (x.type === "battle") { if (x.phase === "end") { end = x; j++; } break; }
+        if (BATTLE_STOP.has(x.type)) break;
+        j++;
+      }
+      const inner = records.slice(i + 1, end ? j - 1 : j);
+      flushEpisode();
+      flushGroup();
+      const sub = fold(inner, model, { ...opts, noisy }, true);
+      const logLines = inner.reduce((n, x) => n + (x.type === "battlelog" ? 1 : 0), 0);
+      const signature = inner.some(x => uncertain(x.seq)) ? null : battleSignature(r, end, inner);
+      const last = items[items.length - 1];
+      if (signature !== null && seenBattles.has(signature)) {
+        if (last?.kind === "battle" && last.repeat > 0 && lastRepeatKey === signature) last.repeat++;
+        else { push({ kind: "battle", start: r, end, items: sub, logLines, repeat: 1 }); lastRepeatKey = signature; }
+      } else {
+        push({ kind: "battle", start: r, end, items: sub, logLines, repeat: 0 });
+      }
+      if (signature !== null) seenBattles.add(signature);
+      lastEpisode = null;
+      forkAt(r);
+      if (end) forkAt(end);
+      i = j - 1;
+      continue;
+    }
     if (EPISODE_TYPES.has(r.type)) {
       const er = r as EpisodeRecord;
       flushGroup();
@@ -299,16 +364,7 @@ export function foldTimeline(
       lastEpisode = null;
     }
 
-    const children = forkChildren.get(`${r.branch}:${r.seq}`);
-    if (children) {
-      flushEpisode();
-      flushGroup();
-      const own = rep(r.branch);
-      const all = [own, ...children];
-      const next = children.find(id => pathBranches.has(id)) ?? own;
-      const rest = [...new Set(all.filter(id => id !== next))].sort((a, b) => a - b);
-      push({ kind: "fork", atSeq: r.seq, branches: [next, ...rest] });
-    }
+    forkAt(r);
   }
   flushEpisode();
   flushGroup();

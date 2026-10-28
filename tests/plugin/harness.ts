@@ -124,6 +124,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Party.prototype.aliveMembers = function () { return (this._battlers ?? []).filter((b: any) => b.isAlive()); };
   function Game_Troop(this: any) { this._troopId = 0; this._enemies = []; }
   Game_Troop.prototype.aliveMembers = function () { return this._enemies.filter((b: any) => b.isAlive()); };
+  Game_Troop.prototype.members = function () { return this._enemies; };
   // ---- battlers (death state 1)
   function Game_Battler(this: any) { this._states = []; this._collapsed = false; }
   Game_Battler.prototype.deathStateId = function () { return 1; };
@@ -259,6 +260,10 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Scene_Title(this: any) {}
   function Scene_Map(this: any) {}
   function Scene_Battle(this: any) {}
+  Scene_Battle.prototype.start = function () { this.started = true; };
+  // Window_BattleLog: addText is where every displayed log line ends up (push('addText') calls it later)
+  function Window_BattleLog(this: any) { this._lines = []; }
+  Window_BattleLog.prototype.addText = function (text: string) { this._lines.push(text); };
   // Input: keyMapper like the engine's default (subset); update / isTriggered / isRepeated /
   // isLongPressed follow rpg_core.js (latest button + _pressedTime, repeat wait 24, interval 6).
   const Input = {
@@ -449,7 +454,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
-    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message, Sprite, Sprite_Picture,
+    SceneManager, BattleManager, DataManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture,
     $dataCommonEvents: [null], $dataTroops: [null],
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.

@@ -1,9 +1,12 @@
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { branchLabel, representative } from "@/core/live/history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live/types";
 import { formatText } from "@/core/text/escape";
 import type { GameData, Location } from "@/core/types";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { troopName } from "@/core/live/reader";
+import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { explainRecord, reasonLabel } from "@/core/live/mismatch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -95,6 +98,7 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><PluginRecordLine r={r} data={ctx.data} /></Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;
+    case "battlelog": return <div className="px-2 text-xs leading-snug text-muted-foreground">{formatText(typeof r.text === "string" ? r.text : "", ctx.data)}</div>;
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
     case "load": return <Line ctx={ctx}>💾 불러오기 (슬롯 {r.slot})</Line>;
     case "branchStart":
@@ -140,10 +144,74 @@ function sameItem(a: HistoryItem, b: HistoryItem): boolean {
     case "stateGroup":
       return b.kind === "stateGroup" && a.count === b.count && a.records.length === b.records.length
         && a.records.every((r, i) => sameRecord(r, b.records[i]));
+    case "battle":
+      return b.kind === "battle" && a.start === b.start && a.end === b.end && a.repeat === b.repeat && a.logLines === b.logLines
+        && a.items.length === b.items.length && a.items.every((x, i) => sameItem(x, b.items[i]));
     case "fork":
       return b.kind === "fork" && a.atSeq === b.atSeq && a.branches.length === b.branches.length
         && a.branches.every((id, i) => id === b.branches[i]);
   }
+}
+
+type BattleHistoryItem = Extract<HistoryItem, { kind: "battle" }>;
+
+/** 전투 묶음 안: 대사·상태 변경 등은 늘 보이고, 전투 로그 줄은 `전투 기록 N줄`을 펼쳤을 때만. */
+function BattleTimelineBody({ item, ctx }: { item: BattleHistoryItem; ctx: TimelineCtx }) {
+  const [logOpen, setLogOpen] = useState(false);
+  const shown = logOpen ? item.items : item.items.filter(it => !(it.kind === "record" && it.record.type === "battlelog"));
+  const dropped = typeof item.end?.dropped === "number" ? item.end.dropped : 0;
+  return (
+    <div className="space-y-1">
+      {item.logLines > 0 && (
+        <Button variant="ghost" size="xs" className="text-muted-foreground" aria-expanded={logOpen} onClick={() => setLogOpen(o => !o)}>
+          {logOpen ? "전투 기록 접기" : `전투 기록 ${item.logLines}줄`}
+        </Button>
+      )}
+      {shown.map((it, i) => <TimelineItem key={i} item={it} ctx={ctx} />)}
+      {logOpen && dropped > 0 && <p className="px-2 text-xs text-muted-foreground">줄이 많아 {dropped}줄은 기록하지 않았어요</p>}
+    </div>
+  );
+}
+
+function rewardsText(rw: RecordOf<"battle">["rewards"], data: GameData): string {
+  if (!rw || typeof rw !== "object") return "";
+  const parts: string[] = [];
+  if (typeof rw.exp === "number" && rw.exp > 0) parts.push(`경험치 ${rw.exp}`);
+  if (typeof rw.gold === "number" && rw.gold > 0) parts.push(`골드 ${rw.gold}`);
+  const items = Array.isArray(rw.items) ? rw.items.filter(s => typeof s === "string" && s).map(s => formatText(s, data)) : [];
+  if (items.length > 0) parts.push(`얻은 것: ${items.join(", ")}`);
+  return parts.join(" · ");
+}
+
+/** 전투 한 번(기록 탭): 머리(적 무리·결과·보상) + 안의 기록. 다시 본 같은 전투는 통째로 접는다. */
+function BattleTimeline({ item, ctx }: { item: BattleHistoryItem; ctx: TimelineCtx }) {
+  const result = item.end?.result;
+  const label = result && result in BATTLE_RESULT_LABEL ? BATTLE_RESULT_LABEL[result] : item.end ? "끝남" : "진행 중";
+  const variant = result === "win" ? "default" : result === "lose" ? "destructive" : "secondary";
+  const rewards = rewardsText(item.end?.rewards, ctx.data);
+  return (
+    <Card size="sm" className="my-1">
+      <CardHeader>
+        <CardTitle>⚔ 전투: {troopName(item.start, ctx.data)}</CardTitle>
+        {(item.repeat > 0 || rewards) && (
+          <CardDescription>{item.repeat > 0 ? `↻ 같은 전투 다시 봄 ×${item.repeat}` : rewards}</CardDescription>
+        )}
+        <CardAction><Badge variant={variant}>{label}</Badge></CardAction>
+      </CardHeader>
+      {item.items.length > 0 && (
+        <CardContent>
+          {item.repeat > 0 ? (
+            <Collapsible>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="xs" className="text-muted-foreground">펼쳐 보기</Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent><BattleTimelineBody item={item} ctx={ctx} /></CollapsibleContent>
+            </Collapsible>
+          ) : <BattleTimelineBody item={item} ctx={ctx} />}
+        </CardContent>
+      )}
+    </Card>
+  );
 }
 
 type TimelineItemProps = { item: HistoryItem; ctx: TimelineCtx };
@@ -174,6 +242,7 @@ export const TimelineItem = memo(function TimelineItem({ item, ctx }: TimelineIt
           </CollapsibleContent>
         </Collapsible>
       );
+    case "battle": return <BattleTimeline item={item} ctx={ctx} />;
     case "fork":
       return (
         <div className="flex flex-wrap items-center gap-2 px-2 py-1 text-sm">

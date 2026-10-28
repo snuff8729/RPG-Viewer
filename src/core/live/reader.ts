@@ -20,7 +20,22 @@ export type ReaderItem =
    */
   | { kind: "plugin"; key: string; seq: number; text: string; raw: string; name: string; tech: boolean }
   | { kind: "choice"; key: string; seq: number; label: string }
-  | { kind: "battle"; key: string; seq: number };
+  /**
+   * 전투 한 번(foldTimeline의 battle 묶음). key = 시작 기록(r{시작 seq}), seq = 묶음의 마지막 읽기 기록 seq.
+   * troop = 적 무리 이름, result = 결과(null = 진행 중·모름), items = 안의 대사·그림·선택·플러그인·전투 로그(battlelog),
+   * logLines = 전투 로그 줄 수, dropped = 플러그인이 줄 수 제한으로 안 남긴 줄 수, rewards = 승리 보상 글(없으면 null),
+   * repeat = 같은 전투를 다시 본 횟수(0 = 처음), screen·endScreen = 시작·끝에 새로 보일 화면 그림.
+   */
+  | {
+    kind: "battle"; key: string; seq: number; troop: string; result: BattleResult | null; ended: boolean;
+    items: ReaderItem[]; logLines: number; dropped: number; rewards: string | null; repeat: number;
+    screen?: ScreenShot; endScreen?: ScreenShot;
+  }
+  /** 전투 로그 한 줄(제어 문자 처리). screen: 이 줄에서 새로 보일 화면 그림 */
+  | { kind: "battlelog"; key: string; seq: number; text: string; screen?: ScreenShot };
+
+export type BattleResult = "win" | "lose" | "escape" | "abort";
+const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
 
 const safe = (s: unknown): string => typeof s === "string" ? s : "";
 const lines = (text: unknown, data: GameData): string[] => formatText(safe(text), data).split("\n");
@@ -97,9 +112,46 @@ function fromRecord(
       // 이어진 갈래(저장 → 종료 → 이어하기)의 시작은 새 갈래 시작이 아니다
       if (isContinuation(model, r.branch)) return null;
       return { kind: "chapter", key: `c${r.seq}`, text: `— ${branchLabel(model, r.branch)} 시작 —` };
-    case "battle": return r.phase === "start" ? { kind: "battle", key: `r${r.seq}`, seq: r.seq } : null;
+    case "battle": return r.phase === "start" ? battleItem(r, null, [], 0, 0, data) : null;
+    case "battlelog": return { kind: "battlelog", key: `r${r.seq}`, seq: r.seq, text: formatText(safe(r.text), data) };
     default: return null;
   }
+}
+
+/** 적 무리 이름: 기록의 이름 → 데이터의 이름 → `#번호` */
+export function troopName(r: RecordOf<"battle">, data: GameData): string {
+  const named = safe(r.troopName);
+  if (named) return named;
+  const id = typeof r.troopId === "number" ? r.troopId : 0;
+  return data?.troops?.[id]?.name || `#${id}`;
+}
+
+function rewardsText(end: RecordOf<"battle"> | null, data: GameData): string | null {
+  const rw = end?.rewards;
+  if (!rw || typeof rw !== "object") return null;
+  const parts: string[] = [];
+  if (typeof rw.exp === "number" && rw.exp > 0) parts.push(`경험치 ${rw.exp}`);
+  if (typeof rw.gold === "number" && rw.gold > 0) parts.push(`골드 ${rw.gold}`);
+  const items = Array.isArray(rw.items) ? rw.items.filter(s => typeof s === "string" && s).map(s => formatText(s, data)) : [];
+  if (items.length > 0) parts.push(`얻은 것: ${items.join(", ")}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function battleItem(
+  start: RecordOf<"battle">, end: RecordOf<"battle"> | null, items: ReaderItem[], logLines: number, repeat: number, data: GameData,
+): Extract<ReaderItem, { kind: "battle" }> {
+  let seq = start.seq;
+  if (end && end.seq > seq) seq = end.seq;
+  for (const it of items) {
+    const s = lastSeqOf(it);
+    if (s !== null && s > seq) seq = s;
+  }
+  const result = end && typeof end.result === "string" && BATTLE_RESULTS.has(end.result) ? end.result as BattleResult : null;
+  return {
+    kind: "battle", key: `r${start.seq}`, seq, troop: troopName(start, data), result, ended: end !== null,
+    items, logLines, dropped: typeof end?.dropped === "number" && end.dropped > 0 ? end.dropped : 0,
+    rewards: rewardsText(end, data), repeat,
+  };
 }
 
 /**
@@ -110,37 +162,68 @@ function fromRecord(
  */
 export function readerItems(
   items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
-  scenes: Map<number, ScreenScene> | null = null,
+  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean } = {},
 ): ReaderItem[] {
-  const out: ReaderItem[] = [];
   /** 바로 앞에 이어진 플러그인 기록들(글자 그림 설명용) */
   let plugins: RecordOf<"plugin">[] = [];
   /** 마지막으로 보인 그림의 열쇠(nextShot). "" = 아무것도 없음, null = 모름 */
   let shown: string | null = null;
-  const withScreen = (item: ReaderItem | null): ReaderItem | null => {
-    if (!scenes || !item || item.kind !== "message") return item;
-    const { shot, key } = nextShot(shown, scenes.get(item.seq));
-    if (shot) item.screen = shot;
+  /** seq의 화면에서 새로 보일 그림. always가 아니면(전투 로그·전투 시작·끝) 그 seq에 화면이 있을 때만 본다. */
+  const shotAt = (seq: number, always: boolean): ScreenShot | null => {
+    if (!scenes || (!always && !scenes.has(seq))) return null;
+    const { shot, key } = nextShot(shown, scenes.get(seq));
     shown = key;
-    return item;
+    return shot;
   };
-  for (const it of Array.isArray(items) ? items : []) {
-    try {
-      if (!it) continue;
-      if (it.kind === "record") {
-        const rec = it.record;
-        const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);
-        plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
-        // 화면 그림을 기록하는 중이면 그림 표시(231)는 다음 대사의 화면이 실제 모습으로 보여 주므로 따로 넣지 않는다(글자 띄우기는 남긴다)
-        if (r?.kind === "picture" && r.name && shown !== null) continue;
-        if (r) out.push(withScreen(r)!);
-      } else if (it.kind === "repeat") {
-        plugins = [];
-        // 접힌 반복 대화는 화면 그림을 붙이지 않는다(접혀 있어 안 보이므로 다음 대사가 보인다)
-        out.push(messageItem(it.record, data, it.count));
-      }
-    } catch { /* 깨진 항목은 건너뛴다 */ }
-  }
+  const battles = opts?.battles !== false;
+  const convert = (list: HistoryItem[], out: ReaderItem[]) => {
+    for (const it of Array.isArray(list) ? list : []) {
+      try {
+        if (!it) continue;
+        if (it.kind === "record") {
+          const rec = it.record;
+          const r = rec?.type === "picture" ? pictureItem(rec, plugins) : fromRecord(rec, data, choiceText, model, overrides);
+          plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
+          // 화면 그림을 기록하는 중이면 그림 표시(231)는 다음 대사의 화면이 실제 모습으로 보여 주므로 따로 넣지 않는다(글자 띄우기는 남긴다)
+          if (r?.kind === "picture" && r.name && shown !== null) continue;
+          if (!r) continue;
+          if (r.kind === "battle" && !battles) continue;
+          if (r.kind === "message" || r.kind === "battlelog") {
+            const shot = shotAt(r.seq, r.kind === "message");
+            if (shot) r.screen = shot;
+          }
+          out.push(r);
+        } else if (it.kind === "repeat") {
+          plugins = [];
+          // 접힌 반복 대화는 화면 그림을 붙이지 않는다(접혀 있어 안 보이므로 다음 대사가 보인다)
+          out.push(messageItem(it.record, data, it.count));
+        } else if (it.kind === "battle") {
+          plugins = [];
+          // `전투 기록 보기`를 끄면 전투는 통째로 빠진다(그 안의 그림도 앞뒤 대사의 그림 비교에 넣지 않는다)
+          if (!battles || !it.start) continue;
+          const screen = it.repeat > 0 ? null : shotAt(it.start.seq, false);
+          const inner: ReaderItem[] = [];
+          // 다시 본 같은 전투는 접혀 있어 그림을 붙이지 않는다
+          if (it.repeat > 0) {
+            const saved = shown;
+            convert(it.items, inner);
+            shown = saved;
+            for (const x of inner) if ((x.kind === "message" || x.kind === "battlelog") && x.screen) delete x.screen;
+          } else {
+            convert(it.items, inner);
+          }
+          const endScreen = it.repeat > 0 || !it.end ? null : shotAt(it.end.seq, false);
+          const b = battleItem(it.start, it.end ?? null, inner, typeof it.logLines === "number" ? it.logLines : 0, typeof it.repeat === "number" ? it.repeat : 0, data);
+          if (screen) b.screen = screen;
+          if (endScreen) b.endScreen = endScreen;
+          out.push(b);
+          plugins = [];
+        }
+      } catch { /* 깨진 항목은 건너뛴다 */ }
+    }
+  };
+  const out: ReaderItem[] = [];
+  convert(items, out);
   return out;
 }
 
