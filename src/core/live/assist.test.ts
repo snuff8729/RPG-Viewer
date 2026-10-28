@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import {
-  adoptLiveAssist, commandStatus, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys,
-  normalizeAssist, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
+  adoptLiveAssist, commandStatus, commandStatusText, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys,
+  isHpCommand, normalizeAssist, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
 import type { Coverage, PickInfo } from "./types";
@@ -16,6 +16,8 @@ const cov = (seen: string[], picks: [string, number[]][] = []): Coverage => ({
   uncertainSeqs: new Set(), changedSeqs: new Set(), touched: new Set(), pluginRan: new Set(),
 });
 const idx = (pages: PageEntry[]) => ({ pages }) as unknown as GameIndex;
+/** 체력 단축키(기본 끔) */
+const HP = { hpFull: null, hpLow: null };
 
 const M: Location = { source: "map", mapId: 3, eventId: 5, page: 0 };
 const C: Location = { source: "common", commonEventId: 7 };
@@ -73,13 +75,19 @@ describe("controlJson", () => {
     const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win", at: 100 }, 123));
     expect(j).toEqual({
       v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
-      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
+      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP },
       seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win", at: 100 },
     });
   });
   it("sanitizes bad settings/commands", () => {
     const j = JSON.parse(controlJson({ speed: 3, autoSpeed: 1 } as never, null as never, { id: "x", kind: "boom" } as never, NaN));
     expect(j).toMatchObject({ t: 0, speed: 1, autoSpeed: 8, seenMessages: [], command: null });
+  });
+  it("writes the party HP commands", () => {
+    for (const kind of ["hpFull", "hpLow"] as const) {
+      const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: [], seenPages: [] }, { id: "h-1", kind, at: 5 }, 1));
+      expect(j.command).toEqual({ id: "h-1", kind, at: 5 });
+    }
   });
 });
 
@@ -88,7 +96,7 @@ describe("normalizeAssist / versionAtLeast", () => {
     expect(normalizeAssist(null)).toEqual(DEFAULT_ASSIST);
     expect(normalizeAssist({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2 }))
       .toEqual({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS });
-    const hk = { speed: 65, skip: null, win: 121, lose: 122 };
+    const hk = { speed: 65, skip: null, win: 121, lose: 122, hpFull: 72, hpLow: 76 };
     expect(normalizeAssist({ ...DEFAULT_ASSIST, hotkeys: hk }).hotkeys).toEqual(hk);
     expect(normalizeAssist({ speed: "4", autoSpeed: 16 })).toEqual(DEFAULT_ASSIST);
   });
@@ -133,25 +141,35 @@ describe("hotkeys", () => {
   it("normalizeHotkeys: old settings get defaults, bad/duplicate keys fall back", () => {
     expect(normalizeHotkeys(undefined)).toEqual(DEFAULT_HOTKEYS);
     expect(normalizeHotkeys({ speed: 116, skip: "x" })).toEqual(DEFAULT_HOTKEYS);
-    expect(normalizeHotkeys({ speed: null, skip: 65, win: 66, lose: 67 })).toEqual({ speed: null, skip: 65, win: 66, lose: 67 });
+    expect(normalizeHotkeys({ speed: null, skip: 65, win: 66, lose: 67 })).toEqual({ speed: null, skip: 65, win: 66, lose: 67, ...HP });
     // skip이 speed와 겹치면 기본값 F7
-    expect(normalizeHotkeys({ speed: 65, skip: 65 })).toEqual({ speed: 65, skip: 118, win: 121, lose: 122 });
+    expect(normalizeHotkeys({ speed: 65, skip: 65 })).toEqual({ speed: 65, skip: 118, win: 121, lose: 122, ...HP });
     // 기본값도 이미 쓰이면 끔
-    expect(normalizeHotkeys({ speed: 118, skip: 118 })).toEqual({ speed: 118, skip: null, win: 121, lose: 122 });
+    expect(normalizeHotkeys({ speed: 118, skip: 118 })).toEqual({ speed: 118, skip: null, win: 121, lose: 122, ...HP });
+    // 체력 키: 기본은 끔, 겹치면 끔(기본값이 없다)
+    expect(normalizeHotkeys({ hpFull: 72, hpLow: 76 })).toEqual({ ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: 76 });
+    expect(normalizeHotkeys({ hpFull: 72, hpLow: 72 })).toEqual({ ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null });
+    expect(normalizeHotkeys({ hpFull: 117 })).toEqual(DEFAULT_HOTKEYS);
+    expect(normalizeHotkeys({ hpFull: 116, hpLow: "x" })).toEqual(DEFAULT_HOTKEYS);
+    expect(DEFAULT_HOTKEYS).toMatchObject(HP);
+    expect(validateHotkey(121, "hpFull", DEFAULT_HOTKEYS)).toBe("F10은(는) 이미 '전투 이기기'에 쓰고 있어요");
+    expect(validateHotkey(72, "speed", { ...DEFAULT_HOTKEYS, hpLow: 72 })).toBe("H은(는) 이미 '내 체력 1%'에 쓰고 있어요");
     expect(normalizeAssist({ speed: 2 }).hotkeys).toEqual(DEFAULT_HOTKEYS);
   });
   it("liveHotkeys reads the echo; missing echo = fixed defaults", () => {
     expect(liveHotkeys(undefined)).toEqual(DEFAULT_HOTKEYS);
     expect(liveHotkeys({ speed: 1 })).toEqual(DEFAULT_HOTKEYS);
-    expect(liveHotkeys({ hotkeys: { speed: 65, skip: null, win: "x" } })).toEqual({ speed: 65, skip: null, win: 121, lose: 122 });
+    expect(liveHotkeys({ hotkeys: { speed: 65, skip: null, win: "x" } })).toEqual({ speed: 65, skip: null, win: 121, lose: 122, ...HP });
+    expect(liveHotkeys({ hotkeys: { ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null } })).toEqual({ ...DEFAULT_HOTKEYS, hpFull: 72 });
   });
   it("hotkeySummary lists bound keys only", () => {
     expect(hotkeySummary(DEFAULT_HOTKEYS)).toBe("게임 창 단축키: F6 배속, F7 본 대사 넘기기, F10 전투 중 이기기, F11 전투 중 지기");
-    expect(hotkeySummary({ speed: 65, skip: null, win: null, lose: null })).toBe("게임 창 단축키: A 배속");
-    expect(hotkeySummary({ speed: null, skip: null, win: null, lose: null })).toBe("게임 창 단축키를 모두 껐어요");
+    expect(hotkeySummary({ speed: 65, skip: null, win: null, lose: null, ...HP })).toBe("게임 창 단축키: A 배속");
+    expect(hotkeySummary({ ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: 76 })).toMatch(/F11 전투 중 지기, H 체력 100%, L 체력 1%$/);
+    expect(hotkeySummary({ speed: null, skip: null, win: null, lose: null, ...HP })).toBe("게임 창 단축키를 모두 껐어요");
   });
   it("controlJson writes custom hotkeys", () => {
-    const hotkeys = { speed: 65, skip: null, win: 121, lose: 122 };
+    const hotkeys = { speed: 65, skip: null, win: 121, lose: 122, hpFull: 72, hpLow: null };
     expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual(hotkeys);
   });
 });
@@ -203,5 +221,14 @@ describe("game sync", () => {
     expect(commandStatus(sent, "c-1", true)).toBe("applied");
     expect(commandStatus(sent, "c-1:ignored", false)).toBe("ignored");
     expect(commandStatus(sent, "c-1:failed", false)).toBe("failed");
+  });
+  it("commandStatusText: HP commands are ignored only without a party", () => {
+    expect(isHpCommand("hpFull")).toBe(true);
+    expect(isHpCommand("hpLow")).toBe(true);
+    expect(isHpCommand("win")).toBe(false);
+    expect(commandStatusText("ignored", "hpFull")).toBe("게임에서 무시했어요 (파티가 없어요)");
+    expect(commandStatusText("ignored", "win")).toMatch(/전투 중이 아니거나/);
+    expect(commandStatusText("applied", "hpLow")).toBe("적용됐어요");
+    expect(commandStatusText("failed", "hpFull")).toBe("실행하지 못했어요");
   });
 });

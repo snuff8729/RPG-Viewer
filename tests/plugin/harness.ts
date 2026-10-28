@@ -128,11 +128,16 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   }
   Game_Party.prototype.inBattle = function () { return this._inBattle; };
   Game_Party.prototype.aliveMembers = function () { return (this._battlers ?? []).filter((b: any) => b.isAlive()); };
+  Game_Party.prototype.members = function () { return this._battlers ?? []; };
   function Game_Troop(this: any) { this._troopId = 0; this._enemies = []; }
   Game_Troop.prototype.aliveMembers = function () { return this._enemies.filter((b: any) => b.isAlive()); };
   Game_Troop.prototype.members = function () { return this._enemies; };
   // ---- battlers (death state 1)
-  function Game_Battler(this: any) { this._states = []; this._collapsed = false; }
+  function Game_Battler(this: any) { this._states = []; this._collapsed = false; this._hp = 100; this._mhp = 100; }
+  Object.defineProperty(Game_Battler.prototype, "mhp", { get() { return this._mhp; } });
+  Object.defineProperty(Game_Battler.prototype, "hp", { get() { return this._hp; } });
+  Game_Battler.prototype.setHp = function (hp: number) { this._hp = hp; this.refresh(); };
+  Game_Battler.prototype.removeState = function (id: number) { this._states = this._states.filter((s: number) => s !== id); };
   Game_Battler.prototype.deathStateId = function () { return 1; };
   Game_Battler.prototype.addNewState = function (id: number) { this._states.push(id); };
   Game_Battler.prototype.refresh = function () {};
@@ -457,6 +462,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       return ok;
     },
     processAbort() { this.calls.push("abort"); this.endBattle(1); },
+    refreshStatus() { this.calls.push("refreshStatus"); },
   };
   const DataManager = {
     createGameObjects() {

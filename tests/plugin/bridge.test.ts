@@ -984,7 +984,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.10.1", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.12.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -993,7 +993,7 @@ describe("RPGViewerBridge", () => {
       assist: {
         speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
         lastCommand: null, controlT: null, capturePictures: false, captureNotices: false, notices: [],
-        hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
+        hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null },
       },
     });
   });
@@ -1460,10 +1460,10 @@ describe("RPGViewerBridge", () => {
       h = newGame();
       const km2: Record<number, string> = { 13: "ok", 117: "otherPlugin" };
       h.g.Input.keyMapper = km2;
-      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null });
       poll(h);
       expect(km2).toEqual({ 13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose" });
-      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122 });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null });
     });
 
     it("never auto-advances a message added without a text 101 (stale seen key is dropped)", () => {
@@ -1590,7 +1590,7 @@ describe("RPGViewerBridge", () => {
       expect(km[121]).toBe("rpgvWin");
       expect(km[66]).toBe("otherPlugin"); // never overwritten
       expect(km[13]).toBe("ok");
-      expect(assistOf(h).hotkeys).toEqual({ speed: 65, skip: null, win: 121, lose: null });
+      expect(assistOf(h).hotkeys).toEqual({ speed: 65, skip: null, win: 121, lose: null, hpFull: null, hpLow: null });
       onMap(h);
       h.g.Input.press(117);
       h.bridge._frame();
@@ -1599,7 +1599,126 @@ describe("RPGViewerBridge", () => {
       poll(h);
       expect(km[65]).toBeUndefined();
       expect([km[117], km[118], km[121], km[122]]).toEqual(["rpgvSpeed", "rpgvSkip", "rpgvWin", "rpgvLose"]);
-      expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122 });
+      expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null });
+    });
+
+    describe("party HP commands (1.12.0)", () => {
+      // three actors: 100/100, 50/250 and one dead (hp 0)
+      const party = (hh: Harness) => {
+        const a = battler(hh), b = battler(hh), dead = battler(hh);
+        b._mhp = 250; b._hp = 50;
+        dead._hp = 0; dead.addNewState(1);
+        hh.g.$gameParty._battlers = [a, b, dead];
+        return [a, b, dead];
+      };
+      const hpOf = (ms: any[]) => ms.map((m) => [m.hp, m.isAlive()]);
+
+      it("hpFull on the map revives the dead and fills every member's HP", () => {
+        h = newGame();
+        onMap(h);
+        const ms = party(h);
+        writeControl(h, { command: { id: "h-1", kind: "hpFull" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(hpOf(ms)).toEqual([[100, true], [250, true], [100, true]]);
+        expect(assistOf(h).lastCommand).toBe("h-1");
+        expect(h.g.BattleManager.calls).toEqual([]); // no battle refresh on the map
+      });
+
+      it("hpLow sets alive members to 1% (at least 1) and leaves the dead dead", () => {
+        h = newGame();
+        onMap(h);
+        const ms = party(h);
+        ms[0]._mhp = 50; // 1% of 50 floors to 0 -> 1
+        writeControl(h, { command: { id: "h-2", kind: "hpLow" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(hpOf(ms)).toEqual([[1, true], [2, true], [0, false]]);
+        expect(assistOf(h).lastCommand).toBe("h-2");
+      });
+
+      it("works in battle (even while a message is open) and refreshes the status window", () => {
+        h = newGame();
+        startBattle(h);
+        const ms = party(h);
+        h.g.$gameMessage._busy = true;
+        writeControl(h, { command: { id: "h-3", kind: "hpLow" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(hpOf(ms)).toEqual([[1, true], [2, true], [0, false]]);
+        expect(h.g.BattleManager.calls).toEqual(["refreshStatus"]);
+        writeControl(h, { command: { id: "h-4", kind: "hpFull" } });
+        poll(h);
+        h.bridge._frame();
+        expect(hpOf(ms)).toEqual([[100, true], [250, true], [100, true]]);
+        expect(h.g.BattleManager.calls).toEqual(["refreshStatus", "refreshStatus"]);
+        expect(assistOf(h).lastCommand).toBe("h-4");
+        expect(h.g.$gameParty.inBattle()).toBe(true); // the battle goes on
+      });
+
+      it("a command issued before the battle started still applies (not tied to a battle)", () => {
+        h = newGame();
+        onMap(h);
+        const issued = h.clock.t;
+        h.clock.t += 2000;
+        startBattle(h);
+        const ms = party(h);
+        writeControl(h, { command: { id: "h-5", kind: "hpFull", at: issued } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(ms[2].isAlive()).toBe(true);
+        expect(assistOf(h).lastCommand).toBe("h-5");
+      });
+
+      it("ignored without a party or when stale; failed when an actor throws; never throws", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { command: { id: "h-6", kind: "hpFull" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(assistOf(h).lastCommand).toBe("h-6:ignored");
+        const ms = party(h);
+        writeControl(h, { command: { id: "h-7", kind: "hpFull", at: h.clock.t - 11_000 } });
+        poll(h);
+        h.bridge._frame();
+        expect(assistOf(h).lastCommand).toBe("h-7:ignored");
+        expect(ms[2].isAlive()).toBe(false);
+        ms[1].setHp = () => { throw new Error("broken"); };
+        writeControl(h, { command: { id: "h-8", kind: "hpLow" } });
+        poll(h);
+        expect(() => h.bridge._frame()).not.toThrow();
+        expect(assistOf(h).lastCommand).toBe("h-8:failed");
+        h.g.$gameParty._battlers = [];
+        writeControl(h, { command: { id: "h-9", kind: "hpLow" } });
+        poll(h);
+        expect(() => h.bridge._frame()).not.toThrow();
+        expect(assistOf(h).lastCommand).toBe("h-9:ignored");
+      });
+
+      it("HP hotkeys are off by default; configured keys work on the map and in battle", () => {
+        h = newGame();
+        const km = h.g.Input.keyMapper;
+        expect(Object.values(km)).not.toContain("rpgvHpFull");
+        onMap(h);
+        const ms = party(h);
+        writeControl(h, { hotkeys: { hpFull: 72, hpLow: 76 } });
+        h.bridge._tick();
+        expect([km[72], km[76]]).toEqual(["rpgvHpFull", "rpgvHpLow"]);
+        expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: 72, hpLow: 76 });
+        const press = (code: number) => { h.g.Input.press(code); h.bridge._frame(); h.g.Input.update(); };
+        press(76);
+        expect(hpOf(ms)).toEqual([[1, true], [2, true], [0, false]]);
+        expect(assistOf(h).lastCommand).toBe("key-hpLow-" + h.clock.t);
+        startBattle(h);
+        h.g.$gameParty._battlers = ms;
+        press(72);
+        expect(hpOf(ms)).toEqual([[100, true], [250, true], [100, true]]);
+        expect(h.g.BattleManager.calls).toEqual(["refreshStatus"]);
+        writeControl(h, { hotkeys: { hpFull: 72, hpLow: 72 } }); // duplicate -> second one off
+        poll(h);
+        expect(assistOf(h).hotkeys).toMatchObject({ hpFull: 72, hpLow: null });
+        expect(km[76]).toBeUndefined();
+      });
     });
 
     it("never throws into the game when assist hooks fail", () => {
@@ -1617,13 +1736,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.10\.1"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.12\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.10.1");
+    expect(h.bridge.VERSION).toBe("1.12.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
