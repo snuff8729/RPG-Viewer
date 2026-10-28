@@ -143,6 +143,51 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Battler.prototype.refresh = function () {};
   Game_Battler.prototype.isAlive = function () { return !this._states.includes(1); };
   Game_Battler.prototype.performCollapse = function () { this._collapsed = true; };
+  // ---- party items / gold (1.14.0 cheats; max 99 per item, like the engine)
+  Game_Party.prototype.itemContainer = function (item: any) {
+    if (g.$dataItems.includes(item)) return this._items;
+    if (g.$dataWeapons.includes(item)) return this._weapons;
+    if (g.$dataArmors.includes(item)) return this._armors;
+    return null;
+  };
+  Game_Party.prototype.numItems = function (item: any) { const c = this.itemContainer(item); return c ? c[item.id] || 0 : 0; };
+  Game_Party.prototype.gainItem = function (item: any, amount: number, includeEquip: boolean) {
+    const c = this.itemContainer(item);
+    if (!c) return;
+    this.lastIncludeEquip = includeEquip;
+    const n = Math.min(99, Math.max(0, this.numItems(item) + amount));
+    if (n > 0) c[item.id] = n; else delete c[item.id];
+  };
+  Game_Party.prototype.gold = function () { return this._gold; };
+  Game_Party.prototype.gainGold = function (n: number) { this._gold = Math.min(99999999, Math.max(0, this._gold + n)); };
+  // ---- actors (level n = exp n * 100, params 10 * (id + 1) plus _paramPlus, max level 99)
+  function Game_Actor(this: any, actorId: number) {
+    Game_Battler.call(this);
+    this._actorId = actorId; this._level = 1; this._exp = 100; this._paramPlus = [0, 0, 0, 0, 0, 0, 0, 0]; this._skills = []; this._mp = 10;
+  }
+  Game_Actor.prototype = Object.create(Game_Battler.prototype);
+  Game_Actor.prototype.constructor = Game_Actor;
+  Object.defineProperty(Game_Actor.prototype, "level", { get() { return this._level; } });
+  Object.defineProperty(Game_Actor.prototype, "mp", { get() { return this._mp; } });
+  Game_Actor.prototype.name = function () { return g.$dataActors[this._actorId].name; };
+  Game_Actor.prototype.maxLevel = function () { return 99; };
+  Game_Actor.prototype.currentExp = function () { return this._exp; };
+  Game_Actor.prototype.changeExp = function (exp: number, show: boolean) {
+    this.lastShow = show; this._exp = Math.max(exp, 0); this._level = Math.min(99, Math.max(1, Math.floor(this._exp / 100)));
+  };
+  Game_Actor.prototype.changeLevel = function (level: number, show: boolean) { this.changeExp(Math.min(99, Math.max(1, level)) * 100, show); };
+  Game_Actor.prototype.param = function (id: number) { return 10 * (id + 1) + this._paramPlus[id]; };
+  Game_Actor.prototype.addParam = function (id: number, v: number) { this._paramPlus[id] += v; };
+  Game_Actor.prototype.recoverAll = function () { this._states = []; this._hp = this._mhp; this._mp = 10; };
+  Game_Actor.prototype.learnSkill = function (id: number) { if (!this._skills.includes(id)) this._skills.push(id); };
+  Game_Actor.prototype.forgetSkill = function (id: number) { this._skills = this._skills.filter((s: number) => s !== id); };
+  Game_Actor.prototype.addState = function (id: number) { if (!this._states.includes(id)) this._states.push(id); };
+  function Game_Actors(this: any) { this._data = []; }
+  Game_Actors.prototype.actor = function (id: number) {
+    if (!g.$dataActors[id]) return null;
+    if (!this._data[id]) this._data[id] = new (Game_Actor as any)(id);
+    return this._data[id];
+  };
   Game_Troop.prototype.troop = function () { return g.$dataTroops[this._troopId]; };
   function Game_Player(this: any) { this.x = 0; this.y = 0; this._transferring = false; this._newMapId = 0; this._newX = 0; this._newY = 0; }
   Game_Player.prototype.isTransferring = function () { return this._transferring; };
@@ -165,6 +210,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Map.prototype.mapId = function () { return this._mapId; };
   Game_Map.prototype.event = function (id: number) { return this._events[id]; };
   Game_Map.prototype.events = function () { return this._events.filter((e: any) => !!e); };
+  Game_Map.prototype.requestRefresh = function () { this.refreshes = (this.refreshes ?? 0) + 1; };
 
   // ---- Game_Screen / Game_Picture (fields as in rpg_objects.js / rmmz_objects.js; battle pictures use the upper half)
   function Game_Picture(this: any) {
@@ -478,6 +524,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       g.$gameMap = new (Game_Map as any)();
       g.$gamePlayer = new (Game_Player as any)();
       g.$gameScreen = new (Game_Screen as any)();
+      g.$gameActors = new (Game_Actors as any)();
     },
     setupNewGame() { this.createGameObjects(); g.$gamePlayer.reserveTransfer(1, 3, 4); },
     makeSaveContents(): any {
@@ -510,9 +557,11 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
-    Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
+    Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Game_Actor, Game_Actors, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
     SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture,
     $dataCommonEvents: [null], $dataTroops: [null],
+    $dataActors: [null], $dataItems: [null], $dataWeapons: [null], $dataArmors: [null], $dataSkills: [null], $dataStates: [null],
+    $dataSystem: null,
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
   DataManager.createGameObjects();

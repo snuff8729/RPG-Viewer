@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Gauge, Heart, HeartCrack } from "lucide-react";
+import { Gauge, Heart, HeartCrack, WandSparkles } from "lucide-react";
+import { openCheatSheet } from "./cheat/CheatSheet";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
   AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HP_COMMAND_MIN_VERSION, hotkeySummary,
@@ -36,6 +37,7 @@ export function AssistPanel() {
   const canEscape = live?.assist?.canEscape !== false;
   const canLose = live?.assist?.canLose !== false;
   const [confirmLose, setConfirmLose] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   // 보낸 명령의 응답: COMMAND_RESPONSE_MS 안에 live.json에 메아리가 없으면 응답 없음.
   const [timedOutId, setTimedOutId] = useState<string | null>(null);
@@ -89,7 +91,7 @@ export function AssistPanel() {
   };
 
   return (
-    <Popover onOpenChange={(open) => { if (!open) { setCapturing(null); setHotkeyError(null); } }}>
+    <Popover open={panelOpen} onOpenChange={(open) => { setPanelOpen(open); if (!open) { setCapturing(null); setHotkeyError(null); } }}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm"><Gauge />게임 보조</Button>
       </PopoverTrigger>
@@ -174,6 +176,11 @@ export function AssistPanel() {
           {supported && !hpSupported && <p className="text-xs text-muted-foreground">플러그인을 1.12.0으로 업데이트하면 쓸 수 있어요</p>}
           {hpSupported && <p className="text-xs text-muted-foreground">파티 전원에게 적용돼요. 100%는 쓰러진 동료도 살려요</p>}
           {statusText !== null && hpSent && <p className="text-xs text-muted-foreground">{statusText}</p>}
+        </div>
+        <Separator />
+        <div className="flex items-center justify-between gap-2">
+          <Label>아이템·능력치·스위치</Label>
+          <Button variant="outline" size="sm" onClick={() => { setPanelOpen(false); openCheatSheet(); }}><WandSparkles />치트 열기</Button>
         </div>
         <Separator />
         <div className="flex flex-col gap-2">

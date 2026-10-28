@@ -339,3 +339,38 @@ export function howTo(req: Req, data: GameData, live: LiveSnapshot, opts?: { fro
     return { steps: [], end: { kind: "opaque", reason: "noWriter" } };
   }
 }
+
+/** 지금 상태(live)에서 쓰는 곳·문맥을 판정하는 도구(howTo와 같은 규칙). 문맥 판정은 기억한다. */
+export interface Availability {
+  /** 쓰는 곳을 지금 할 수 있는가(문맥 + 분기 요구) */
+  writer(w: Writer): boolean;
+  /** 문맥이 지금 실행될 수 있는가(호출식 공통 이벤트는 부르는 곳 중 하나라도) */
+  ctx(id: CtxId): boolean;
+  /** 쓰는 곳의 아직 안 된 요구들 */
+  unmet(w: Writer): Req[];
+  /** 디버그·테스트용으로 보이는 문맥인가 */
+  debug(id: CtxId): boolean;
+  /** 요구가 지금 성립하는가 */
+  met(req: Req): boolean;
+}
+
+/** howTo와 같은 규칙으로 지금 할 수 있는지 판정하는 도구를 만든다. 예외를 던지지 않는다. */
+export function availability(data: GameData, live: LiveSnapshot): Availability {
+  const c: Ctx = { g: buildDepGraph(data), data, live, ctxAvail: new Map() };
+  const dbg = new Map<CtxId, boolean>();
+  return {
+    writer: (w) => { try { return writerAvailable(c, w); } catch { return false; } },
+    ctx: (id) => { try { return ctxAvailable(c, id, 0, new Set()); } catch { return false; } },
+    unmet: (w) => { try { return unmetReqsOf(c, w); } catch { return []; } },
+    debug: (id) => {
+      const hit = dbg.get(id);
+      if (hit !== undefined) return hit;
+      const info = c.g.ctxs.get(id);
+      let v = false;
+      try { v = !!info && isDebugCtx(data, info); } catch { v = false; }
+      dbg.set(id, v);
+      return v;
+    },
+    met: (r) => { try { return reqMet(r, live); } catch { return false; } },
+  };
+}

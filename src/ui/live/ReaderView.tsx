@@ -9,7 +9,7 @@ import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { hasLayeredPictures } from "@/core/live/pictureStack";
 import { Info, X } from "lucide-react";
-import { setGameSettingsOpen } from "../addons/settingsOpen";
+import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -449,7 +449,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
             이 게임은 그림 여러 장을 겹쳐서 캐릭터를 그려요. 게임 설정에서 '화면 그림 따라 그리기'를 켜면 게임 화면 그대로 기록돼요.
           </AlertDescription>
           <AlertAction className="flex gap-1">
-            <Button size="xs" variant="outline" onClick={() => setGameSettingsOpen(true)}>게임 설정</Button>
+            <Button size="xs" variant="outline" onClick={openGameSettings}>게임 설정</Button>
             <Button size="icon-xs" variant="ghost" aria-label="안내 닫기" onClick={closeHint}><X /></Button>
           </AlertAction>
         </Alert>

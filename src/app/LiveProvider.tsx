@@ -17,6 +17,9 @@ import {
   adoptLiveAssist, ASSIST_MIN_VERSION, controlJson, controlMismatch, DEFAULT_ASSIST, normalizeAssist, resyncDue, seenSets, versionAtLeast,
   type AssistCommand, type AssistCommandKind, type AssistSettings, type SeenSets, type WrittenControl,
 } from "@/core/live/assist";
+import {
+  batchResults, CHEAT_MIN_VERSION, makeBatch, splitOps, validCheatOp, type CheatBatch, type CheatOp, type CheatStatus,
+} from "@/core/live/cheat";
 import { clearReadPositions, gameKeyOf } from "@/ui/live/readPosition";
 
 export type Connection = "noPlugin" | "waiting" | "connected" | "stale";
@@ -137,12 +140,26 @@ export interface AssistValue {
   sentCommand: AssistCommand | null;
   /** 연결됨 + 게임의 플러그인이 1.1.0 이상 */
   supported: boolean;
+  /** 연결됨 + 게임의 플러그인이 1.14.0 이상(치트) */
+  cheatSupported: boolean;
+  /**
+   * 치트 보내기. 클릭 핸들러 안에서 호출할 것. 기록 키(50개씩 나눈 묶음마다 하나)를 돌려준다. 틀린 op가 있거나 지원 안 하면 [].
+   * 앞서 보낸 치트의 응답을 기다리는 동안 누른 것은 모아 두었다가 다음 명령 하나로 보낸다.
+   */
+  sendCheat(ops: CheatOp[]): string[];
+  /** 기록 키 → 상태 */
+  cheatResults: ReadonlyMap<string, CheatStatus>;
+  /** 치트 창이 열려 있는 동안 true: 게임이 live.json에 파티 캐릭터 정보를 싣는다(control.json `liveActors`). */
+  setLiveActors(on: boolean): void;
 }
 
 /** 본 것 묶음은 진행도가 바뀐 뒤 이 시간 동안 조용하면 쓴다. */
 const ASSIST_DEBOUNCE_MS = 3000;
 /** 전투 명령은 이 시간 동안만 control.json에 남긴다(플러그인도 10초 넘은 명령은 무시). */
 const COMMAND_TTL_MS = 10000;
+/** 치트 응답을 이만큼 못 받으면 응답 없음으로 보고 다음 묶음을 보낸다(플러그인은 10초 넘은 명령을 무시한다). */
+const CHEAT_RESPONSE_MS = COMMAND_TTL_MS + 1000;
+let cheatSeq = 0;
 
 const assistStorageKey = (gameKey: string) => `rpgv.assist.${gameKey}`;
 function loadAssist(gameKey: string | null): AssistSettings {
@@ -408,8 +425,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }
   const assistSupported = connection === "connected" && wfolder !== null && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
   const controlFile = dataRoot === null ? null : livePaths(dataRoot).controlFile;
-  /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) */
-  const { controlFlags } = useAddons();
+  /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) + 치트 창이 열렸을 때 liveActors */
+  const { controlFlags: addonFlags } = useAddons();
+  const [liveActors, setLiveActors] = useState(false);
+  const controlFlags = useMemo(() => (liveActors ? { ...addonFlags, liveActors: true } : addonFlags), [addonFlags, liveActors]);
+  const cheatSupported = assistSupported && versionAtLeast(live?.pluginVersion, CHEAT_MIN_VERSION);
 
   /** 쓰기에 필요한 최신 값(비동기·타이머에서 읽는다) */
   const assistLatest = useRef({ supported: false, folder: null as WritableGameFolder | null, controlFile: null as string | null, settings: assistSettings, coverage, index: index as GameIndex | null, gameKey, live: live as LiveSnapshot | null, flags: controlFlags });
@@ -430,6 +450,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   /** controlT가 마지막 쓰기와 어긋나기 시작한 때 / 마지막으로 다시 쓴 때 */
   const mismatchSince = useRef<number | null>(null);
   const lastResyncAt = useRef<number | null>(null);
+  /** 치트: 보낼 기록들 / 응답을 기다리는 묶음 / 기록별 상태 */
+  const cheatQueue = useRef<{ key: string; ops: CheatOp[] }[]>([]);
+  const cheatInflight = useRef<CheatBatch | null>(null);
+  const [cheatResults, setCheatResults] = useState<ReadonlyMap<string, CheatStatus>>(() => new Map());
+  const putCheatResults = useCallback((entries: Iterable<[string, CheatStatus]>) => {
+    setCheatResults((prev) => {
+      const m = new Map(prev);
+      for (const [k, v] of entries) m.set(k, v);
+      return m;
+    });
+  }, []);
 
   // 게임이 바뀌면 쓰기 기록을 비운다.
   useEffect(() => {
@@ -441,6 +472,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     queued.current = null;
     mismatchSince.current = null;
     lastResyncAt.current = null;
+    cheatQueue.current = [];
+    cheatInflight.current = null;
   }, [wfolder, data]);
 
   /** control.json을 한 번 쓴다. 쓰는 순간의 최신 설정·본 것·명령을 쓴다. 실패는 조용히 넘긴다. */
@@ -513,6 +546,57 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     requestControlWrite({ gesture: true });
   }, [requestControlWrite]);
 
+  /** 기다리는 치트를 명령 하나로 묶어 보낸다(응답을 기다리는 묶음이 없을 때만). */
+  const pumpCheat = useCallback((gesture: boolean) => {
+    if (cheatInflight.current || !assistLatest.current.supported) return;
+    const at = Date.now();
+    const r = makeBatch(cheatQueue.current, `x-${at}-${++cheatSeq}`, at);
+    if (!r) { cheatQueue.current = []; return; }
+    cheatQueue.current = r.rest;
+    cheatInflight.current = r.batch;
+    lastCommand.current = { id: r.batch.id, kind: "cheat", at, ops: r.batch.ops };
+    putCheatResults(r.batch.entries.map((e): [string, CheatStatus] => [e.key, "sent"]));
+    requestControlWrite({ gesture });
+  }, [putCheatResults, requestControlWrite]);
+
+  const cheatSupportedRef = useRef(false);
+  useEffect(() => { cheatSupportedRef.current = cheatSupported; }, [cheatSupported]);
+  const sendCheat = useCallback((ops: CheatOp[]): string[] => {
+    if (!cheatSupportedRef.current || !Array.isArray(ops) || ops.length === 0) return [];
+    if (!ops.every((o) => validCheatOp(o, data ?? null))) return [];
+    const keys = splitOps(ops).map((chunk) => {
+      const key = `k-${Date.now()}-${++cheatSeq}`;
+      cheatQueue.current.push({ key, ops: chunk });
+      return key;
+    });
+    putCheatResults(keys.map((k): [string, CheatStatus] => [k, "queued"]));
+    pumpCheat(true);
+    return keys;
+  }, [data, putCheatResults, pumpCheat]);
+
+  // 치트 응답: live.json `assist.lastCommand`가 묶음 id면 기록별 결과를 적고 다음 묶음을 보낸다.
+  const liveLastCommand = live?.assist?.lastCommand;
+  useEffect(() => {
+    const b = cheatInflight.current;
+    if (!b) return;
+    const res = batchResults(b, liveLastCommand);
+    if (!res) return;
+    cheatInflight.current = null;
+    putCheatResults(res);
+    pumpCheat(false);
+  }, [liveLastCommand, putCheatResults, pumpCheat]);
+  // 응답이 너무 늦으면 응답 없음
+  useEffect(() => {
+    const id = setInterval(() => {
+      const b = cheatInflight.current;
+      if (!b || Date.now() - b.at < CHEAT_RESPONSE_MS) return;
+      cheatInflight.current = null;
+      putCheatResults(b.entries.map((e): [string, CheatStatus] => [e.key, "noResponse"]));
+      pumpCheat(false);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [putCheatResults, pumpCheat]);
+
   // 연결되면(또는 플러그인이 1.1.0 이상이 되면) 바로 한 번 쓴다(권한이 이미 있을 때만 성공).
   useEffect(() => {
     if (assistSupported) requestControlWrite();
@@ -565,8 +649,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [assistSupported, live, syncWithGame]);
 
   const assistValue = useMemo<AssistValue>(
-    () => ({ settings: assistSettings, setSettings, sendCommand, sentCommand, supported: assistSupported }),
-    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported],
+    () => ({
+      settings: assistSettings, setSettings, sendCommand, sentCommand, supported: assistSupported,
+      cheatSupported, sendCheat, cheatResults, setLiveActors,
+    }),
+    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported, cheatSupported, sendCheat, cheatResults],
   );
 
   return (

@@ -41,8 +41,11 @@ export interface TroopPageConditions {
 }
 export interface TroopPage { conditions: TroopPageConditions; span: number; list: EventCommand[] }
 export interface Troop { id: number; name: string; pages: TroopPage[] }
-export interface Actor { id: number; name: string; faceName: string; faceIndex: number }
-export interface NamedEntry { id: number; name: string }
+export interface Actor { id: number; name: string; faceName: string; faceIndex: number; classId?: number; initialLevel?: number }
+/** description·iconIndex: 아이템·무기·방어구·기술·상태 원본 필드(있을 때) */
+export interface NamedEntry { id: number; name: string; description?: string; iconIndex?: number }
+/** params[paramId][level] (Classes.json) */
+export interface ClassEntry { id: number; name: string; params?: number[][] }
 export interface SystemData {
   gameTitle: string; currencyUnit: string; switches: string[]; variables: string[];
   encryptionKey?: string; hasEncryptedImages?: boolean; advanced?: unknown;
@@ -64,6 +67,10 @@ export interface GameData {
   items: (NamedEntry | null)[];
   weapons: (NamedEntry | null)[];
   armors: (NamedEntry | null)[];
+  /** 기술·상태·직업(치트 창용). 파일이 없으면 [null] — 오류로 남기지 않는다. 예전 데이터·테스트에는 없을 수 있다. */
+  skills?: (NamedEntry | null)[];
+  states?: (NamedEntry | null)[];
+  classes?: (ClassEntry | null)[];
   errors: LoadError[];
   /** 게임 화면 크기(MZ System.json advanced, MV는 plugins.js 파라미터, 없으면 816×624). 없으면 기본 크기로 본다. */
   screenSize?: { width: number; height: number };

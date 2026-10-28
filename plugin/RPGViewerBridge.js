@@ -6,8 +6,9 @@
  * RPG Viewer가 설치하는 기록 플러그인입니다.
  * 게임 폴더의 rpg-viewer/ 아래에 플레이 기록(log.jsonl)과
  * 현재 상태(live.json)를 남깁니다.
- * RPG Viewer의 "게임 보조"(rpg-viewer/control.json)나 아래 단축키를 쓰지 않으면
- * 게임 화면과 진행에는 영향을 주지 않습니다.
+ * RPG Viewer의 "게임 보조"·"치트"(rpg-viewer/control.json)나 아래 단축키를 쓰지 않으면
+ * 게임 화면과 진행에는 영향을 주지 않습니다. 치트(아이템·돈·능력치·스위치·변수
+ * 바꾸기)는 RPG Viewer에서 누를 때만, 실행 중인 게임에 바로 적용합니다.
  * 플러그인 명령이나 파라미터는 없습니다.
  * 게임 창 단축키: F6 배속(×1→×2→×4→×8), F7 본 대사 자동 넘기기,
  * 전투 중 F10 이기기, F11 지기. 선택지는 자동으로 고르지 않습니다.
@@ -100,7 +101,7 @@
   // game assist (control.json from the viewer, hotkeys in game)
   var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
   var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
-  var COMMAND_KINDS = { win: true, lose: true, escape: true, hpFull: true, hpLow: true };
+  var COMMAND_KINDS = { win: true, lose: true, escape: true, hpFull: true, hpLow: true, cheat: true };
   // party HP commands (1.12.0): work on the map and in battle
   var PARTY_COMMANDS = { hpFull: true, hpLow: true };
   var CONTROL_POLL_MS = 1000, COMMAND_MAX_AGE_MS = 10000, AUTO_ADVANCE_UPDATES = 6, MAX_SPEED = 8;
@@ -557,7 +558,7 @@
     if (msg && msg.isChoice && msg.isChoice() && lastChoices) {
       choice = { src: lastChoices.src, cmd: lastChoices.cmd, options: lastChoices.options };
     }
-    return {
+    var snap = {
       v: 1, t: 0, pluginVersion: bridge.VERSION,
       run: run, branch: branch, seq: meta.nextSeq - 1,
       mapId: map.mapId(), x: player.x, y: player.y,
@@ -586,6 +587,8 @@
         hotkeys: effectiveHotkeys()
       }
     };
+    if (liveActors) snap.actors = actorDetails();
+    return snap;
   }
 
   // Innermost running interpreter of the map (or of the troop in battle), or null.
@@ -630,6 +633,205 @@
     } catch (e) {
       fs.writeFileSync(LIVE, json); // e.g. Windows refusing to replace a file the viewer has open
     }
+  }
+
+  // ---------------------------------------------------------------- cheats (1.14.0)
+  // control.json command { kind: "cheat", ops: [...] }: every op is checked first (nothing applies when one is
+  // bad: "id:failed:<index>"), then applied in order (an op that throws stops there: "id:failed:<index>").
+  var CHEAT_OPS_MAX = 50, CHEAT_NUM_MAX = 999999999, CHEAT_STR_MAX = 1000, CHEAT_ID_MAX = 99999;
+  var CHEAT_LETTERS = { A: true, B: true, C: true, D: true };
+  var ACTORS_MAX = 50, ACTOR_SKILLS_MAX = 500, ACTOR_STATES_MAX = 100;
+  var liveActors = false;     // control.json "liveActors": live.json also carries the party's actors
+
+  function isInt(v, lo, hi) {
+    return typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= lo && v <= hi;
+  }
+
+  // Database entry with this id (null when missing).
+  function dataEntry(list, id) {
+    return list && typeof list.length === "number" && isInt(id, 1, list.length - 1) && list[id] ? list[id] : null;
+  }
+
+  function itemData(type) {
+    if (type === "item") return G.$dataItems;
+    if (type === "weapon") return G.$dataWeapons;
+    if (type === "armor") return G.$dataArmors;
+    return null;
+  }
+
+  // Highest switch / variable id: from System.json names when loaded.
+  function systemMax(kind) {
+    var s = G.$dataSystem;
+    var names = s && (kind === "switch" ? s.switches : s.variables);
+    return names && typeof names.length === "number" && names.length > 1 ? names.length - 1 : CHEAT_ID_MAX;
+  }
+
+  function cheatActor(id) {
+    if (!dataEntry(G.$dataActors, id)) return null;
+    var A = G.$gameActors;
+    return A && typeof A.actor === "function" ? A.actor(id) || null : null;
+  }
+
+  function actorStep(op) {
+    var a = cheatActor(op.actorId);
+    if (!a) return null;
+    var k = op.op;
+    if (k === "level") {
+      if (!isInt(op.level, 1, 9999)) return null;
+      return function () {
+        var max = typeof a.maxLevel === "function" ? a.maxLevel() : 99;
+        a.changeLevel(Math.min(op.level, max), false);
+      };
+    }
+    if (k === "exp") {
+      if (!isInt(op.add, -CHEAT_NUM_MAX, CHEAT_NUM_MAX)) return null;
+      return function () { a.changeExp(Math.max(0, a.currentExp() + op.add), false); };
+    }
+    if (k === "param") {
+      if (!isInt(op.paramId, 0, 7) || !isInt(op.add, -CHEAT_NUM_MAX, CHEAT_NUM_MAX)) return null;
+      return function () { a.addParam(op.paramId, op.add); };
+    }
+    if (k === "learnSkill" || k === "forgetSkill") {
+      if (!dataEntry(G.$dataSkills, op.skillId)) return null;
+      return function () { if (k === "learnSkill") a.learnSkill(op.skillId); else a.forgetSkill(op.skillId); };
+    }
+    if (k === "addState" || k === "removeState") {
+      if (!dataEntry(G.$dataStates, op.stateId)) return null;
+      return function () { if (k === "addState") a.addState(op.stateId); else a.removeState(op.stateId); };
+    }
+    return null;
+  }
+
+  // A checked op as a function that applies it, or null when the op is not valid.
+  function cheatStep(op) {
+    if (!op || typeof op !== "object") return null;
+    var party = G.$gameParty, k = op.op;
+    if (k === "gainItem" || k === "setItem") {
+      var item = dataEntry(itemData(op.type), op.id);
+      if (!item || !party) return null;
+      if (k === "gainItem") {
+        if (!isInt(op.amount, -CHEAT_NUM_MAX, CHEAT_NUM_MAX)) return null;
+        return function () { party.gainItem(item, op.amount, false); };
+      }
+      if (!isInt(op.count, 0, CHEAT_NUM_MAX)) return null;
+      return function () { party.gainItem(item, op.count - party.numItems(item), false); };
+    }
+    if (k === "gold") {
+      var hasSet = has(op, "set"), hasAdd = has(op, "add");
+      if (!party || hasSet === hasAdd) return null;
+      if (hasSet ? !isInt(op.set, 0, CHEAT_NUM_MAX) : !isInt(op.add, -CHEAT_NUM_MAX, CHEAT_NUM_MAX)) return null;
+      return function () { party.gainGold(hasSet ? op.set - party.gold() : op.add); };
+    }
+    if (k === "recover") {
+      if (op.actorId === null) {
+        if (!party) return null;
+        return function () {
+          var ms = partyMembers();
+          for (var i = 0; i < ms.length; i++) if (ms[i] && typeof ms[i].recoverAll === "function") ms[i].recoverAll();
+        };
+      }
+      var ra = cheatActor(op.actorId);
+      return ra ? function () { ra.recoverAll(); } : null;
+    }
+    if (k === "level" || k === "exp" || k === "param" || k === "learnSkill" || k === "forgetSkill" || k === "addState" || k === "removeState") {
+      return actorStep(op);
+    }
+    if (k === "switch") {
+      if (!G.$gameSwitches || !isInt(op.id, 1, systemMax("switch")) || typeof op.value !== "boolean") return null;
+      return function () { G.$gameSwitches.setValue(op.id, op.value); };
+    }
+    if (k === "variable") {
+      var okValue = isInt(op.value, -CHEAT_NUM_MAX, CHEAT_NUM_MAX) || (typeof op.value === "string" && op.value.length <= CHEAT_STR_MAX);
+      if (!G.$gameVariables || !isInt(op.id, 1, systemMax("variable")) || !okValue) return null;
+      return function () { G.$gameVariables.setValue(op.id, op.value); };
+    }
+    if (k === "selfSwitch") {
+      if (!G.$gameSelfSwitches || !isInt(op.mapId, 1, CHEAT_ID_MAX) || !isInt(op.eventId, 1, CHEAT_ID_MAX)) return null;
+      if (typeof op.letter !== "string" || CHEAT_LETTERS[op.letter] !== true || typeof op.value !== "boolean") return null;
+      return function () { G.$gameSelfSwitches.setValue([op.mapId, op.eventId, op.letter], op.value); };
+    }
+    return null;
+  }
+
+  // Event pages, the player's followers and the battle status follow the new values.
+  function cheatRefresh() {
+    try {
+      var map = G.$gameMap;
+      if (map && typeof map.requestRefresh === "function") map.requestRefresh();
+    } catch (e) { reportError(e); }
+    try {
+      var pl = G.$gamePlayer;
+      if (pl && typeof pl.refresh === "function") pl.refresh();
+    } catch (e2) { reportError(e2); }
+    if (inBattleNow()) refreshBattleStatus();
+  }
+
+  function runCheatCommand(c) {
+    pendingCommand = null;
+    if (!commandFresh(c.t, c.kind) || run === null || !G.$gameParty) {
+      lastCommand = c.id + ":ignored";
+      return;
+    }
+    var ops = c.ops, steps = [], i;
+    if (!Array.isArray(ops) || ops.length === 0 || ops.length > CHEAT_OPS_MAX) {
+      lastCommand = c.id + ":failed:0";
+      return;
+    }
+    for (i = 0; i < ops.length; i++) {
+      var step = null;
+      try { step = cheatStep(ops[i]); } catch (e) { step = null; reportError(e); }
+      if (!step) {
+        lastCommand = c.id + ":failed:" + i;
+        return;
+      }
+      steps.push(step);
+    }
+    for (i = 0; i < steps.length; i++) {
+      try {
+        steps[i]();
+      } catch (e2) {
+        reportError(e2);
+        cheatRefresh();
+        lastCommand = c.id + ":failed:" + i;
+        return;
+      }
+    }
+    cheatRefresh();
+    lastCommand = c.id;
+  }
+
+  function idList(arr, max) {
+    var out = [];
+    if (!arr || typeof arr.length !== "number") return out;
+    for (var i = 0; i < arr.length && out.length < max; i++) if (typeof arr[i] === "number") out.push(arr[i]);
+    return out;
+  }
+
+  // Party actors for the viewer's cheat sheet (only while it asks with "liveActors").
+  function actorDetails() {
+    var out = [], party = G.$gameParty, A = G.$gameActors;
+    var ids = party && party._actors ? party._actors : [];
+    if (!A || typeof A.actor !== "function") return out;
+    for (var i = 0; i < ids.length && out.length < ACTORS_MAX; i++) {
+      try {
+        var a = A.actor(ids[i]);
+        if (!a) continue;
+        var params = [];
+        for (var p = 0; p < 8; p++) params.push(typeof a.param === "function" ? a.param(p) : 0);
+        out.push({
+          id: ids[i],
+          name: typeof a.name === "function" ? String(a.name()) : "",
+          level: typeof a.level === "number" ? a.level : (typeof a._level === "number" ? a._level : 0),
+          exp: typeof a.currentExp === "function" ? a.currentExp() : 0,
+          params: params,
+          hp: typeof a.hp === "number" ? a.hp : 0,
+          mp: typeof a.mp === "number" ? a.mp : 0,
+          skills: idList(a._skills, ACTOR_SKILLS_MAX),
+          states: idList(a._states, ACTOR_STATES_MAX)
+        });
+      } catch (e) { reportError(e); }
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- game assist
@@ -722,6 +924,7 @@
     if (cap !== capturePictures) { lastPicsKey = null; lastPicsSet = null; screenSettle = null; } // turned on again: the next snapshot is written in full
     capturePictures = cap;
     captureNotices = c.captureNotices === true;
+    liveActors = c.liveActors === true;
     noticeExtra = noticePaths(c.noticeHooks);
     if (captureNotices) {
       try { ensureNoticeHooks(); } catch (en) { reportError(en); }
@@ -738,7 +941,7 @@
       // issue time of the command itself (older viewers: the control file's t)
       var at = typeof cmd.at === "number" && isFinite(cmd.at) ? cmd.at : c.t;
       if (commandFresh(at, cmd.kind)) {
-        pendingCommand = { id: cmd.id, kind: cmd.kind, t: at };
+        pendingCommand = { id: cmd.id, kind: cmd.kind, t: at, ops: cmd.kind === "cheat" ? cmd.ops : null };
       } else {
         lastCommand = cmd.id + ":ignored";
       }
@@ -748,7 +951,7 @@
   // Issued within the last 10 s and (battle commands) not before the current battle started.
   function commandFresh(at, kind) {
     if (typeof at !== "number" || !isFinite(at) || now() - at > COMMAND_MAX_AGE_MS) return false;
-    return PARTY_COMMANDS[kind] === true || at >= battleStartT;
+    return PARTY_COMMANDS[kind] === true || kind === "cheat" || at >= battleStartT;
   }
 
   // mtime:size of control.json (null when stat gives no usable mtime).
@@ -920,6 +1123,7 @@
     var c = pendingCommand;
     if (!c) return;
     if (PARTY_COMMANDS[c.kind] === true) { runPendingPartyCommand(c); return; }
+    if (c.kind === "cheat") { runCheatCommand(c); return; }
     var BM = G.BattleManager;
     if (!commandFresh(c.t, c.kind) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
       pendingCommand = null;
