@@ -18,6 +18,8 @@ import { TimelineItem, type TimelineCtx } from "./TimelineItem";
 import { choiceTexts } from "./historyText";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { ALL_KINDS, filterItems, loadKinds, saveKinds, type Kind } from "./historyFilter";
+import { classifyPluginRecord } from "@/core/live/pluginText";
+import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
 
 const PAGE = 500;
 const KIND_LABELS: [Kind, string][] = [
@@ -56,7 +58,12 @@ export function HistoryView() {
     return foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
   }, [path, selected, model, noisy, uncertainSeqs, changedSeqs]);
 
-  const filtered = useMemo(() => filterItems(items, kinds), [items, kinds]);
+  const { overrides } = usePluginOverrides();
+  const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
+  const filtered = useMemo(
+    () => filterItems(items, kinds, showAllPlugins ? undefined : r => classifyPluginRecord(r, overrides).kind === "tech"),
+    [items, kinds, showAllPlugins, overrides],
+  );
 
   const choiceTextNow = useMemo(() => {
     if (!data || selected === null) return new Map<number, string>();
@@ -187,6 +194,10 @@ export function HistoryView() {
           <div className="flex items-center gap-2">
             <Switch id="history-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
             <Label htmlFor="history-auto-follow">자동으로 맨 아래로</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch id="history-plugin-all" checked={showAllPlugins} onCheckedChange={setShowAllPlugins} />
+            <Label htmlFor="history-plugin-all">플러그인 명령 모두 보기</Label>
           </div>
         </div>
       )}

@@ -5,6 +5,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { FaceImage } from "../script/FaceImage";
 import { useAssetUrl } from "../script/useAssetUrl";
+import { PluginLine } from "./PluginLine";
+import { usePluginShowAll } from "./pluginDisplay";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
@@ -23,6 +25,13 @@ function Picture({ name }: { name: string }) {
   if (url === undefined) return <Skeleton className="h-40 w-full" />;
   if (!url) return <p className="text-center text-sm text-muted-foreground">{name}</p>;
   return <img src={url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
+}
+
+/** 플러그인 명령 줄. 기술 명령은 `플러그인 명령 모두 보기`를 켰을 때만. */
+function ReaderPlugin({ item }: { item: Extract<ReaderItem, { kind: "plugin" }> }) {
+  const [showAll] = usePluginShowAll();
+  if (item.tech && !showAll) return null;
+  return <PluginLine text={item.text} raw={item.raw} name={item.name} tech={item.tech} />;
 }
 
 /** 읽기 항목 하나(대사·그림·고른 선택·장면 구분). 전체 읽기와 선택 흐름이 함께 쓴다. */
@@ -51,7 +60,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "picture":
       return <Picture name={item.name} />;
     case "plugin":
-      return <p className="text-sm break-words text-muted-foreground">플러그인: {item.text}</p>;
+      return <ReaderPlugin item={item} />;
     case "choice":
       return <p className="font-medium">▶ 고른 것: "{item.label}"</p>;
     case "battle":
@@ -78,7 +87,10 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
     case "picture": return a.name === (b as typeof a).name;
-    case "plugin": return a.text === (b as typeof a).text;
+    case "plugin": {
+      const p = b as typeof a;
+      return a.text === p.text && a.tech === p.tech && a.name === p.name;
+    }
     case "choice": return a.label === (b as typeof a).label;
     case "battle": return true;
   }

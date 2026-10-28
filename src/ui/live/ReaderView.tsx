@@ -23,6 +23,7 @@ import {
 } from "./readerWindow";
 import { ReaderItemView } from "./ReaderItemView";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
+import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 
 const PAGE = 300;
@@ -93,11 +94,15 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const live = withLive ? liveNow : null;
 
   const path = useMemo(() => (branch === null ? [] : branchPath(records, model, branch)), [records, model, branch]);
+  const { overrides } = usePluginOverrides();
+  const [showAllPlugins] = usePluginShowAll();
   const items = useMemo(() => {
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
-    return readerItems(folded, data, choiceTexts(path, data), model);
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs]);
+    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides);
+    // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만
+    return showAllPlugins ? all : all.filter(it => it.kind !== "plugin" || !it.tech);
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins]);
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
@@ -469,6 +474,7 @@ export function ReaderView() {
   // 읽은 위치·갈래 고르기는 대표 갈래 id 기준(이어진 갈래 id가 들어와도 대표 갈래로)
   const selected = picked !== null && model.branches.has(picked) ? representative(model, picked) : latestBranch;
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
+  const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
   const onMode = (v: string) => {
     if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
     setMode(v);
@@ -498,6 +504,10 @@ export function ReaderView() {
             <ToggleGroupItem value="full">전체 읽기</ToggleGroupItem>
             <ToggleGroupItem value="flow">선택 흐름</ToggleGroupItem>
           </ToggleGroup>
+          <div className="flex items-center gap-2">
+            <Switch id="reader-plugin-all" checked={showAllPlugins} onCheckedChange={setShowAllPlugins} />
+            <Label htmlFor="reader-plugin-all">플러그인 명령 모두 보기</Label>
+          </div>
         </div>
       )}
       {hasBranch && mode === "flow"

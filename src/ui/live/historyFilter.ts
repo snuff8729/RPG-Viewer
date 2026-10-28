@@ -1,4 +1,4 @@
-import type { HistoryItem } from "@/core/live/types";
+import type { HistoryItem, RecordOf } from "@/core/live/types";
 
 export type Kind = "message" | "choice" | "picture" | "transfer" | "battle" | "state" | "save";
 
@@ -24,8 +24,10 @@ export function itemKind(item: HistoryItem): Kind | null {
   }
 }
 
-export function filterItems(items: HistoryItem[], enabled: Set<Kind>): HistoryItem[] {
+/** hidePlugin: 숨길 플러그인 명령 기록(기술 명령이고 `플러그인 명령 모두 보기`가 꺼짐) */
+export function filterItems(items: HistoryItem[], enabled: Set<Kind>, hidePlugin?: (r: RecordOf<"plugin">) => boolean): HistoryItem[] {
   return items.filter(it => {
+    if (hidePlugin && it.kind === "record" && it.record.type === "plugin" && hidePlugin(it.record)) return false;
     const k = itemKind(it);
     return k === null || enabled.has(k);
   });

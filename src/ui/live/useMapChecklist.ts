@@ -6,18 +6,24 @@ import { loadMapTiles } from "@/core/map/tiles";
 import type { Coverage, LiveSnapshot } from "@/core/live/types";
 import type { GameData, GameIndex } from "@/core/types";
 import { useConditionsLive } from "./useConditionsLive";
+import { usePluginOverrides } from "./pluginDisplay";
+import type { PluginOverrides } from "@/core/live/pluginText";
 
 /** 탭 라벨과 이 맵 화면이 같은 입력으로 두 번 계산하지 않도록 마지막 결과 하나를 기억한다. */
 let last: {
-  data: GameData; index: GameIndex; coverage: Coverage; live: LiveSnapshot; passage: MapPassage | null; result: MapChecklist | null;
+  data: GameData; index: GameIndex; coverage: Coverage; live: LiveSnapshot; passage: MapPassage | null; overrides: PluginOverrides;
+  result: MapChecklist | null;
 } | null = null;
 
-function compute(data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage: MapPassage | null): MapChecklist | null {
-  if (last && last.data === data && last.index === index && last.coverage === coverage && last.live === live && last.passage === passage) {
+function compute(
+  data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage: MapPassage | null, overrides: PluginOverrides,
+): MapChecklist | null {
+  if (last && last.data === data && last.index === index && last.coverage === coverage && last.live === live && last.passage === passage
+    && last.overrides === overrides) {
     return last.result;
   }
-  const result = mapChecklist(data, index, coverage, live, passage);
-  last = { data, index, coverage, live, passage, result };
+  const result = mapChecklist(data, index, coverage, live, passage, overrides);
+  last = { data, index, coverage, live, passage, overrides, result };
   return result;
 }
 
@@ -50,9 +56,10 @@ export function useMapChecklist(): MapChecklist | null {
   const { connection, coverage, live } = useLive();
   const condLive = useConditionsLive(live);
   const passage = useMapPassage(condLive?.mapId ?? null);
+  const { overrides } = usePluginOverrides();
   const connected = connection === "connected";
   return useMemo(
-    () => (connected && data && index && condLive ? compute(data, index, coverage, condLive, passage) : null),
-    [connected, data, index, coverage, condLive, passage],
+    () => (connected && data && index && condLive ? compute(data, index, coverage, condLive, passage, overrides) : null),
+    [connected, data, index, coverage, condLive, passage, overrides],
   );
 }

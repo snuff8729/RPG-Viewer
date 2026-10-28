@@ -41,7 +41,7 @@ const town: MapData = {
     ev(11, "문", [page(MSG, sw1(2))]),                                       // locked
     ev(12, "빈칸", [page([])]),                                              // 명령·볼거리 없음 → 빠짐
     ev(13, "숨은 말", [page(MSG, sw1(2), 0, false)]),                        // 그래픽 없음 → 이야기 진행 조건
-    ev(14, "긴 조사", [page([c(357, ["Plugin", "cmd", "가".repeat(70), {}])])]), // talk(긴 플러그인 글)
+    ev(14, "긴 조사", [page([c(357, ["Plugin", "cmd", "", { text: "가".repeat(70) }])])]), // talk(긴 플러그인 글)
   ],
 };
 const forest: MapData = { displayName: "", width: 10, height: 10, events: [null, ev(1, "노인", [page([c(121, [2, 2, 0])])])] };
@@ -99,17 +99,25 @@ describe("mapChecklist", () => {
   it("talk: interactable now, with a plugin hint when the page uses plugin commands", () => {
     const m = mapChecklist(data, index, cov, live())!;
     const spot = m.events.find(e => e.eventId === 9)!;
-    expect([spot.section, spot.interactable, spot.pluginHint, spot.gains]).toEqual(["talk", true, "TMng Search 종이 상자.", []]);
+    expect([spot.section, spot.interactable, spot.pluginHint, spot.gains]).toEqual(["talk", true, "종이 상자.", []]);
     expect(m.events.find(e => e.eventId === 14)!.pluginHint).toBe(`${"가".repeat(60)}…`);
     expect(m.events.find(e => e.eventId === 4)!.pluginHint).toBeUndefined();
     expect(m.events.find(e => e.eventId === 12)).toBeUndefined();
+  });
+
+  it("plugin hint: only text-like commands, and the per-command override wins", () => {
+    const hidden = mapChecklist(data, index, cov, live(), null, { TMng: "hide" })!;
+    expect(hidden.events.find(e => e.eventId === 9)!.pluginHint).toBeUndefined();
+    expect(hidden.events.find(e => e.eventId === 14)!.pluginHint).toBe(`${"가".repeat(60)}…`);
+    const off = mapChecklist(data, index, cov, live(), null, { "Plugin/cmd": "hide" })!;
+    expect(off.events.find(e => e.eventId === 14)!.pluginHint).toBeUndefined();
   });
 
   it("untried: a plugin examine spot never run is in now until a record touches its page", () => {
     const fresh = coverage([at(2, 0), at(2, 1), at(3, 0), at(4, 0)], [at(2, 0), at(2, 1), at(3, 0), at(4, 0)]);
     const m = mapChecklist(data, index, fresh, live())!;
     const spot = m.events.find(e => e.eventId === 9)!;
-    expect([spot.section, spot.untried, spot.pluginHint]).toEqual(["now", true, "TMng Search 종이 상자."]);
+    expect([spot.section, spot.untried, spot.pluginHint]).toEqual(["now", true, "종이 상자."]);
     expect(m.events.find(e => e.eventId === 14)).toMatchObject({ section: "now", untried: true });
     // 플러그인 명령이 없는 페이지(스위치만·그림만)는 기록 여부와 상관없이 그대로
     expect(m.events.find(e => e.eventId === 5)).toMatchObject({ section: "talk" });

@@ -1,6 +1,6 @@
 import type { Ref } from "react";
-import { ChevronRight, MapPin } from "lucide-react";
-import { hintBody, type ChecklistEvent, type LockedPage } from "@/core/live/mapChecklist";
+import { ChevronRight, Info, MapPin } from "lucide-react";
+import type { ChecklistEvent, LockedPage } from "@/core/live/mapChecklist";
 import type { RemainingLine } from "@/core/live/remainingLines";
 import { openPage } from "@/ui/navigation";
 import { cn } from "@/lib/utils";
@@ -99,7 +99,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
   const lockedPages = ev.locked.length;
   /** 다 봄 (다시 가능) 카드와 아직 안 해 본 조사 지점에 보이는 플러그인 명령 글 */
   // (이게 뭔지 줄에 이미 그 글이 나오면 다시 쓰지 않는다)
-  const hint = (ev.section === "talk" || ev.untried) && ev.pluginHint && !ev.describe.includes(hintBody(ev.pluginHint).slice(0, 20))
+  const hint = (ev.section === "talk" || ev.untried) && ev.pluginHint && !ev.describe.includes(ev.pluginHint.slice(0, 20))
     ? ev.pluginHint : undefined;
   return (
     <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, selected && "ring-1 ring-ring", highlighted && "ring-2 ring-ring")}>
@@ -148,7 +148,12 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
               {ev.gains.map((g, i) => <li key={i}>{g}</li>)}
             </ul>
           )}
-          {hint && <p className="text-sm text-muted-foreground">플러그인: {hint}</p>}
+          {hint && (
+            <p className="flex items-start gap-2 text-sm text-muted-foreground">
+              <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span className="min-w-0 break-words">{hint}</span>
+            </p>
+          )}
           {ev.repeat.length > 0 && (
             <ul className="space-y-0.5 text-sm">
               {ev.repeat.map((r, i) => <li key={i}>{r.text}{r.estimated ? " (추정)" : ""}</li>)}

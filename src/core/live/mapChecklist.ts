@@ -12,6 +12,7 @@ import { evaluate } from "./evaluate";
 import { seenKey } from "./coverage";
 import { activePageIndex, pageEntries, pageNewCounts } from "./interactable";
 import { calledBy, entryPoints, findTransfer, type TransferTarget } from "./mapScan";
+import { classifyPluginRecord, pluginRecOfCommand, type PluginOverrides } from "./pluginText";
 import { remainingLines, type RemainingLine } from "./remainingLines";
 import { repeatInfo, type RepeatInfo } from "./repeat";
 import type { Coverage, LiveSnapshot } from "./types";
@@ -142,16 +143,13 @@ function gainsOf(list: EventCommand[], data: GameData): string[] {
 
 const isPluginCommand = (c: EventCommand): boolean => c.code === 356 || c.code === 357;
 
-/** 첫 플러그인 명령(MV 356의 글, MZ 357의 설명 글 또는 플러그인·명령 이름)의 글. */
-function pluginHintOf(list: EventCommand[]): string | undefined {
+/** 글로 보이는(pluginText: 내용 + 명령별 설정) 첫 플러그인 명령의 글. 기술 명령(변수·효과음 등)은 건너뛴다. */
+function pluginHintOf(list: EventCommand[], overrides: PluginOverrides | null): string | undefined {
   for (const cmd of list) {
-    const p = arr<unknown>(cmd.parameters);
-    let text = "";
-    if (cmd.code === 356) text = typeof p[0] === "string" ? p[0] : "";
-    else if (cmd.code === 357) {
-      text = typeof p[2] === "string" && p[2].trim() ? p[2] : [p[0], p[1]].filter(v => typeof v === "string" && v).join(" ");
-    }
-    text = text.trim();
+    const rec = pluginRecOfCommand(cmd);
+    if (!rec) continue;
+    const c = classifyPluginRecord(rec, overrides);
+    const text = c.kind === "text" ? c.text.trim() : "";
     if (text) return text.length > HINT_MAX ? `${text.slice(0, HINT_MAX)}…` : text;
   }
   return undefined;
@@ -174,12 +172,6 @@ function previewLine(entry: PageEntry | null, coverage: Coverage, data: GameData
   } catch { /* 지금까지 */ }
   const t = unseen ?? first;
   return t ? clip(t, PREVIEW_MAX) : undefined;
-}
-
-/** 플러그인 글에서 앞의 명령 이름을 빼고 남은 글(`TMng Search 역시…` → `역시…`). 남는 게 없으면 전체 */
-export function hintBody(hint: string): string {
-  const rest = hint.replace(/^\S+\s+(?:Search\s+)?/, "").trim();
-  return rest || hint;
 }
 
 function imageKind(pg: unknown): "npc" | "object" | "none" {
@@ -268,7 +260,7 @@ function lockedPage(
 
 function checkEvent(
   ev: MapEvent, mapId: number, data: GameData, byKey: Map<string, PageEntry>, coverage: Coverage, live: LiveSnapshot,
-  livePages: Map<number, number>, bg: Background | null,
+  livePages: Map<number, number>, bg: Background | null, overrides: PluginOverrides | null,
 ): ChecklistEvent | null {
   const pages = arr<MapEvent["pages"][number] | null>(ev.pages);
   const entries = pages.map((_, pi) => byKey.get(locationKey({ source: "map", mapId, eventId: ev.id, page: pi })) ?? null);
@@ -292,7 +284,7 @@ function checkEvent(
   const unseen = rem?.nowCount ?? 0;
   const repeat = active && trigger <= 4 ? repeatInfo(ev, mapId, data, live, activePage) : [];
   const gains = interactable ? gainsOf(runCommands, data) : [];
-  const pluginHint = interactable ? pluginHintOf(runCommands) : undefined;
+  const pluginHint = interactable ? pluginHintOf(runCommands, overrides) : undefined;
   // 플러그인 명령은 실행되면 기록되므로(병렬 제외), 그 페이지가 기록에 없으면 아직 안 해 본 것
   const touched = coverage.touched instanceof Set ? coverage.touched : null;
   const untried = !exitFound && interactable && !!activeEntry && touched !== null && unseen === 0 && unpicked === 0 && gains.length === 0
@@ -322,9 +314,9 @@ function checkEvent(
   const descTrigger = num(descPg?.trigger);
   const moveType = num(descPg?.moveType);
   const moves = moveType === 1 || moveType === 2;
-  const hintAny = activePg ? pluginHintOf(realCommands(flattenCalls(activePg.list, { data, mapId, event: ev, page: activePage }))) : undefined;
+  const hintAny = activePg ? pluginHintOf(realCommands(flattenCalls(activePg.list, { data, mapId, event: ev, page: activePage })), overrides) : undefined;
   const preview = previewLine(activeEntry ?? (locked[0] ? entries[locked[0].page] ?? null : null), coverage, data)
-    ?? (hintAny ? clip(hintBody(hintAny), PREVIEW_MAX) : undefined);
+    ?? (hintAny ? clip(hintAny, PREVIEW_MAX) : undefined);
   const quoted = preview ? ` · “${preview}”` : "";
   const trigText = descTrigger === 0 ? "말 걸기·조사" : descTrigger <= 2 ? "밟으면 시작" : "자동으로 시작";
   const kind = imageKind(descPg);
@@ -360,7 +352,7 @@ function checkEvent(
  * live 없음·맵 없음 → null. 예외를 던지지 않는다.
  */
 export function mapChecklist(
-  data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage?: MapPassage | null,
+  data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage?: MapPassage | null, overrides: PluginOverrides | null = null,
 ): MapChecklist | null {
   try {
     if (!isObj(live) || !isObj(data) || !(data.maps instanceof Map) || !isObj(coverage)) return null;
@@ -387,7 +379,7 @@ export function mapChecklist(
         const bg = backgroundOf(ev, mapId, data, reach);
         // 번호는 맵 데이터만으로(타일·지금 상태와 무관): 걸어서 실행하는 페이지가 있는 이벤트. 이야기·자동 진행이면 번호를 안 보일 뿐(빈 번호)
         const number = ev.pages.some(directPage) ? ++n : undefined;
-        const item = checkEvent(ev, mapId, data, byKey, coverage, live, livePages, bg);
+        const item = checkEvent(ev, mapId, data, byKey, coverage, live, livePages, bg, overrides);
         if (!item) continue;
         if (number !== undefined && !item.story) item.number = number;
         events.push(item);

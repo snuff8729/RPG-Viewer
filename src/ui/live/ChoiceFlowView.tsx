@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderItemView } from "./ReaderItemView";
+import { usePluginOverrides } from "./pluginDisplay";
 import { choiceTexts } from "./historyText";
 
 /** `대사 {N}줄 · 그림 {N}` — 0인 쪽은 뺀다. */
@@ -81,15 +82,16 @@ function Fork({ item, model, branch, onSelect }: {
 export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onSelectBranch: (id: number) => void }) {
   const { data } = useGame();
   const { records, model, noisy, uncertainSeqs, changedSeqs, coverage } = useLive();
+  const { overrides } = usePluginOverrides();
 
   const flow = useMemo(() => {
     if (!data) return [];
     const path = branchPath(records, model, branch);
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
     const choiceText = choiceTexts(path, data);
-    const reader = readerItems(folded, data, choiceText, model);
+    const reader = readerItems(folded, data, choiceText, model, overrides);
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides]);
 
   if (!data) return null;
 
