@@ -17,6 +17,8 @@ export interface GameState {
   data?: GameData;
   index?: GameIndex;
   assets?: AssetStore;
+  /** 열린 게임 폴더(ready일 때). 쓰기 가능 여부는 isWritableFolder로 확인. */
+  folder?: GameFolder;
   error?: OpenError;
 }
 export interface GameContextValue extends GameState {
@@ -37,7 +39,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       const result = await loadGame(folder);
       if (!result.ok) { setState({ status: "error", error: result }); return false; }
       const index = buildIndex(result.data);
-      setState({ status: "ready", data: result.data, index, assets: new AssetStore(folder, result.data) });
+      setState({ status: "ready", data: result.data, index, assets: new AssetStore(folder, result.data), folder });
       return true;
     } catch (e) {
       setState({ status: "error", error: { ok: false, reason: "internal", message: e instanceof Error ? e.message : String(e) } });

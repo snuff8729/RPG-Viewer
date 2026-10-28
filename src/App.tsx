@@ -14,6 +14,11 @@ import { AppSidebar } from "@/ui/AppSidebar";
 import { ErrorsBadge } from "@/ui/ErrorsBadge";
 import { EventView } from "@/ui/EventView";
 import { SearchDialog } from "@/ui/SearchDialog";
+import { LiveProvider } from "@/app/LiveProvider";
+import { LiveTabs } from "@/ui/live/LiveTabs";
+import { ConnectionBadge } from "@/ui/live/ConnectionBadge";
+import { HistoryView } from "@/ui/live/HistoryView";
+import { MissingView } from "@/ui/live/MissingView";
 
 function Shell() {
   const { status, data, index, close } = useGame();
@@ -48,17 +53,9 @@ function Shell() {
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              {crumbs.map((c, i) => (
-                <BreadcrumbItem key={i}>
-                  {i > 0 && <BreadcrumbSeparator />}
-                  <BreadcrumbPage className={i === crumbs.length - 1 ? undefined : "font-normal text-muted-foreground"}>{c}</BreadcrumbPage>
-                </BreadcrumbItem>
-              ))}
-            </BreadcrumbList>
-          </Breadcrumb>
+          <LiveTabs route={route} />
           <div className="ml-auto flex items-center gap-2">
+            <ConnectionBadge />
             <span className="text-sm">{data.system.gameTitle}</span>
             <Badge variant="secondary">{data.engine}</Badge>
             <ErrorsBadge />
@@ -67,8 +64,22 @@ function Shell() {
           </div>
         </header>
         <main className="flex-1 p-4">
+          {route.kind === "page" && crumbs.length > 0 && (
+            <Breadcrumb className="mb-4">
+              <BreadcrumbList>
+                {crumbs.map((c, i) => (
+                  <BreadcrumbItem key={i}>
+                    {i > 0 && <BreadcrumbSeparator />}
+                    <BreadcrumbPage className={i === crumbs.length - 1 ? undefined : "font-normal text-muted-foreground"}>{c}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          )}
           {route.kind === "home" && <p className="text-sm text-muted-foreground">왼쪽에서 이벤트를 선택하세요</p>}
           {route.kind === "page" && <EventView route={route} />}
+          {route.kind === "history" && <HistoryView />}
+          {route.kind === "missing" && <MissingView />}
         </main>
       </SidebarInset>
       <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
@@ -80,7 +91,9 @@ export default function App() {
   return (
     <TooltipProvider>
       <GameProvider>
-        <Shell />
+        <LiveProvider>
+          <Shell />
+        </LiveProvider>
       </GameProvider>
     </TooltipProvider>
   );
