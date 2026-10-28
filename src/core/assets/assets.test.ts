@@ -2,8 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { GameData } from "@/core/types";
 import { loadGame } from "@/core/loader/loadGame";
 import { loadFixtureFolder } from "../../../tests/helpers/fixtureFolder";
-import { MemoryFolder } from "@/core/fs/folder";
-import { AssetStore } from "./assets";
+import { MemoryFolder, type GameFolder } from "@/core/fs/folder";
+import { AssetStore, RETRY_BACKOFF_MS } from "./assets";
 
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const head = async (b: Blob | null) => [...new Uint8Array(await b!.arrayBuffer()).slice(0, 8)];
@@ -43,7 +43,7 @@ describe("AssetStore", () => {
     const noKey = { ...data, system: { ...data.system, encryptionKey: undefined } } as GameData;
     expect(await head(await new AssetStore(folder, noKey).load("faces", "People1"))).toEqual(PNG_SIG);
   });
-  it("caches", () => expect(store.load("faces", "People1")).toBe(store.load("faces", "People1")));
+  it("caches", () => expect(store.fetch("faces", "People1")).toBe(store.fetch("faces", "People1")));
 });
 
 describe("AssetStore extension order", () => {
@@ -123,5 +123,90 @@ describe("AssetStore decodes by content, not by extension or key", () => {
     }), { hasEncryptedImages: false, encryptionKey: undefined });
     expect(new Uint8Array(await (await store.load("pictures", "Late"))!.arrayBuffer())).toEqual(png);
     expect(await store.load("pictures", "Stub")).toBeNull();
+  });
+});
+
+/** 없는 그림(캐시)과 읽기 실패(캐시 안 함, 5초 백오프 후 다시 읽음)를 구분한다. */
+describe("AssetStore missing vs failed", () => {
+  async function setup(strict: (folder: GameFolder, p: string) => Promise<ArrayBuffer | null>) {
+    const { folder, data } = await open("sample-mz");
+    let t = 0;
+    let calls = 0;
+    const waits: number[] = [];
+    const spy: GameFolder = {
+      readText: (p) => folder.readText(p),
+      readBinary: (p) => folder.readBinary(p),
+      list: (d) => folder.list(d),
+      readBinaryStrict: (p) => { calls++; return strict(folder, p); },
+    };
+    const store = new AssetStore(spy, data, {
+      now: () => t,
+      wait: async (ms) => { waits.push(ms); t += ms; },
+    });
+    return { store, waits, calls: () => calls, advance: (ms: number) => { t += ms; } };
+  }
+
+  /** fail()이 true인 동안 읽기 오류를 던지는 폴더. */
+  const flaky = (fail: () => boolean) => async (folder: GameFolder, p: string) => {
+    if (fail()) throw new Error("500");
+    return folder.readBinary(p);
+  };
+
+  it("caches missing (every extension absent) and does not read again", async () => {
+    const s = await setup(async () => null);
+    expect(await s.store.fetch("pictures", "nope")).toEqual({ status: "missing" });
+    expect(s.calls()).toBe(3);
+    expect(await s.store.fetch("pictures", "nope")).toEqual({ status: "missing" });
+    expect(s.calls()).toBe(3);
+  });
+
+  it("does not cache read failures; reads again on the next request after the backoff", async () => {
+    let fail = true;
+    const s = await setup(flaky(() => fail));
+    expect(await s.store.fetch("faces", "People1")).toEqual({ status: "failed" });
+    fail = false;
+    s.advance(RETRY_BACKOFF_MS);
+    expect((await s.store.fetch("faces", "People1")).status).toBe("ok");
+    expect(s.waits).toEqual([]); // 백오프가 지났으니 기다리지 않고 바로 읽는다
+  });
+
+  it("waits out the rest of the 5 s backoff before reading the same file again", async () => {
+    let fail = true;
+    const s = await setup(flaky(() => fail));
+    expect((await s.store.fetch("faces", "People1")).status).toBe("failed");
+    const afterFail = s.calls();
+    fail = false;
+    s.advance(1000);
+    expect((await s.store.fetch("faces", "People1")).status).toBe("ok");
+    expect(s.waits).toEqual([RETRY_BACKOFF_MS - 1000]);
+    expect(s.calls()).toBeGreaterThan(afterFail);
+  });
+
+  it("concurrent requests after a failure share one re-read", async () => {
+    let fail = true;
+    const s = await setup(flaky(() => fail));
+    await s.store.fetch("faces", "People1");
+    fail = false;
+    const a = s.store.fetch("faces", "People1");
+    expect(s.store.fetch("faces", "People1")).toBe(a);
+    expect((await a).status).toBe("ok");
+  });
+
+  it("a failure on one extension is not reported as missing", async () => {
+    const s = await setup(async (_f, p) => {
+      if (p.endsWith(".png_")) throw new Error("network");
+      return null;
+    });
+    expect(await s.store.fetch("pictures", "x")).toEqual({ status: "failed" });
+  });
+
+  it("image() does not cache a read failure", async () => {
+    let fail = true;
+    const s = await setup(flaky(() => fail));
+    const first = s.store.image("faces", "People1");
+    expect(await first).toBeNull();
+    fail = false;
+    s.advance(RETRY_BACKOFF_MS);
+    expect(s.store.image("faces", "People1")).not.toBe(first);
   });
 });

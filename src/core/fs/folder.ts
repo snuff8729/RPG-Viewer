@@ -2,6 +2,11 @@
 export interface GameFolder {
   readText(path: string): Promise<string | null>;
   readBinary(path: string): Promise<ArrayBuffer | null>;
+  /**
+   * readBinary와 같지만 "없음"(null)과 "읽기 실패"(throw: 네트워크·서버 오류 등)를 구분한다.
+   * 없으면 readBinary의 null을 "없음"으로 본다.
+   */
+  readBinaryStrict?(path: string): Promise<ArrayBuffer | null>;
   /** 바로 아래 항목 이름만. 없으면 []. */
   list(dir: string): Promise<string[]>;
 }

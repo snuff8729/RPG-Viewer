@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FaceImage } from "../script/FaceImage";
-import { useAssetUrl } from "../script/useAssetUrl";
+import { AssetPlaceholder } from "../script/AssetPlaceholder";
+import { useAsset } from "../script/useAssetUrl";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
@@ -19,10 +20,10 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
 }
 
 function Picture({ name }: { name: string }) {
-  const url = useAssetUrl("pictures", name);
-  if (url === undefined) return <Skeleton className="h-40 w-full" />;
-  if (!url) return <p className="text-center text-sm text-muted-foreground">{name}</p>;
-  return <img src={url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
+  const a = useAsset("pictures", name);
+  if (a.status === "loading") return <Skeleton className="h-40 w-full" />;
+  if (a.status !== "ok") return <AssetPlaceholder view={a} name={name} className="mx-auto w-fit max-w-full" />;
+  return <img src={a.url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
 }
 
 /** 읽기 항목 하나(대사·그림·고른 선택·장면 구분). 전체 읽기와 선택 흐름이 함께 쓴다. */

@@ -285,6 +285,18 @@ describe("ServerFolder with a fake fetch", () => {
     expect(await f.remove("a")).toBe(false);
   });
 
+  it("readBinaryStrict: 404 is missing (null), network errors and 500 throw", async () => {
+    const session = { id: "x", root: "C:/g", title: "", engine: "MV", name: "g" };
+    const offline = new ServerFolder(session, async () => { throw new Error("offline"); });
+    await expect(offline.readBinaryStrict("a")).rejects.toThrow();
+    const notFound = new ServerFolder(session, async () => new Response("{}", { status: 404 }));
+    expect(await notFound.readBinaryStrict("a")).toBeNull();
+    const broken = new ServerFolder(session, async () => new Response("{}", { status: 500 }));
+    await expect(broken.readBinaryStrict("a")).rejects.toThrow();
+    const ok = new ServerFolder(session, async () => new Response(new Uint8Array([1, 2]), { status: 200 }));
+    expect(new Uint8Array((await ok.readBinaryStrict("a"))!)).toEqual(new Uint8Array([1, 2]));
+  });
+
   it("sends the session id and path in a POST body, never in the URL", async () => {
     const seen: { url: string; body: unknown }[] = [];
     const fetchFn: FetchFn = async (url, init) => {

@@ -148,6 +148,18 @@ export class DirectoryHandleFolder implements WritableGameFolder {
     }
   }
 
+  /** 없으면 null, 있는데 못 읽으면(권한·잠김 등) throw. */
+  async readBinaryStrict(path: string): Promise<ArrayBuffer | null> {
+    const h = await this.fileHandleOf(path);
+    if (!h) return null;
+    try {
+      return await (await h.fh.getFile()).arrayBuffer();
+    } catch (e) {
+      if ((e as { name?: unknown } | null)?.name === "NotFoundError") return null;
+      throw e;
+    }
+  }
+
   async list(dir: string): Promise<string[]> {
     const d = await this.dirOf(dir.split("/").filter(Boolean));
     return d ? childNames(d) : [];
