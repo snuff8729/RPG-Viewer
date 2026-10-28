@@ -118,14 +118,15 @@ function GroupList({ groups }: { groups: MissingGroup[] }) {
   );
 }
 
-export function MissingView() {
+/** initialQuery: 처음 채울 검색어(사이드바 "가 볼 만한 곳"에서 맵 이름). 바꾸려면 key도 바꿔 다시 마운트한다. */
+export function MissingView({ initialQuery = "" }: { initialQuery?: string }) {
   const { connection } = useLive();
   const groups = useMissingGroups();
   const offline = connection !== "connected";
   /** 사용자가 고른 보기. 고르기 전엔 연결 상태를 따른다. */
   const [picked, setPicked] = useState<View | null>(null);
   const view: View = picked ?? (offline ? "all" : "reachable");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const shown = useMemo(() => viewGroups(groups, view, query), [groups, view, query]);
   return (
     <div className="space-y-4 p-1">

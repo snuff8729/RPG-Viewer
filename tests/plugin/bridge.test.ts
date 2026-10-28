@@ -783,12 +783,17 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.5", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.1.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
+      assist: {
+        speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
+        lastCommand: null, controlT: null,
+        hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
+      },
     });
   });
 
@@ -979,19 +984,438 @@ describe("RPGViewerBridge", () => {
     expect(append).toHaveBeenCalledTimes(2);
   });
 
+  describe("game assist", () => {
+    const CONTROL_PATH = "/game/www/rpg-viewer/control.json";
+    const writeControl = (hh: Harness, c: Record<string, unknown>) => {
+      hh.fs.dirs.add("/game/www/rpg-viewer");
+      hh.fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: hh.clock.t, ...c }));
+    };
+    const poll = (hh: Harness) => { hh.clock.t += 1000; hh.bridge._tick(); };
+    const assistOf = (hh: Harness) => { hh.bridge._snapshotNow(); return hh.readLive().assist; };
+    const onMap = (hh: Harness) => { hh.g.SceneManager._scene = new hh.g.Scene_Map(); };
+    const battler = (hh: Harness) => new hh.g.Game_Battler();
+    const startBattle = (hh: Harness, phase = "input") => {
+      hh.g.BattleManager.setup(4);
+      hh.g.BattleManager._phase = phase;
+      hh.g.SceneManager._scene = new hh.g.Scene_Battle();
+      hh.g.$gameTroop._enemies = [battler(hh), battler(hh)];
+      hh.g.$gameParty._battlers = [battler(hh), battler(hh)];
+    };
+    // run event 3 page 0 of map 1 until its message at cmd `at` is set up
+    const showMessage = (hh: Harness, list: any[], at: number) => {
+      if (!hh.g.$gameMap.event(3)) hh.addMapEvent(3, [list], 0);
+      const interp = hh.g.$gameMap._interpreter;
+      interp.setup(list, 3);
+      hh.g.$gameMessage.clear();
+      hh.runCommand(interp, at);
+      return interp;
+    };
+    const pressOkCount = (w: any, frames: number) => { for (let i = 0; i < frames; i++) w.updateInput(); return w.advanced; };
+
+    it("polls control.json at most once per second, re-reads on mtime change, ignores bad input", () => {
+      h = newGame();
+      onMap(h);
+      writeControl(h, { speed: 4 });
+      h.bridge._tick();
+      expect(h.bridge._frame()).toBe(4);
+      writeControl(h, { speed: 2 });
+      h.clock.t += 500;
+      h.bridge._tick();
+      expect(h.bridge._frame()).toBe(4); // within the 1s poll gap
+      poll(h);
+      expect(h.bridge._frame()).toBe(2);
+      const reads = vi.spyOn(h.fs, "readFileSync");
+      poll(h);
+      expect(reads.mock.calls.filter((c) => c[0] === CONTROL_PATH)).toHaveLength(0); // mtime unchanged
+      h.fs.writeFileSync(CONTROL_PATH, "{\"v\":1,\"speed\":8"); // half-written
+      poll(h);
+      writeControl(h, { speed: 3, skipSeen: "yes" });
+      poll(h);
+      writeControl(h, { v: 2, speed: 8 });
+      poll(h);
+      expect(h.bridge._frame()).toBe(2);
+      expect(assistOf(h)).toMatchObject({ speed: 2, effectiveSpeed: 2, skipSeen: false });
+    });
+
+    it("updates the scene speed times per frame on the map, once in menus or during a scene change", () => {
+      h = newGame();
+      onMap(h);
+      const sm = h.g.SceneManager;
+      writeControl(h, { speed: 4 });
+      h.bridge._tick();
+      sm.updateScene();
+      expect(sm.sceneUpdates).toBe(4);
+      expect(h.g.Input.updates).toBe(3); // a key press is seen by the first update only
+      sm._scene = new h.g.Scene_Title();
+      sm.updateScene();
+      expect(sm.sceneUpdates).toBe(5);
+      onMap(h);
+      sm._nextScene = {};
+      sm.updateScene();
+      expect(sm.sceneUpdates).toBe(6);
+      sm._nextScene = null;
+      // re-entrant call: runs the original once, no extra repeats
+      let nested = false;
+      sm.onSceneUpdate = () => { if (!nested) { nested = true; sm.updateScene(); nested = false; } };
+      sm.sceneUpdates = 0;
+      sm.updateScene();
+      expect(sm.sceneUpdates).toBe(8); // 4 outer updates + 4 single nested ones
+    });
+
+    it("shows a seen message fast and advances it after 6 updates; unseen messages and choices wait", () => {
+      h = newGame();
+      const list = [
+        cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["seen"]),
+        cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["new"]),
+        cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["Q?"]), cmd(102, [["A", "B"], 1, 0, 2, 0]),
+        cmd(0),
+      ];
+      writeControl(h, { skipSeen: true, seenMessages: ["map:1:3:0#0", "map:1:3:0#4"] });
+      h.bridge._tick();
+      const w = new h.g.Window_Message();
+      showMessage(h, list, 0);
+      w.startMessage();
+      expect([w._showFast, w._lineShowFast]).toEqual([true, true]);
+      w.newPage(); // next page of a long message keeps the fast flags
+      expect(w._showFast).toBe(true);
+      w.pause = true;
+      expect(pressOkCount(w, 5)).toBe(0);
+      expect(pressOkCount(w, 1)).toBe(1);
+
+      showMessage(h, list, 2); // unseen
+      w.startMessage();
+      expect(w._showFast).toBe(false);
+      w.pause = true;
+      expect(pressOkCount(w, 30)).toBe(1);
+
+      showMessage(h, list, 4); // seen, but with a choice
+      expect(h.g.$gameMessage.isChoice()).toBe(true);
+      w.startMessage();
+      expect(w._showFast).toBe(false);
+      w.pause = true;
+      expect(pressOkCount(w, 30)).toBe(1);
+    });
+
+    it("does not skip seen messages when skipSeen is off", () => {
+      h = newGame();
+      writeControl(h, { skipSeen: false, seenMessages: ["map:1:3:0#0"] });
+      h.bridge._tick();
+      const w = new h.g.Window_Message();
+      showMessage(h, [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["x"]), cmd(0)], 0);
+      w.startMessage();
+      w.pause = true;
+      expect(w._showFast).toBe(false);
+      expect(pressOkCount(w, 30)).toBe(0);
+    });
+
+    it("auto speed while a fully seen event runs outside battle; never in battle (seenTroops ignored)", () => {
+      h = newGame();
+      onMap(h);
+      writeControl(h, { speed: 2, autoFast: true, autoSpeed: 8, seenPages: ["map:1:3:0"], seenTroops: [4] });
+      h.bridge._tick();
+      expect(h.bridge._frame()).toBe(2); // nothing running
+      const list = [cmd(121, [1, 1, 0]), cmd(0)];
+      h.addMapEvent(3, [list, [cmd(121, [2, 2, 0]), cmd(0)]], 0);
+      h.g.$gameMap._interpreter.setup(list, 3);
+      expect(h.bridge._frame()).toBe(8);
+      expect(assistOf(h)).toMatchObject({ speed: 2, effectiveSpeed: 8 });
+      h.g.$gameMap._interpreter.setup(h.g.$gameMap.event(3).event().pages[1].list, 3); // page 1 not seen
+      expect(h.bridge._frame()).toBe(2);
+      h.g.$gameMap._interpreter.clear();
+      startBattle(h);
+      h.g.$gameTroop._interpreter.setup([cmd(0)], 0);
+      expect(h.bridge._frame()).toBe(2);
+      writeControl(h, { autoFast: false });
+      poll(h);
+      h.g.$gameParty._inBattle = false;
+      onMap(h);
+      h.g.$gameMap._interpreter.setup(list, 3);
+      expect(h.bridge._frame()).toBe(2);
+    });
+
+    it("win: kills alive enemies and runs the battle end check, once per command id", () => {
+      h = newGame();
+      startBattle(h);
+      writeControl(h, { command: { id: "c-1", kind: "win" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(h.g.$gameTroop._enemies.map((e: any) => [e.isAlive(), e._collapsed])).toEqual([[false, true], [false, true]]);
+      expect(h.g.BattleManager.calls).toEqual(["victory"]);
+      expect(assistOf(h).lastCommand).toBe("c-1");
+      startBattle(h);
+      writeControl(h, { speed: 2, command: { id: "c-1", kind: "win" } }); // same command rewritten
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["victory"]);
+    });
+
+    it("ignores stale commands and commands outside battle; waits while a message is open", () => {
+      h = newGame();
+      startBattle(h);
+      writeControl(h, { t: h.clock.t - 11_000, command: { id: "old", kind: "win" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(assistOf(h).lastCommand).toBe("old:ignored");
+      h.g.$gameMessage._busy = true;
+      writeControl(h, { command: { id: "c-2", kind: "lose" } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual([]);
+      h.g.$gameMessage._busy = false;
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["defeat:0"]); // party killed first
+      h.g.$gameParty._inBattle = false;
+      writeControl(h, { command: { id: "c-3", kind: "win" } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["defeat:0"]);
+      expect(assistOf(h).lastCommand).toBe("c-3:ignored");
+    });
+
+    it("escape always succeeds when escaping is allowed, else is ignored; canEscape / canLose reported", () => {
+      h = newGame();
+      startBattle(h);
+      expect(assistOf(h)).toMatchObject({ canEscape: true, canLose: false });
+      writeControl(h, { command: { id: "e-1", kind: "escape" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort"]);
+      expect(h.g.BattleManager._escapeRatio).toBe(0.5);
+      expect(assistOf(h)).toMatchObject({ lastCommand: "e-1", canEscape: false, canLose: false }); // battle over
+      startBattle(h);
+      h.g.BattleManager._canEscape = false;
+      h.g.BattleManager._canLose = true;
+      expect(assistOf(h)).toMatchObject({ canEscape: false, canLose: true });
+      writeControl(h, { command: { id: "e-2", kind: "escape" } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort"]);
+      expect(h.g.$gameParty.inBattle()).toBe(true);
+      expect(assistOf(h).lastCommand).toBe("e-2:ignored");
+    });
+
+    it("reports a command that throws as failed", () => {
+      h = newGame();
+      startBattle(h);
+      h.g.BattleManager.checkBattleEnd = () => { throw new Error("broken"); };
+      writeControl(h, { command: { id: "f-1", kind: "win" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(assistOf(h).lastCommand).toBe("f-1:failed");
+    });
+
+    it("uses the command's own issue time; never applies a command issued before the battle started", () => {
+      h = newGame();
+      onMap(h);
+      writeControl(h, { command: { id: "a-1", kind: "win", at: h.clock.t - 11_000 } }); // file t fresh, command old
+      h.bridge._tick();
+      expect(assistOf(h).lastCommand).toBe("a-1:ignored");
+      const issued = h.clock.t;
+      h.clock.t += 2000;
+      startBattle(h); // a new battle started after the command was issued
+      writeControl(h, { t: h.clock.t, command: { id: "a-2", kind: "win", at: issued } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(assistOf(h).lastCommand).toBe("a-2:ignored");
+      writeControl(h, { command: { id: "a-3", kind: "win", at: h.clock.t } });
+      poll(h);
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual(["victory"]);
+      expect(assistOf(h).lastCommand).toBe("a-3");
+    });
+
+    it("ignores a control.json left from an earlier session; applies only later writes and echoes their t", () => {
+      const fs = new MemFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: 5, speed: 8, skipSeen: true, command: { id: "old", kind: "win", at: 1_000_000 } }));
+      h = newGame("MZ", fs);
+      onMap(h);
+      startBattle(h);
+      h.bridge._tick();
+      poll(h);
+      expect(h.bridge._frame()).toBe(1);
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(assistOf(h)).toMatchObject({ speed: 1, skipSeen: false, lastCommand: null, controlT: null });
+      writeControl(h, { speed: 2 });
+      poll(h);
+      expect(assistOf(h)).toMatchObject({ speed: 2, controlT: h.clock.t - 1000 });
+    });
+
+    it("re-maps the hotkeys when another plugin replaces Input.keyMapper", () => {
+      h = newGame();
+      const km2: Record<number, string> = { 13: "ok", 117: "otherPlugin" };
+      h.g.Input.keyMapper = km2;
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null });
+      poll(h);
+      expect(km2).toEqual({ 13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose" });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122 });
+    });
+
+    it("never auto-advances a message added without a text 101 (stale seen key is dropped)", () => {
+      h = newGame();
+      writeControl(h, { skipSeen: true, seenMessages: ["map:1:3:0#0"] });
+      h.bridge._tick();
+      showMessage(h, [cmd(101, ["", 0, 0, 2, ""]), cmd(0)], 0); // seen 101 without text: no window start
+      h.g.$gameMessage.clear();
+      h.g.$gameMessage.add("The enemy appears!"); // battle text, added directly
+      const w = new h.g.Window_Message();
+      w.startMessage();
+      w.pause = true;
+      expect(w._showFast).toBe(false);
+      expect(pressOkCount(w, 30)).toBe(0);
+    });
+
+    describe("extra updates are input-neutral", () => {
+      // one real frame: the engine's updateInputData, then updateScene (hooked)
+      const holdFrames = (speed: number, frames: number, down: (hh: Harness) => void) => {
+        const hh = newGame();
+        onMap(hh);
+        writeControl(hh, { speed });
+        hh.bridge._tick();
+        const sm = hh.g.SceneManager, I = hh.g.Input, TI = hh.g.TouchInput;
+        const seen = { ok: 0, okTriggered: 0, okLong: 0, touch: 0, touchTriggered: 0 };
+        sm.onSceneUpdate = () => {
+          if (I.isRepeated("ok")) seen.ok++;
+          if (I.isTriggered("ok")) seen.okTriggered++;
+          if (I.isLongPressed("ok")) seen.okLong++;
+          if (TI.isRepeated()) seen.touch++;
+          if (TI.isTriggered()) seen.touchTriggered++;
+        };
+        down(hh);
+        for (let f = 0; f < frames; f++) { sm.updateInputData(); sm.updateScene(); }
+        return { seen, inputTime: I._pressedTime, touchTime: TI._pressedTime, updates: sm.sceneUpdates };
+      };
+
+      it("a 6-frame OK hold at x8 yields exactly one OK repeat-trigger, same as x1", () => {
+        const x1 = holdFrames(1, 6, (hh) => hh.g.Input.keyDown(13));
+        const x8 = holdFrames(8, 6, (hh) => hh.g.Input.keyDown(13));
+        expect(x1.seen).toMatchObject({ ok: 1, okTriggered: 1, okLong: 0 });
+        expect(x8.seen).toEqual(x1.seen);
+        expect(x8.inputTime).toBe(x1.inputTime);
+        expect(x8.inputTime).toBe(5);
+        expect(x8.updates).toBe(48);
+      });
+
+      it("a 6-frame touch hold at x8 yields exactly one repeat-trigger, same as x1", () => {
+        const x1 = holdFrames(1, 6, (hh) => hh.g.TouchInput.touchDown());
+        const x8 = holdFrames(8, 6, (hh) => hh.g.TouchInput.touchDown());
+        expect(x1.seen).toMatchObject({ touch: 1, touchTriggered: 1 });
+        expect(x8.seen).toEqual(x1.seen);
+        expect(x8.touchTime).toBe(x1.touchTime);
+      });
+
+      it("a long hold repeats at the engine's real-frame rate at x8", () => {
+        const x1 = holdFrames(1, 40, (hh) => hh.g.Input.keyDown(13));
+        const x8 = holdFrames(8, 40, (hh) => hh.g.Input.keyDown(13));
+        expect(x1.seen.ok).toBe(4); // frame 1, then pressedTime 24, 30, 36
+        expect(x8.seen).toEqual(x1.seen);
+      });
+    });
+
+    it("does not run a command when the battle is already ending", () => {
+      h = newGame();
+      startBattle(h, "battleEnd");
+      writeControl(h, { command: { id: "c-9", kind: "win" } });
+      h.bridge._tick();
+      h.bridge._frame();
+      expect(h.g.BattleManager.calls).toEqual([]);
+      expect(h.g.$gameTroop._enemies[0].isAlive()).toBe(true);
+    });
+
+    it("F6 cycles speed, F7 toggles seen skip; a control rewrite with the same values keeps them", () => {
+      h = newGame();
+      onMap(h);
+      writeControl(h, { speed: 1, skipSeen: false });
+      h.bridge._tick();
+      const press = (code: number) => { h.g.Input.press(code); h.bridge._frame(); h.g.Input.update(); };
+      press(117);
+      press(117);
+      press(118);
+      expect(assistOf(h)).toMatchObject({ speed: 4, effectiveSpeed: 4, skipSeen: true });
+      writeControl(h, { speed: 1, skipSeen: false, seenMessages: ["x"] }); // coverage rewrite
+      poll(h);
+      expect(assistOf(h)).toMatchObject({ speed: 4, skipSeen: true });
+      writeControl(h, { speed: 8, skipSeen: false });
+      poll(h);
+      press(117);
+      expect(assistOf(h)).toMatchObject({ speed: 1, skipSeen: true }); // skipSeen unchanged in control: hotkey value stays
+      writeControl(h, { speed: 8, skipSeen: true });
+      poll(h);
+      expect(assistOf(h)).toMatchObject({ speed: 1, skipSeen: true });
+      writeControl(h, { speed: 2, skipSeen: false });
+      poll(h);
+      expect(assistOf(h)).toMatchObject({ speed: 2, skipSeen: false });
+    });
+
+    it("F10 wins and F11 loses only in battle, reported as lastCommand", () => {
+      h = newGame();
+      onMap(h);
+      const press = (code: number) => { h.g.Input.press(code); h.bridge._frame(); h.g.Input.update(); };
+      press(121);
+      expect(h.g.BattleManager.calls).toEqual([]);
+      startBattle(h);
+      press(121);
+      expect(h.g.BattleManager.calls).toEqual(["victory"]);
+      expect(assistOf(h).lastCommand).toBe("key-win-" + h.clock.t);
+      startBattle(h);
+      press(122);
+      expect(h.g.BattleManager.calls).toEqual(["victory", "defeat:0"]);
+    });
+
+    it("remaps hotkeys from control.json: invalid/reserved -> default, null disables, others' keys untouched", () => {
+      h = newGame();
+      const km = h.g.Input.keyMapper;
+      expect([km[117], km[118], km[121], km[122]]).toEqual(["rpgvSpeed", "rpgvSkip", "rpgvWin", "rpgvLose"]);
+      km[66] = "otherPlugin";
+      writeControl(h, { hotkeys: { speed: 65, skip: null, win: 116, lose: 66 } });
+      h.bridge._tick();
+      expect(km[65]).toBe("rpgvSpeed");
+      expect([km[117], km[118]]).toEqual([undefined, undefined]);
+      expect(km[116]).toBeUndefined(); // F5 (reserved) rejected -> default F10
+      expect(km[121]).toBe("rpgvWin");
+      expect(km[66]).toBe("otherPlugin"); // never overwritten
+      expect(km[13]).toBe("ok");
+      expect(assistOf(h).hotkeys).toEqual({ speed: 65, skip: null, win: 121, lose: null });
+      onMap(h);
+      h.g.Input.press(117);
+      h.bridge._frame();
+      expect(assistOf(h).speed).toBe(1); // old F6 no longer bound
+      writeControl(h, { hotkeys: { speed: 999, skip: 13, win: "x" } }); // all invalid / missing -> defaults
+      poll(h);
+      expect(km[65]).toBeUndefined();
+      expect([km[117], km[118], km[121], km[122]]).toEqual(["rpgvSpeed", "rpgvSkip", "rpgvWin", "rpgvLose"]);
+      expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122 });
+    });
+
+    it("never throws into the game when assist hooks fail", () => {
+      h = newGame();
+      onMap(h);
+      h.g.Input.isTriggered = () => { throw new Error("boom"); };
+      startBattle(h);
+      writeControl(h, { command: { id: "c-x", kind: "win" } });
+      h.bridge._tick();
+      h.g.$gameTroop.aliveMembers = () => { throw new Error("troop"); };
+      expect(() => h.g.SceneManager.updateScene()).not.toThrow();
+      expect(h.g.SceneManager.sceneUpdates).toBe(1);
+    });
+  });
+
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.5"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.1\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.5");
+    expect(h.bridge.VERSION).toBe("1.1.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
     expect(src).not.toMatch(/\?\.|\?\?|=>|\bclass\b|\basync\b|\bawait\b|^\s*(import|export)\b/m);
+    expect(src).not.toMatch(/`|^\s*(let|const)\s|\bfor\s*\(\s*(let|const)\b/m); // ES5 for old NW.js (MV)
   });
 });

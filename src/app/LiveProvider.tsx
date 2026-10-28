@@ -9,6 +9,11 @@ import { computeMissing } from "@/core/live/missing";
 import { getInstallStatus, install as installPlugin, livePaths, pluginVersionOf, uninstall as uninstallPlugin, type InstallResult, type InstallStatus } from "@/core/live/installer";
 import { LogTail, readLive } from "@/core/live/tail";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
+import type { GameIndex } from "@/core/types";
+import {
+  adoptLiveAssist, ASSIST_MIN_VERSION, controlJson, controlMismatch, DEFAULT_ASSIST, normalizeAssist, resyncDue, seenSets, versionAtLeast,
+  type AssistCommand, type AssistCommandKind, type AssistSettings, type SeenSets, type WrittenControl,
+} from "@/core/live/assist";
 import { clearReadPositions, gameKeyOf } from "@/ui/live/readPosition";
 
 export type Connection = "noPlugin" | "waiting" | "connected" | "stale";
@@ -102,8 +107,42 @@ interface TailEntry {
   clearedEpoch: number;
 }
 
+/** 게임 보조(control.json) — useLive()와 나눠 두어 설정이 바뀌어도 다른 화면은 다시 그리지 않는다. */
+export interface AssistValue {
+  settings: AssistSettings;
+  /** 설정을 바꾸고 바로 control.json에 쓴다. 클릭 핸들러 안에서 호출할 것(쓰기 권한 요청). */
+  setSettings(next: AssistSettings): void;
+  /** 전투 조작(이기기·지기·도망). supported일 때만. 클릭 핸들러 안에서 호출할 것. */
+  sendCommand(kind: AssistCommandKind): void;
+  /** 마지막으로 보낸 전투 명령(없으면 null) — live.json `assist.lastCommand`와 맞춰 응답을 보인다. */
+  sentCommand: AssistCommand | null;
+  /** 연결됨 + 게임의 플러그인이 1.1.0 이상 */
+  supported: boolean;
+}
+
+/** 본 것 묶음은 진행도가 바뀐 뒤 이 시간 동안 조용하면 쓴다. */
+const ASSIST_DEBOUNCE_MS = 3000;
+/** 전투 명령은 이 시간 동안만 control.json에 남긴다(플러그인도 10초 넘은 명령은 무시). */
+const COMMAND_TTL_MS = 10000;
+
+const assistStorageKey = (gameKey: string) => `rpgv.assist.${gameKey}`;
+function loadAssist(gameKey: string | null): AssistSettings {
+  if (gameKey === null) return DEFAULT_ASSIST;
+  try {
+    const raw = localStorage.getItem(assistStorageKey(gameKey));
+    return raw === null ? DEFAULT_ASSIST : normalizeAssist(JSON.parse(raw));
+  } catch {
+    return DEFAULT_ASSIST;
+  }
+}
+function saveAssist(gameKey: string | null, s: AssistSettings): void {
+  if (gameKey === null) return;
+  try { localStorage.setItem(assistStorageKey(gameKey), JSON.stringify(s)); } catch { /* 저장 못 해도 동작 */ }
+}
+
 const LiveContext = createContext<LiveContextValue | null>(null);
 const LiveStatusContext = createContext<LiveStatusValue | null>(null);
+const AssistContext = createContext<AssistValue | null>(null);
 
 /** t만 다른 live.json(하트비트)이면 같은 키 → 판정·못 본 것 재계산을 건너뛴다. */
 function stateKey(s: LiveSnapshot): string {
@@ -325,9 +364,177 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const statusValue = useMemo<LiveStatusValue>(() => ({ lastSeenT, lastLive, logStats }), [lastSeenT, lastLive, logStats]);
 
+  // ── 게임 보조: 설정(게임별 localStorage) → rpg-viewer/control.json ──
+  const gameKey = data ? gameKeyOf(data) : null;
+  const [assistKey, setAssistKey] = useState<string | null>(gameKey);
+  const [assistSettings, setAssistSettings] = useState<AssistSettings>(() => loadAssist(gameKey));
+  /** 마지막으로 보낸 전투 명령(응답 표시용) */
+  const [sentCommand, setSentCommand] = useState<AssistCommand | null>(null);
+  if (assistKey !== gameKey) {
+    setAssistKey(gameKey);
+    setAssistSettings(loadAssist(gameKey));
+    setSentCommand(null);
+  }
+  const assistSupported = connection === "connected" && wfolder !== null && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
+  const controlFile = dataRoot === null ? null : livePaths(dataRoot).controlFile;
+
+  /** 쓰기에 필요한 최신 값(비동기·타이머에서 읽는다) */
+  const assistLatest = useRef({ supported: false, folder: null as WritableGameFolder | null, controlFile: null as string | null, settings: assistSettings, coverage, index: index as GameIndex | null, gameKey, live: live as LiveSnapshot | null });
+  useEffect(() => {
+    assistLatest.current = { supported: assistSupported, folder: wfolder, controlFile, settings: assistSettings, coverage, index: index ?? null, gameKey, live };
+  });
+  /** 마지막으로 성공한 쓰기: 본문(t 제외, 같으면 다시 쓰지 않는다)·t·설정 */
+  const lastWritten = useRef<(WrittenControl & { body: string }) | null>(null);
+  const lastCommand = useRef<AssistCommand | null>(null);
+  /** 쓰기에 성공한 마지막 명령 id */
+  const commandWritten = useRef<string | null>(null);
+  const setsCache = useRef<{ coverage: Coverage; index: GameIndex; sets: SeenSets } | null>(null);
+  /** 모든 쓰기는 이 사슬로 하나씩. 기다리는 쓰기는 하나로 합친다(queued). */
+  const writeChain = useRef<Promise<void>>(Promise.resolve());
+  const queued = useRef<{ force: boolean; perms: Promise<unknown>[] } | null>(null);
+  const writing = useRef(false);
+  const writeGen = useRef(0);
+  /** controlT가 마지막 쓰기와 어긋나기 시작한 때 / 마지막으로 다시 쓴 때 */
+  const mismatchSince = useRef<number | null>(null);
+  const lastResyncAt = useRef<number | null>(null);
+
+  // 게임이 바뀌면 쓰기 기록을 비운다.
+  useEffect(() => {
+    writeGen.current++;
+    lastWritten.current = null;
+    lastCommand.current = null;
+    commandWritten.current = null;
+    setsCache.current = null;
+    queued.current = null;
+    mismatchSince.current = null;
+    lastResyncAt.current = null;
+  }, [wfolder, data]);
+
+  /** control.json을 한 번 쓴다. 쓰는 순간의 최신 설정·본 것·명령을 쓴다. 실패는 조용히 넘긴다. */
+  const doWrite = useCallback(async (force: boolean, perms: Promise<unknown>[]) => {
+    const gen = writeGen.current;
+    if (perms.length > 0) await Promise.all(perms);
+    const cur = assistLatest.current;
+    const folderNow = cur.folder;
+    const path = cur.controlFile;
+    if (!folderNow || !path || !cur.index || writeGen.current !== gen) return;
+    let cached = setsCache.current;
+    if (!cached || cached.coverage !== cur.coverage || cached.index !== cur.index) {
+      cached = { coverage: cur.coverage, index: cur.index, sets: seenSets(cur.coverage, cur.index) };
+      setsCache.current = cached;
+    }
+    const now = Date.now();
+    // 다시 쓰기(force)에는 이미 쓴 명령을 다시 싣지 않는다 — 재시작한 게임이 예전 명령을 새 전투에 쓰지 않도록.
+    const fresh = lastCommand.current && now - lastCommand.current.at < COMMAND_TTL_MS ? lastCommand.current : null;
+    const cmd = fresh && !(force && commandWritten.current === fresh.id) ? fresh : null;
+    const settings = cur.settings;
+    const body = controlJson(settings, cached.sets, cmd, 0);
+    const prev = lastWritten.current;
+    if (!force && prev?.body === body) return;
+    const t = Math.max(now, (prev?.t ?? 0) + 1);
+    let ok = false;
+    try { ok = await folderNow.writeText(path, controlJson(settings, cached.sets, cmd, t)); } catch { ok = false; }
+    if (ok && writeGen.current === gen && assistLatest.current.folder === folderNow) {
+      lastWritten.current = { body, t, settings };
+      if (cmd) commandWritten.current = cmd.id;
+    }
+  }, []);
+
+  /** control.json 쓰기를 사슬에 건다. gesture면 지금(클릭 핸들러 안에서) 쓰기 권한을 요청한다. force면 본문이 같아도 쓴다. */
+  const requestControlWrite = useCallback((opts: { gesture?: boolean; force?: boolean } = {}) => {
+    const folderNow = assistLatest.current.folder;
+    const perm = opts.gesture && folderNow ? folderNow.requestWrite().catch(() => false) : null;
+    const q = queued.current;
+    if (q) {
+      q.force ||= opts.force === true;
+      if (perm) q.perms.push(perm);
+      return;
+    }
+    const next = { force: opts.force === true, perms: perm ? [perm] : [] };
+    queued.current = next;
+    writeChain.current = writeChain.current.then(async () => {
+      if (queued.current !== next) return;
+      queued.current = null;
+      writing.current = true;
+      try { await doWrite(next.force, next.perms); } catch { /* 조용히 */ } finally { writing.current = false; }
+    });
+  }, [doWrite]);
+
+  const updateSettings = useCallback((s: AssistSettings) => {
+    setAssistSettings(s);
+    saveAssist(assistLatest.current.gameKey, s);
+    assistLatest.current = { ...assistLatest.current, settings: s };
+  }, []);
+
+  const setSettings = useCallback((next: AssistSettings) => {
+    updateSettings(normalizeAssist(next));
+    if (assistLatest.current.supported) requestControlWrite({ gesture: true });
+  }, [updateSettings, requestControlWrite]);
+
+  const sendCommand = useCallback((kind: AssistCommandKind) => {
+    if (!assistLatest.current.supported) return;
+    const at = Date.now();
+    const command: AssistCommand = { id: `c-${at}`, kind, at };
+    lastCommand.current = command;
+    setSentCommand(command);
+    requestControlWrite({ gesture: true });
+  }, [requestControlWrite]);
+
+  // 연결되면(또는 플러그인이 1.1.0 이상이 되면) 바로 한 번 쓴다(권한이 이미 있을 때만 성공).
+  useEffect(() => {
+    if (assistSupported) requestControlWrite();
+  }, [assistSupported, wfolder, requestControlWrite]);
+
+  // 진행도가 바뀌면 3초 조용할 때 본 것 묶음을 다시 쓴다.
+  useEffect(() => {
+    if (!assistSupported) return;
+    const id = setTimeout(() => requestControlWrite(), ASSIST_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [assistSupported, coverage, index, requestControlWrite]);
+
+  /**
+   * 게임과 맞추기:
+   * - 게임 창 단축키로 바뀐 배속·본 대사 넘기기를 받아들인다(게임이 우리 마지막 파일을 적용한 뒤 바꾼 값만).
+   * - 게임이 적용한 파일(controlT)이 마지막 쓰기와 3초 넘게 다르면 다시 쓴다(게임 재시작·F5, 시작 전 파일 무시). 5초에 한 번까지.
+   */
+  const syncWithGame = useCallback(() => {
+    const cur = assistLatest.current;
+    if (!cur.supported) { mismatchSince.current = null; return; }
+    const a = cur.live?.assist;
+    const pending = queued.current !== null || writing.current;
+    const patch = adoptLiveAssist(a, lastWritten.current, cur.settings, pending);
+    if (patch) {
+      updateSettings(normalizeAssist({ ...cur.settings, ...patch }));
+      requestControlWrite();
+      return;
+    }
+    const now = Date.now();
+    if (!pending && controlMismatch(a, lastWritten.current?.t ?? null)) mismatchSince.current ??= now;
+    else mismatchSince.current = null;
+    if (resyncDue(mismatchSince.current, lastResyncAt.current, now)) {
+      lastResyncAt.current = now;
+      mismatchSince.current = null;
+      requestControlWrite({ force: true });
+    }
+  }, [updateSettings, requestControlWrite]);
+
+  useEffect(() => {
+    if (!assistSupported) return;
+    syncWithGame();
+    const id = setInterval(syncWithGame, 1000);
+    return () => clearInterval(id);
+  }, [assistSupported, live, syncWithGame]);
+
+  const assistValue = useMemo<AssistValue>(
+    () => ({ settings: assistSettings, setSettings, sendCommand, sentCommand, supported: assistSupported }),
+    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported],
+  );
+
   return (
     <LiveContext.Provider value={value}>
-      <LiveStatusContext.Provider value={statusValue}>{children}</LiveStatusContext.Provider>
+      <LiveStatusContext.Provider value={statusValue}>
+        <AssistContext.Provider value={assistValue}>{children}</AssistContext.Provider>
+      </LiveStatusContext.Provider>
     </LiveContext.Provider>
   );
 }
@@ -336,6 +543,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 export function useLive(): LiveContextValue {
   const v = useContext(LiveContext);
   if (!v) throw new Error("useLive must be used within LiveProvider");
+  return v;
+}
+
+/** 게임 보조 설정·전투 조작. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAssist(): AssistValue {
+  const v = useContext(AssistContext);
+  if (!v) throw new Error("useAssist must be used within LiveProvider");
   return v;
 }
 

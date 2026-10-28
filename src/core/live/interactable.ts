@@ -20,7 +20,7 @@ const entriesCache = new WeakMap<object, Map<string, PageEntry>>();
 /** data → (페이지 객체 → 출현 조건) */
 const condCache = new WeakMap<object, WeakMap<object, Condition[]>>();
 /** coverage → (페이지 항목 → 새것 수) */
-const countCache = new WeakMap<object, WeakMap<object, { unseen: number; unpicked: number }>>();
+const countCache = new WeakMap<object, WeakMap<object, NewCounts>>();
 
 function pageConditions(pg: { conditions: any; trigger: any }, data: GameData): Condition[] {
   let byPage = isObj(data) ? condCache.get(data) : undefined;
@@ -86,28 +86,57 @@ function markOf(entry: PageEntry, trigger: unknown): Interactable["mark"] {
   return trigger <= 2 ? "talk" : trigger <= 4 ? "auto" : "none";
 }
 
-/** countNew를 coverage·페이지 항목별로 기억한다. */
-function countNewCached(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: number } {
+/**
+ * 페이지 항목의 안 본 대사 수(기본은 선택지 밖만, opts.inChoices면 갈래 안도)·안 고른 선택지 항목 수·대사 노드 수.
+ * 기본 모드는 coverage·항목별로 기억한다. 예외를 던지지 않는다.
+ */
+export function pageNewCounts(entry: PageEntry, cov: Coverage, opts: NewCountOptions = {}): NewCounts {
+  try {
+    if (!isObj(entry) || !isObj(cov)) return { unseen: 0, unpicked: 0, dialogue: 0 };
+    return opts.inChoices === true ? countNew(entry, cov, opts) : countNewCached(entry, cov);
+  } catch {
+    return { unseen: 0, unpicked: 0, dialogue: 0 };
+  }
+}
+
+/** countNew(기본 모드)를 coverage·페이지 항목별로 기억한다. */
+function countNewCached(entry: PageEntry, cov: Coverage): NewCounts {
   let byEntry = countCache.get(cov);
   if (!byEntry) { byEntry = new WeakMap(); countCache.set(cov, byEntry); }
   const hit = byEntry.get(entry);
   if (hit) return hit;
-  const counts = countNew(entry, cov);
+  const counts = countNew(entry, cov, {});
   byEntry.set(entry, counts);
   return counts;
 }
 
-/** 페이지를 한 번 훑어 선택지 밖 안 본 대사 수와 안 고른 선택지 항목 수를 센다. */
-function countNew(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: number } {
-  let unseen = 0, unpicked = 0;
+export interface NewCountOptions {
+  /** true면 선택지 갈래 안의 안 본 대사도 unseen에 센다(기본: 선택지 밖만). */
+  inChoices?: boolean;
+}
+export interface NewCounts {
+  unseen: number; unpicked: number;
+  /** 대사·스크롤·선택지 노드 수(갈래 안 포함) */
+  dialogue: number;
+}
+
+/**
+ * 페이지를 한 번 훑어 안 본 대사 수(기본은 선택지 밖만, opts.inChoices면 갈래 안도),
+ * 안 고른 선택지 항목 수(취소 갈래 포함), 대사·선택지 노드 수를 센다. 예외를 던지지 않는다(이상하면 지금까지 센 것).
+ */
+function countNew(entry: PageEntry, cov: Coverage, opts: NewCountOptions): NewCounts {
+  let unseen = 0, unpicked = 0, dialogue = 0;
+  const deep = opts.inChoices === true;
   const visit = (nodes: unknown, inChoice: boolean) => {
     for (const n of arr<ScriptNode | null>(nodes)) {
       if (!isObj(n)) continue;
       switch (n.kind) {
         case "message": case "scroll":
-          if (!inChoice && !cov.seen.has(seenKey(entry.location, n.cmd))) unseen++;
+          dialogue++;
+          if ((deep || !inChoice) && !cov.seen.has(seenKey(entry.location, n.cmd))) unseen++;
           break;
         case "choices": {
+          dialogue++;
           const picked = new Set(arr<{ picked: number } | null>(cov.picks.get(pickKey(entry.location, n.cmd))).map(p => p?.picked));
           arr<{ body: ScriptNode[] } | null>(n.branches).forEach((b, bi) => {
             if (!isObj(b)) return;
@@ -130,12 +159,16 @@ function countNew(entry: PageEntry, cov: Coverage): { unseen: number; unpicked: 
       }
     }
   };
-  visit(entry.nodes, false);
-  return { unseen, unpicked };
+  try {
+    if (isObj(entry) && isObj(cov) && cov.seen instanceof Set && cov.picks instanceof Map) visit(entry.nodes, false);
+  } catch {
+    /* 지금까지 센 것 */
+  }
+  return { unseen, unpicked, dialogue };
 }
 
 /** 위치 키 → 페이지 항목. index별로 한 번만 만든다. */
-function pageEntries(index: GameIndex): Map<string, PageEntry> {
+export function pageEntries(index: GameIndex): Map<string, PageEntry> {
   const cached = isObj(index) ? entriesCache.get(index) : undefined;
   if (cached) return cached;
   const byKey = new Map<string, PageEntry>();

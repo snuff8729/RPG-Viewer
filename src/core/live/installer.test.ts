@@ -8,7 +8,7 @@ const UNSUPPORTED = { ok: false, message: "이 게임은 자동 설치를 지원
 describe("installer", () => {
   it("paths", () => {
     expect(livePaths("www/data").pluginsJs).toBe("www/js/plugins.js");
-    expect(livePaths("www/data")).toMatchObject({ base: "www", pluginFile: "www/js/plugins/RPGViewerBridge.js", logDir: "www/rpg-viewer", logFile: "www/rpg-viewer/log.jsonl", liveFile: "www/rpg-viewer/live.json", backupFile: "www/rpg-viewer/plugins.js.bak" });
+    expect(livePaths("www/data")).toMatchObject({ base: "www", pluginFile: "www/js/plugins/RPGViewerBridge.js", logDir: "www/rpg-viewer", logFile: "www/rpg-viewer/log.jsonl", liveFile: "www/rpg-viewer/live.json", controlFile: "www/rpg-viewer/control.json", backupFile: "www/rpg-viewer/plugins.js.bak" });
     expect(livePaths("data").logFile).toBe("rpg-viewer/log.jsonl");
     expect(livePaths("data").base).toBe("");
     expect(livePaths("data").pluginsJs).toBe("js/plugins.js");

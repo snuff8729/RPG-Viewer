@@ -1,31 +1,36 @@
-import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import { GameProvider, useGame } from "@/app/GameProvider";
-import { useRoute } from "@/app/route";
+import { formatRoute, useRoute } from "@/app/route";
 import { locationKey } from "@/core/index/locations";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { StartScreen } from "@/ui/StartScreen";
 import { AppSidebar } from "@/ui/AppSidebar";
-import { ErrorsBadge } from "@/ui/ErrorsBadge";
 import { EventView } from "@/ui/EventView";
+import { ExplorerView } from "@/ui/ExplorerView";
+import { useExplorerState } from "@/ui/useExplorerState";
 import { SearchDialog } from "@/ui/SearchDialog";
+import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider } from "@/app/LiveProvider";
-import { LiveTabs } from "@/ui/live/LiveTabs";
-import { ConnectionBadge } from "@/ui/live/ConnectionBadge";
+import { AssistPanel } from "@/ui/live/AssistPanel";
 import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
 import { MissingView } from "@/ui/live/MissingView";
+import { HereView } from "@/ui/live/HereView";
 
 function Shell() {
   const { status, data, index, close } = useGame();
   const [route] = useRoute();
-  const [showEmpty, setShowEmpty] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** 게임 속 맵을 찾아보기에서 펼쳐 따라간다 */
+  const [follow, setFollow] = useState(true);
+  const [explorer, setExplorer] = useExplorerState(route, follow);
+  /** 못 본 것 화면에 미리 채울 검색어. n이 바뀌면 화면을 다시 마운트한다. */
+  const [missingSeed, setMissingSeed] = useState({ n: 0, query: "" });
   const ready = status === "ready";
 
   useEffect(() => {
@@ -46,42 +51,57 @@ function Shell() {
     ? index.pages.find((p) => locationKey(p.location) === locationKey(route.location))
     : undefined;
   const crumbs = entry ? entry.path.split(" › ") : [];
+  const openMissing = (query: string) => {
+    setMissingSeed((s) => ({ n: s.n + 1, query }));
+    window.location.hash = formatRoute({ kind: "missing" });
+  };
 
   return (
     <SidebarProvider>
-      <AppSidebar route={route} showEmpty={showEmpty} onShowEmptyChange={setShowEmpty} />
+      <AppSidebar
+        route={route}
+        follow={follow}
+        onFollowChange={setFollow}
+        onOpenMissing={openMissing}
+        onSearch={() => setSearchOpen(true)}
+        onClose={() => { setSearchOpen(false); close(); }}
+      />
       <SidebarInset>
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <LiveTabs route={route} />
-          <div className="ml-auto flex items-center gap-2">
-            <ConnectionBadge />
-            <span className="text-sm">{data.system.gameTitle}</span>
-            <Badge variant="secondary">{data.engine}</Badge>
-            <ErrorsBadge />
-            <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)}><Search />검색</Button>
-            <Button variant="ghost" size="sm" onClick={() => { setSearchOpen(false); close(); }}>다른 게임 열기</Button>
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap">
+              {route.kind === "page" ? (
+                <>
+                  <BreadcrumbItem className="shrink-0">
+                    <BreadcrumbLink href={formatRoute({ kind: "home" })}>{VIEW_NAMES.explore}</BreadcrumbLink>
+                  </BreadcrumbItem>
+                  {crumbs.map((c, i) => (
+                    <Fragment key={i}>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem className="min-w-0">
+                        <BreadcrumbPage className={`truncate ${i === crumbs.length - 1 ? "" : "font-normal text-muted-foreground"}`}>{c}</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </Fragment>
+                  ))}
+                </>
+              ) : (
+                <BreadcrumbItem><BreadcrumbPage>{VIEW_NAMES[viewOf(route)]}</BreadcrumbPage></BreadcrumbItem>
+              )}
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <AssistPanel />
           </div>
         </header>
         <main className="flex-1 p-4">
-          {route.kind === "page" && crumbs.length > 0 && (
-            <Breadcrumb className="mb-4">
-              <BreadcrumbList>
-                {crumbs.map((c, i) => (
-                  <BreadcrumbItem key={i}>
-                    {i > 0 && <BreadcrumbSeparator />}
-                    <BreadcrumbPage className={i === crumbs.length - 1 ? undefined : "font-normal text-muted-foreground"}>{c}</BreadcrumbPage>
-                  </BreadcrumbItem>
-                ))}
-              </BreadcrumbList>
-            </Breadcrumb>
-          )}
-          {route.kind === "home" && <p className="text-sm text-muted-foreground">왼쪽에서 이벤트를 선택하세요</p>}
+          {route.kind === "home" && <ExplorerView state={explorer} onStateChange={setExplorer} />}
           {route.kind === "page" && <EventView route={route} />}
           {route.kind === "read" && <ReaderView />}
+          {route.kind === "here" && <HereView />}
           {route.kind === "history" && <HistoryView />}
-          {route.kind === "missing" && <MissingView />}
+          {route.kind === "missing" && <MissingView key={missingSeed.n} initialQuery={missingSeed.query} />}
         </main>
       </SidebarInset>
       <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />

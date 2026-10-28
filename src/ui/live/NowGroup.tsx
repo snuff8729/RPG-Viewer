@@ -1,64 +1,63 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { List } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
+import {
+  SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
+import { formatRoute } from "@/app/route";
 import { openPage } from "../navigation";
-import { mapInteractables } from "@/core/live/interactable";
-import { useConditionsLive } from "./useConditionsLive";
+import { nowItems } from "./sidebarItems";
+import { useMapChecklist } from "./useMapChecklist";
 
-const MARK = { talk: "●", auto: "⚡", none: "○" } as const;
-
-/** 사이드바 맨 위 "지금" 그룹. 연결되지 않았으면 아무것도 그리지 않는다. */
-export function NowGroup({ showEmpty, follow, onFollowChange }: {
-  showEmpty: boolean; follow: boolean; onFollowChange: (v: boolean) => void;
-}) {
-  const { data, index } = useGame();
-  const { live, connection, coverage } = useLive();
-  const [onlyNew, setOnlyNew] = useState(false);
-  // 위치만 바뀐 스냅샷으로는 다시 계산하지 않는다(출현 조건 필드·맵·이벤트 페이지가 바뀔 때만)
-  const condLive = useConditionsLive(live);
-  const events = useMemo(
-    () => (data && index && condLive ? mapInteractables(data, index, coverage, condLive, condLive.mapId) : []),
-    [data, index, coverage, condLive],
-  );
+/** 사이드바 "지금": 이 맵에서 지금 할 것. 연결되지 않았으면 아무것도 그리지 않는다. */
+export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollowChange: (v: boolean) => void }) {
+  const { data } = useGame();
+  const { live, connection } = useLive();
+  const checklist = useMapChecklist();
+  const items = useMemo(() => nowItems(checklist), [checklist]);
 
   if (connection !== "connected" || !live || !data) return null;
   const mapName = data.mapInfos[live.mapId]?.name || `#${live.mapId}`;
-  const shown = events.filter((e) => (e.mark !== "none" || showEmpty) && (!onlyNew || e.isNew));
 
   return (
     <SidebarGroup>
       <div className="flex items-center justify-between pr-2">
         <SidebarGroupLabel>지금</SidebarGroupLabel>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <Label htmlFor="only-new" className="text-xs font-normal">안 본 것만</Label>
-            <Switch id="only-new" checked={onlyNew} onCheckedChange={setOnlyNew} />
-          </div>
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5">
           <Label htmlFor="follow-live" className="text-xs font-normal">따라가기</Label>
           <Switch id="follow-live" checked={follow} onCheckedChange={onFollowChange} />
-          </div>
         </div>
       </div>
       <SidebarGroupContent>
         <p className="truncate px-2 pb-1 text-sm">{mapName} ({live.x}, {live.y})</p>
+        {items.length === 0 && <p className="px-2 pb-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>}
         <SidebarMenu>
-          {shown.map((e) => (
-            <SidebarMenuItem key={`${e.eventId}:${e.page}`}>
+          {items.map((e) => (
+            <SidebarMenuItem key={e.eventId}>
               <SidebarMenuButton onClick={() => openPage(e.location)}>
-                <span aria-hidden className="w-4 shrink-0 text-center">{MARK[e.mark]}</span>
                 <span className="truncate">{e.title}</span>
-                {e.unseen > 0 && <Badge variant="secondary" className="ml-auto shrink-0 text-xs">새 대화</Badge>}
-                {e.unpicked > 0 && (
-                  <Badge variant="secondary" className={`shrink-0 text-xs ${e.unseen > 0 ? "" : "ml-auto"}`}>선택지 {e.unpicked}</Badge>
-                )}
+                <span className="ml-auto flex shrink-0 gap-1">
+                  {e.section === "now" && e.unseen > 0 && <Badge variant="secondary" className="text-xs">새 대화</Badge>}
+                  {e.section === "now" && e.unpicked > 0 && <Badge variant="secondary" className="text-xs">선택지 {e.unpicked}</Badge>}
+                  {e.section === "repeat" && <Badge variant="outline" className="text-xs">반복</Badge>}
+                </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
+          {checklist && (
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="text-muted-foreground">
+                <a href={formatRoute({ kind: "here" })}>
+                  <List />
+                  <span>이 맵 전체 보기 ({checklist.remaining})</span>
+                </a>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

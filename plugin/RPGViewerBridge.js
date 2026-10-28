@@ -5,8 +5,12 @@
  * @help
  * RPG Viewer가 설치하는 기록 플러그인입니다.
  * 게임 폴더의 rpg-viewer/ 아래에 플레이 기록(log.jsonl)과
- * 현재 상태(live.json)를 남깁니다. 게임 화면과 진행에는 영향을 주지 않습니다.
+ * 현재 상태(live.json)를 남깁니다.
+ * RPG Viewer의 "게임 보조"(rpg-viewer/control.json)나 아래 단축키를 쓰지 않으면
+ * 게임 화면과 진행에는 영향을 주지 않습니다.
  * 플러그인 명령이나 파라미터는 없습니다.
+ * 게임 창 단축키: F6 배속(×1→×2→×4→×8), F7 본 대사 자동 넘기기,
+ * 전투 중 F10 이기기, F11 지기. 선택지는 자동으로 고르지 않습니다.
  * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  *
@@ -21,11 +25,12 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.5",
+    VERSION: "1.1.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
     _runScheduled: function () {},
+    _frame: function () { return 1; },
     _hooks: []
   };
   G.RPGViewerBridge = bridge;
@@ -53,6 +58,7 @@
   var LIVE = path.join(DIR, "live.json");
   var LIVE_TMP = path.join(DIR, "live.json.tmp");
   var META = path.join(DIR, "meta.json");
+  var CONTROL = path.join(DIR, "control.json");
   var MAX_BUFFER = 5000;
 
   // ---------------------------------------------------------------- state
@@ -72,6 +78,37 @@
   var errorTimes = {}, errorCount = 0; // message -> time it was last written
   var ERROR_REPEAT_MS = 60000;
   var lastLiveBody = null, lastLiveT = 0;
+
+  // game assist (control.json from the viewer, hotkeys in game)
+  var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
+  var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
+  var COMMAND_KINDS = { win: true, lose: true, escape: true };
+  var CONTROL_POLL_MS = 1000, COMMAND_MAX_AGE_MS = 10000, AUTO_ADVANCE_UPDATES = 6, MAX_SPEED = 8;
+  var KEY_SPEED = "rpgvSpeed", KEY_SKIP = "rpgvSkip", KEY_WIN = "rpgvWin", KEY_LOSE = "rpgvLose";
+  var HOTKEY_NAMES = ["speed", "skip", "win", "lose"];
+  var HOTKEY_BUTTONS = { speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE };
+  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122 }; // F6 F7 F10 F11
+  // keyCodes the engine itself uses (default Input.keyMapper, F2-F5, F8, F9): never offered as hotkeys
+  var RESERVED_KEYS = {
+    9: true, 13: true, 16: true, 17: true, 18: true, 27: true, 32: true, 33: true, 34: true,
+    37: true, 38: true, 39: true, 40: true, 45: true, 81: true, 87: true, 88: true, 90: true,
+    96: true, 98: true, 100: true, 102: true, 104: true,
+    113: true, 114: true, 115: true, 116: true, 119: true, 120: true
+  };
+  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122 }; // wanted bindings (null = disabled)
+  var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
+  var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
+  var seenMessages = Object.create(null), seenPages = Object.create(null);
+  // last speed/skipSeen taken from control.json: a rewrite with the same value does not undo a hotkey change
+  var ctrlSpeed = null, ctrlSkip = null;
+  var lastControlKey = null, lastControlText = null, lastControlPollT = -Infinity;
+  var lastCommandId = null, lastCommand = null, pendingCommand = null;
+  var controlT = null;        // "t" of the last applied control.json (null = none applied this session)
+  var battleStartT = -Infinity; // when the current battle was set up: older commands never apply to it
+  var effectiveSpeed = 1;
+  var pendingMsgKey = null;   // seen key of the message command101 just set up
+  var inFrame = false;
+  var extraUpdate = false;    // inside an extra (sped-up) scene update: input queries report nothing new
 
   function isCount(n) { return typeof n === "number" && isFinite(n) && n >= 1 && Math.floor(n) === n; }
 
@@ -404,12 +441,8 @@
     var ss = G.$gameSelfSwitches, party = G.$gameParty, msg = G.$gameMessage;
     if (run === null || !map || !player || !sw || !vars || !ss || !party) return null;
     var inBattle = !!(party.inBattle && party.inBattle());
-    var inner = inBattle && G.$gameTroop ? G.$gameTroop._interpreter : map._interpreter;
-    var depth = 0;
-    while (inner && inner._childInterpreter && inner._childInterpreter.isRunning && inner._childInterpreter.isRunning() && depth < 32) {
-      inner = inner._childInterpreter; depth++;
-    }
-    var active = !!(inner && inner.isRunning && inner.isRunning());
+    var inner = innermost(inBattle);
+    var active = !!inner;
     var events = [];
     var list = map.events();
     for (var i = 0; i < list.length; i++) {
@@ -446,8 +479,28 @@
       gold: typeof party._gold === "number" ? party._gold : 0,
       party: (party._actors || []).slice(),
       choice: choice,
-      inBattle: inBattle
+      inBattle: inBattle,
+      assist: {
+        speed: assist.speed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
+        troopId: inBattle && G.$gameTroop && typeof G.$gameTroop._troopId === "number" ? G.$gameTroop._troopId : null,
+        canEscape: inBattle && canEscapeNow(),
+        canLose: inBattle && !!(G.BattleManager && G.BattleManager._canLose),
+        lastCommand: lastCommand,
+        controlT: controlT,
+        hotkeys: effectiveHotkeys()
+      }
     };
+  }
+
+  // Innermost running interpreter of the map (or of the troop in battle), or null.
+  function innermost(inBattle) {
+    var map = G.$gameMap;
+    var inner = inBattle && G.$gameTroop ? G.$gameTroop._interpreter : (map ? map._interpreter : null);
+    var depth = 0;
+    while (inner && inner._childInterpreter && inner._childInterpreter.isRunning && inner._childInterpreter.isRunning() && depth < 32) {
+      inner = inner._childInterpreter; depth++;
+    }
+    return inner && inner.isRunning && inner.isRunning() ? inner : null;
   }
 
   // Title (or boot) scene: objects may still hold the previous play; let live.json go stale.
@@ -466,7 +519,7 @@
     var t = now();
     // changes: at most once per second; unchanged: heartbeat every 2 seconds
     // running / runningCmd / choice / mapId changes skip the 1s floor
-    var urgentKey = JSON.stringify([snap.running, snap.runningCmd, snap.choice, snap.mapId]);
+    var urgentKey = JSON.stringify([snap.running, snap.runningCmd, snap.choice, snap.mapId, snap.assist]);
     var urgent = lastUrgentKey !== null && urgentKey !== lastUrgentKey;
     if (!force && !urgent && t - lastLiveT < (body === lastLiveBody ? 2000 : 1000)) return;
     lastUrgentKey = urgentKey;
@@ -483,7 +536,277 @@
     }
   }
 
+  // ---------------------------------------------------------------- game assist
+  function locKey(src) {
+    if (!src) return null;
+    if (src.source === "map") return "map:" + src.mapId + ":" + src.eventId + ":" + src.page;
+    if (src.source === "common") return "common:" + src.commonEventId;
+    if (src.source === "troop") return "troop:" + src.troopId + ":" + src.page;
+    return null;
+  }
+
+  function stringSet(arr) {
+    var out = Object.create(null);
+    for (var i = 0; i < arr.length; i++) if (typeof arr[i] === "string") out[arr[i]] = true;
+    return out;
+  }
+
+  function validHotkey(v) {
+    return typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= 8 && v <= 255 && RESERVED_KEYS[v] !== true;
+  }
+
+  // control.json "hotkeys": keyCode or null (disabled) per entry; missing/invalid -> default,
+  // a keyCode already taken by an earlier entry -> default if free, else disabled.
+  function hotkeysFrom(h) {
+    var out = {}, used = {};
+    var obj = h && typeof h === "object" ? h : {};
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var name = HOTKEY_NAMES[i];
+      var v = has(obj, name) ? obj[name] : undefined;
+      if (v !== null && !validHotkey(v)) v = HOTKEY_DEFAULTS[name];
+      if (v !== null && used[v] === true) v = used[HOTKEY_DEFAULTS[name]] === true ? null : HOTKEY_DEFAULTS[name];
+      if (v !== null) used[v] = true;
+      out[name] = v;
+    }
+    return out;
+  }
+
+  // Replace this plugin's Input.keyMapper entries with the wanted hotkeys; never overwrite
+  // a mapping that belongs to the engine or another plugin.
+  function applyKeyMap() {
+    var I = G.Input;
+    var km = I && I.keyMapper;
+    if (!km || typeof km !== "object") return;
+    for (var code in mappedKeys) {
+      if (has(mappedKeys, code) && km[code] === mappedKeys[code]) delete km[code];
+    }
+    mappedKeys = {};
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var name = HOTKEY_NAMES[i], k = hotkeys[name];
+      if (k === null || km[k] !== undefined) continue;
+      km[k] = HOTKEY_BUTTONS[name];
+      mappedKeys[k] = HOTKEY_BUTTONS[name];
+    }
+  }
+
+  // Bindings that actually work (null when disabled or the key belongs to someone else).
+  function effectiveHotkeys() {
+    var out = {};
+    var km = G.Input && G.Input.keyMapper;
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var name = HOTKEY_NAMES[i], k = hotkeys[name];
+      out[name] = k !== null && km && typeof km === "object" && km[k] === HOTKEY_BUTTONS[name] ? k : null;
+    }
+    return out;
+  }
+
+  function stripBom(text) { return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text; }
+
+  function applyControl(text) {
+    var c;
+    try { c = JSON.parse(stripBom(String(text))); } catch (ignore) { return; } // half-written / bad JSON: keep the old settings
+    if (!c || typeof c !== "object" || c.v !== 1) return;
+    controlT = typeof c.t === "number" && isFinite(c.t) ? c.t : null;
+    if (typeof c.speed === "number" && SPEED_OK[c.speed] === true) {
+      if (ctrlSpeed === null || c.speed !== ctrlSpeed) assist.speed = c.speed;
+      ctrlSpeed = c.speed;
+    }
+    if (typeof c.skipSeen === "boolean") {
+      if (ctrlSkip === null || c.skipSeen !== ctrlSkip) assist.skipSeen = c.skipSeen;
+      ctrlSkip = c.skipSeen;
+    }
+    if (typeof c.autoFast === "boolean") assist.autoFast = c.autoFast;
+    if (typeof c.autoSpeed === "number" && SPEED_OK[c.autoSpeed] === true) assist.autoSpeed = c.autoSpeed;
+    if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
+    if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
+    // c.seenTroops is accepted and ignored: battles are never sped up automatically
+    var hk = hotkeysFrom(c.hotkeys);
+    if (JSON.stringify(hk) !== JSON.stringify(hotkeys)) {
+      hotkeys = hk;
+      applyKeyMap();
+    }
+    var cmd = c.command;
+    if (cmd && typeof cmd === "object" && typeof cmd.id === "string" && cmd.id && cmd.id !== lastCommandId && COMMAND_KINDS[cmd.kind] === true) {
+      lastCommandId = cmd.id; // at most once, even when stale
+      // issue time of the command itself (older viewers: the control file's t)
+      var at = typeof cmd.at === "number" && isFinite(cmd.at) ? cmd.at : c.t;
+      if (commandFresh(at)) {
+        pendingCommand = { id: cmd.id, kind: cmd.kind, t: at };
+      } else {
+        lastCommand = cmd.id + ":ignored";
+      }
+    }
+  }
+
+  // Issued within the last 10 s and not before the current battle started.
+  function commandFresh(at) {
+    return typeof at === "number" && isFinite(at) && now() - at <= COMMAND_MAX_AGE_MS && at >= battleStartT;
+  }
+
+  // mtime:size of control.json (null when stat gives no usable mtime).
+  function controlKey() {
+    if (typeof fs.statSync !== "function") return null;
+    var st = fs.statSync(CONTROL);
+    var m = st && typeof st.mtimeMs === "number" ? st.mtimeMs : (st && st.mtime && typeof st.mtime.getTime === "function" ? st.mtime.getTime() : null);
+    return typeof m === "number" && isFinite(m) ? m + ":" + st.size : null;
+  }
+
+  // At startup: remember the control file left from an earlier session without applying it;
+  // only a file written after startup is applied (the viewer rewrites it when controlT is not its own).
+  function baselineControl() {
+    if (!fs.existsSync(CONTROL)) return;
+    var key = controlKey();
+    lastControlKey = key;
+    lastControlText = key === null ? String(fs.readFileSync(CONTROL, "utf8")) : null;
+  }
+
+  // Our hotkeys vanished from Input.keyMapper (another plugin replaced it): map them again.
+  function keyMapIntact() {
+    var km = G.Input && G.Input.keyMapper;
+    if (!km || typeof km !== "object") return true;
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var k = hotkeys[HOTKEY_NAMES[i]];
+      if (k !== null && km[k] === undefined) return false;
+    }
+    return true;
+  }
+
+  function pollControl() {
+    var t = now();
+    if (t - lastControlPollT < CONTROL_POLL_MS) return;
+    lastControlPollT = t;
+    try { if (!keyMapIntact()) applyKeyMap(); } catch (ek) { reportError(ek); }
+    if (!fs.existsSync(CONTROL)) return;
+    var key = controlKey();
+    if (key !== null && key === lastControlKey) return;
+    var text = String(fs.readFileSync(CONTROL, "utf8"));
+    if (key === null && text === lastControlText) return; // no usable mtime: compare contents
+    lastControlKey = key;
+    lastControlText = key === null ? text : null;
+    applyControl(text);
+  }
+
+  function inBattleNow() {
+    var p = G.$gameParty;
+    return !!(p && p.inBattle && p.inBattle());
+  }
+
+  function choicePending() {
+    var m = G.$gameMessage;
+    if (!m) return false;
+    return !!((m.isChoice && m.isChoice()) || (m.isNumberInput && m.isNumberInput()) || (m.isItemChoice && m.isItemChoice()));
+  }
+
+  // Auto speed only for a fully seen event outside battle (battles are never judged "seen").
+  function autoActive() {
+    if (!assist.autoFast || inBattleNow()) return false;
+    var inner = innermost(false);
+    var k = inner ? locKey(inner._rpgvSrc) : null;
+    return k !== null && seenPages[k] === true;
+  }
+
+  function computeSpeed() {
+    var s = assist.speed;
+    if (autoActive() && assist.autoSpeed > s) s = assist.autoSpeed;
+    return s > MAX_SPEED ? MAX_SPEED : (s < 1 ? 1 : s);
+  }
+
+  function battleEnding(BM) {
+    var ph = BM._phase;
+    return ph === "battleEnd" || ph === "aborting";
+  }
+
+  function kill(b) {
+    b.addNewState(b.deathStateId());
+    b.refresh();
+    if (typeof b.performCollapse === "function") b.performCollapse();
+  }
+
+  function runCommand(kind) {
+    var BM = G.BattleManager, i;
+    if (kind === "win") {
+      var enemies = G.$gameTroop.aliveMembers();
+      for (i = 0; i < enemies.length; i++) kill(enemies[i]);
+      BM.checkBattleEnd();
+    } else if (kind === "lose") {
+      var actors = G.$gameParty.aliveMembers();
+      for (i = 0; i < actors.length; i++) kill(actors[i]);
+      BM.processDefeat();
+    } else if (kind === "escape") { // only reached when canEscapeNow()
+      if (typeof BM.processEscape === "function") {
+        var ratio = BM._escapeRatio;
+        BM._escapeRatio = 1; // the player asked to escape: never fail the roll
+        try { BM.processEscape(); } finally { BM._escapeRatio = ratio; }
+      } else {
+        BM.processAbort();
+      }
+    }
+  }
+
+  function canEscapeNow() {
+    try {
+      var BM = G.BattleManager;
+      return !!(BM && typeof BM.canEscape === "function" && BM.canEscape());
+    } catch (e) { reportError(e); return false; }
+  }
+
+  // Runs at the start of a frame; waits while a message is open (the battle end adds its own messages).
+  function runPendingCommand() {
+    var c = pendingCommand;
+    if (!c) return;
+    var BM = G.BattleManager;
+    if (!commandFresh(c.t) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
+      pendingCommand = null;
+      lastCommand = c.id + ":ignored";
+      return;
+    }
+    if (!BM._phase || BM._phase === "init" || messageBusy()) return;
+    pendingCommand = null;
+    try {
+      runCommand(c.kind);
+      lastCommand = c.id;
+    } catch (e) {
+      lastCommand = c.id + ":failed";
+      reportError(e);
+    }
+  }
+
+  function hotkeyCommand(kind) {
+    var BM = G.BattleManager;
+    if (!inBattleNow() || !BM || battleEnding(BM) || pendingCommand) return;
+    var t = now();
+    pendingCommand = { id: "key-" + kind + "-" + t, kind: kind, t: t };
+  }
+
+  function pollHotkeys() {
+    var I = G.Input;
+    if (!I || typeof I.isTriggered !== "function") return;
+    if (I.isTriggered(KEY_SPEED)) assist.speed = SPEED_NEXT[assist.speed] || 1;
+    if (I.isTriggered(KEY_SKIP)) assist.skipSeen = !assist.skipSeen;
+    if (I.isTriggered(KEY_WIN)) hotkeyCommand("win");
+    if (I.isTriggered(KEY_LOSE)) hotkeyCommand("lose");
+  }
+
+  // Extra scene updates only on the map / in battle (menus stay at normal speed) and never
+  // while a scene change is pending.
+  function repeatable(sm) {
+    if (!sm || sm._nextScene || sm._exiting || sm._sceneStarted === false) return false;
+    var s = sm._scene;
+    return !!s && ((G.Scene_Map && s instanceof G.Scene_Map) || (G.Scene_Battle && s instanceof G.Scene_Battle));
+  }
+
+  // Per-frame work before the scene update; returns how many times to update the scene.
+  function frameStart(sm) {
+    try { pollHotkeys(); } catch (e) { reportError(e); }
+    try { runPendingCommand(); } catch (e2) { pendingCommand = null; reportError(e2); }
+    try { effectiveSpeed = computeSpeed(); } catch (e3) { effectiveSpeed = assist.speed; reportError(e3); }
+    var again = false;
+    try { again = repeatable(sm); } catch (e4) { reportError(e4); }
+    return again ? effectiveSpeed : 1;
+  }
+
   function tick() {
+    try { pollControl(); } catch (ec) { reportError(ec); }
     try { flush(); } catch (e) { reportError(e); }
     try { writeMeta(); } catch (em) { reportError(em); }
     try { writeLive(false); } catch (e2) { reportError(e2); }
@@ -496,6 +819,7 @@
   bridge._snapshotNow = function () { try { writeLive(true); } catch (e) { reportError(e); } };
   bridge._tick = tick;
   bridge._runScheduled = runScheduled;
+  bridge._frame = function () { return frameStart(G.SceneManager); };
 
   // ---------------------------------------------------------------- engine helpers
   function resolveSource(list, eventId) {
@@ -552,6 +876,13 @@
     return !!(m && m.isBusy && m.isBusy());
   }
 
+  // A message without text never reaches Window_Message.startMessage: its seen key must not linger.
+  function messageHasText() {
+    var m = G.$gameMessage;
+    if (!m || typeof m.hasText !== "function") return true; // cannot tell: keep the key
+    return !!m.hasText();
+  }
+
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
   // ---------------------------------------------------------------- hooks
@@ -595,6 +926,10 @@
       return function () {
         try {
           var i = cmdAt(this, 101);
+          if (i >= 0 && !messageBusy()) {
+            var mk = locKey(srcOf(this));
+            pendingMsgKey = mk === null ? null : mk + "#" + i;
+          }
           if (i >= 0 && run !== null && !messageBusy()) {
             var p = this._list[i].parameters || [];
             emit("message", {
@@ -606,7 +941,9 @@
             });
           }
         } catch (e) { reportError(e); }
-        return orig.apply(this, arguments);
+        var r = orig.apply(this, arguments);
+        try { if (pendingMsgKey !== null && !messageHasText()) pendingMsgKey = null; } catch (e2) { pendingMsgKey = null; reportError(e2); }
+        return r;
       };
     });
 
@@ -724,6 +1061,7 @@
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
         var r = orig.apply(this, arguments);
+        try { battleStartT = now(); } catch (eb) { reportError(eb); }
         try { emit("battle", { phase: "start", troopId: troopId }); } catch (e) { reportError(e); }
         return r;
       };
@@ -739,6 +1077,8 @@
         return orig.apply(this, arguments);
       };
     });
+
+    try { installAssist(); } catch (ea) { reportError(ea); } // the log hooks below must still install
 
     var DM = G.DataManager;
     hook(DM, "DataManager", "setupNewGame", function (orig) {
@@ -819,9 +1159,125 @@
     });
   }
 
+  function setFast(win) {
+    win._showFast = true;
+    win._lineShowFast = true;
+  }
+
+  function hookInputQuery(owner, ownerName, name) {
+    hook(owner, ownerName, name, function (orig) {
+      return function () {
+        if (extraUpdate) return false;
+        return orig.apply(this, arguments);
+      };
+    });
+  }
+
+  function pressedTime(o) { return o && typeof o._pressedTime === "number" ? o._pressedTime : null; }
+
+  // Updates 2..n of a sped-up frame. They are input-neutral: the queries above answer false, and
+  // _pressedTime (key repeat / long press timing) advances once per real frame, not once per update.
+  function extraUpdates(sm, orig, args, n) {
+    var I = G.Input, TI = G.TouchInput;
+    var it = null, tt = null, latest = null;
+    try { it = pressedTime(I); tt = pressedTime(TI); latest = I ? I._latestButton : null; } catch (e0) { reportError(e0); }
+    extraUpdate = true;
+    try {
+      for (var i = 1; i < n; i++) {
+        var again = false;
+        try {
+          again = repeatable(sm);
+          // clears this frame's triggers (also TouchInput cancel / wheel); _pressedTime is restored below
+          if (again && typeof sm.updateInputData === "function") sm.updateInputData();
+        } catch (e) { again = false; reportError(e); }
+        if (!again) break;
+        orig.apply(sm, args);
+      }
+    } finally {
+      extraUpdate = false;
+      try {
+        if (it !== null && I) {
+          // a button newly pressed meanwhile (gamepads are polled): trigger it on the next real frame
+          I._pressedTime = I._latestButton === latest ? it : -1;
+        }
+        if (tt !== null && TI) TI._pressedTime = tt;
+      } catch (e1) { reportError(e1); }
+    }
+  }
+
+  function installAssist() {
+    applyKeyMap();
+
+    hook(G.SceneManager, "SceneManager", "updateScene", function (orig) {
+      return function () {
+        if (inFrame) return orig.apply(this, arguments);
+        inFrame = true;
+        try {
+          var n = frameStart(this);
+          var r = orig.apply(this, arguments);
+          if (n > 1) extraUpdates(this, orig, arguments, n);
+          return r;
+        } finally {
+          inFrame = false;
+        }
+      };
+    });
+
+    // During extra updates every press / repeat / long-press query answers false.
+    var inputQueries = ["isTriggered", "isRepeated", "isLongPressed"];
+    for (var q = 0; q < inputQueries.length; q++) {
+      hookInputQuery(G.Input, "Input", inputQueries[q]);
+      hookInputQuery(G.TouchInput, "TouchInput", inputQueries[q]);
+    }
+
+    var WM = G.Window_Message && G.Window_Message.prototype;
+    hook(WM, "Window_Message", "startMessage", function (orig) {
+      return function () {
+        var key = pendingMsgKey;
+        pendingMsgKey = null;
+        try {
+          if (!messageHasText()) key = null;
+          this._rpgvWait = 0;
+          this._rpgvSkip = !!(assist.skipSeen && key !== null && seenMessages[key] === true && !choicePending());
+        } catch (e) { this._rpgvSkip = false; reportError(e); }
+        var r = orig.apply(this, arguments);
+        try { if (this._rpgvSkip) setFast(this); } catch (e2) { reportError(e2); }
+        return r;
+      };
+    });
+    // newPage() clears the fast flags on every page of a long message: keep them for a seen one.
+    hook(WM, "Window_Message", "clearFlags", function (orig) {
+      return function () {
+        var r = orig.apply(this, arguments);
+        try { if (this._rpgvSkip && assist.skipSeen) setFast(this); } catch (e) { reportError(e); }
+        return r;
+      };
+    });
+    // Seen message: once paused, advance by itself after a few updates as if OK was pressed.
+    hook(WM, "Window_Message", "isTriggered", function (orig) {
+      return function () {
+        var r = orig.apply(this, arguments);
+        if (r) return r;
+        try {
+          if (this._rpgvSkip && assist.skipSeen && this.pause && !choicePending()) {
+            this._rpgvWait = (this._rpgvWait || 0) + 1;
+            if (this._rpgvWait >= AUTO_ADVANCE_UPDATES) {
+              this._rpgvWait = 0;
+              return true;
+            }
+          } else {
+            this._rpgvWait = 0;
+          }
+        } catch (e) { reportError(e); }
+        return r;
+      };
+    });
+  }
+
   try {
     if (fs.existsSync(LIVE_TMP)) fs.unlinkSync(LIVE_TMP); // left over from a crash mid-write
   } catch (e) { /* harmless: overwritten on next snapshot */ }
+  try { baselineControl(); } catch (e) { reportError(e); }
   try {
     loadMeta();
     raiseMetaFromLog();
