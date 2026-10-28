@@ -58,6 +58,8 @@ export interface GameData {
   errors: LoadError[];
   /** TemplateEvent 플러그인의 템플릿 맵 id(템플릿 이벤트를 풀었을 때만). */
   templateMapId?: number;
+  /** TemplateEvent KeepEventId: 맵 이벤트 호출(TE_CALL_MAP_EVENT)이 부른 이벤트 id를 유지(셀프 스위치가 부른 이벤트에). 없으면 false. */
+  templateKeepEventId?: boolean;
 }
 
 // ---- 해석 결과 ----

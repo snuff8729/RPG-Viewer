@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryFolder } from "@/core/fs/folder";
 import { loadFixtureFolder } from "../../../tests/helpers/fixtureFolder";
 import { loadGame } from "./loadGame";
-import { parseTemplateNote, templateMapIdFromPlugins } from "./templateEvent";
+import { parseTemplateNote, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 async function load(edit?: (files: Record<string, string | Uint8Array>) => void) {
   const base = loadFixtureFolder("sample-te");
@@ -27,6 +27,20 @@ describe("parseTemplateNote", () => {
     expect(parseTemplateNote("")).toBeNull();
     expect(parseTemplateNote(undefined)).toBeNull();
     expect(parseTemplateNote("<TE:>")).toBeNull();
+  });
+});
+
+describe("templateKeepEventIdFromPlugins", () => {
+  const js = (status: boolean, keep: unknown) =>
+    `var $plugins =\n[\n${JSON.stringify({ name: "TemplateEvent", status, description: "", parameters: { TemplateMapId: "2", KeepEventId: keep } })}\n];\n`;
+  it("is true only for a true value of an enabled TemplateEvent", () => {
+    expect(templateKeepEventIdFromPlugins(js(true, "true"))).toBe(true);
+    expect(templateKeepEventIdFromPlugins(js(true, true))).toBe(true);
+    expect(templateKeepEventIdFromPlugins(js(true, "false"))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(js(false, "true"))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(js(true, undefined))).toBe(false);
+    expect(templateKeepEventIdFromPlugins(null)).toBe(false);
+    expect(templateKeepEventIdFromPlugins("garbage")).toBe(false);
   });
 });
 

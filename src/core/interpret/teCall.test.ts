@@ -59,10 +59,14 @@ const town: MapData = {
         c(123, ["A", 0]),
       ])],
     },
+    // 6: 이름으로 템플릿 이벤트(보물)를 부름 → $dataMap의 원래 페이지
+    { id: 6, name: "이름호출", x: 6, y: 6, pages: [page([c(356, ["TE_CALL_MAP_EVENT 1 보물"])])] },
+    // 7: 번호로 템플릿 이벤트(1)를 부름 → 템플릿 페이지(그 안의 원래 이벤트 호출·셀프 스위치는 대상 이벤트 기준)
+    { id: 7, name: "번호호출", x: 7, y: 7, pages: [page([c(356, ["TEマップイベント呼び出し 1 1"])])] },
   ],
 };
 
-function makeData(): GameData {
+function makeData(keep = false): GameData {
   const maps = new Map<number, MapData>([
     [1, structuredClone(town)],
     [2, structuredClone(templateMap)],
@@ -76,6 +80,7 @@ function makeData(): GameData {
     maps, commonEvents: [null], troops: [null], actors: [null],
     items: [null, { id: 1, name: "포션" }], weapons: [null], armors: [null], errors: [],
     templateMapId: 2,
+    ...(keep ? { templateKeepEventId: true } : {}),
   };
 }
 const data = makeData();
@@ -117,12 +122,14 @@ describe("resolveTeCall", () => {
   const e: MapEvent = { id: 9, name: "e", x: 0, y: 0, pages: [pg(10), pg(11), pg(12)], originalPages: [pg(0), pg(1), pg(2)] };
   const ctx = { data, mapId: 1, event: e, page: 2 };
   const idx = (n: number | null) => (resolveTeCall({ kind: "origin", page: n }, ctx)!.location as { origin: number }).origin;
-  it("follows the engine rule pages[n - 1 || current] || pages[0]", () => {
-    expect(idx(null)).toBe(2);   // 없음 → 현재 페이지
-    expect(idx(1)).toBe(2);      // 1 - 1 = 0 → 현재 페이지(엔진 그대로)
-    expect(idx(2)).toBe(1);
-    expect(idx(9)).toBe(0);      // 범위 밖 → 첫 페이지
+  it("follows the engine rule pages[n - 1 || interpreter._pageIndex(undefined)] || pages[0]", () => {
+    expect(idx(null)).toBe(0);   // 없음 → 첫 페이지
+    expect(idx(1)).toBe(0);
     expect(idx(0)).toBe(0);
+    expect(idx(2)).toBe(1);
+    expect(idx(3)).toBe(2);
+    expect(idx(9)).toBe(0);      // 범위 밖 → 첫 페이지
+    expect(idx(-1)).toBe(0);
     const r = resolveTeCall({ kind: "origin", page: 2 }, ctx)!;
     expect(r.location).toEqual({ source: "map", mapId: 1, eventId: 9, page: 2, origin: 1 });
     expect(r.label).toBe("원래 이벤트 p2 실행");
@@ -140,6 +147,36 @@ describe("resolveTeCall", () => {
     expect(resolveTeCall({ kind: "map", page: 1, target: "없음" }, { data, mapId: 1, event: ev(2), page: 0 })).toBeNull();
     expect(resolveTeCall({ kind: "origin", page: 1 }, { data, mapId: 1, event: null as unknown as MapEvent, page: 0 })).toBeNull();
   });
+  it("map-event call by name uses the raw (original) pages, by id the template pages", () => {
+    const byName = resolveTeCall({ kind: "map", page: 1, target: "보물" }, { data, mapId: 1, event: ev(6), page: 0 })!;
+    expect(byName.location).toEqual(origin(1, 0, 0));
+    expect(byName.list).toBe(ev(1).originalPages![0].list);
+    const byId = resolveTeCall({ kind: "map", page: 1, target: 1 }, { data, mapId: 1, event: ev(7), page: 0 })!;
+    expect(byId.location).toEqual(at(1, 0));
+    expect(byId.list).toBe(ev(1).pages[0].list);
+    // KeepEventId 꺼짐(기본): 자식은 대상 이벤트로 / 켜짐: 부른 이벤트로
+    expect(byId.ctx.event.id).toBe(1);
+    const keep = { ...data, templateKeepEventId: true };
+    expect(resolveTeCall({ kind: "map", page: 1, target: 1 }, { data: keep, mapId: 1, event: ev(7), page: 0 })!.ctx.event.id).toBe(7);
+    // 원래 이벤트 호출은 언제나 같은 이벤트
+    expect(resolveTeCall({ kind: "origin", page: null }, { data: keep, mapId: 1, event: ev(1), page: 0 })!.ctx.event.id).toBe(1);
+  });
+
+  it("nested calls and self switches follow the child interpreter's event", () => {
+    // 7 → 1의 템플릿 페이지 → (1 기준) 원래 이벤트 호출
+    const nodes = entryOf(at(7, 0)).nodes[0] as Extract<ScriptNode, { kind: "call" }>;
+    expect(nodes.location).toEqual(at(1, 0));
+    expect(nodes.nodes[0]).toMatchObject({ kind: "call", location: origin(1, 0, 0) });
+    const g = buildDepGraph(data);
+    const selfA1 = g.writersOf({ kind: "selfSwitch", mapId: 1, eventId: 1, ch: "A" }).map(w => w.ctx);
+    expect(selfA1).toContain("M1:7:0");
+    expect(g.writersOf({ kind: "selfSwitch", mapId: 1, eventId: 7, ch: "A" })).toEqual([]);
+    const keepData = makeData(true);
+    const gk = buildDepGraph(keepData);
+    expect(gk.writersOf({ kind: "selfSwitch", mapId: 1, eventId: 7, ch: "A" }).map(w => w.ctx)).toEqual(["M1:7:0"]);
+    expect(gk.writersOf({ kind: "selfSwitch", mapId: 1, eventId: 1, ch: "A" }).map(w => w.ctx)).not.toContain("M1:7:0");
+  });
+
   it("flattenCalls splices called lists and stops on recursion", () => {
     const codes = flattenCalls(ev(1).pages[0].list, { data, mapId: 1, event: ev(1), page: 0 }).map(x => x.code);
     expect(codes).toEqual([101, 401, 126, 125, 0, 123, 0]);
@@ -240,7 +277,8 @@ describe("live analyses follow the call", () => {
   it("dependency graph attributes writes in the original page to the template page context", () => {
     const g = buildDepGraph(data);
     const items = g.writersOf({ kind: "item", id: 1 });
-    expect(items).toEqual([expect.objectContaining({ ctx: "M1:1:0", cmd: 2, at: origin(1, 0, 0) })]);
+    expect(items.map(w => w.ctx)).toEqual(["M1:1:0", "M1:6:0", "M1:7:0"]);   // 템플릿 페이지·이름 호출·번호 호출
+    expect(items[0]).toMatchObject({ ctx: "M1:1:0", cmd: 2, at: origin(1, 0, 0) });
     expect(g.writersOf({ kind: "selfSwitch", mapId: 1, eventId: 5, ch: "A" }))
       .toEqual([expect.objectContaining({ ctx: "M1:5:0", at: origin(5, 0, 0) })]);
     expect(g.writersOf({ kind: "switch", id: 3 })).toEqual([

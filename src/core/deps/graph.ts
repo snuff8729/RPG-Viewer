@@ -248,7 +248,9 @@ function scanList(b: Builder, info: CtxInfo, list: unknown, self: Self, call: Ca
         const active = nested?.active ?? [list];
         if (r) {
           if (active.length <= MAX_TE_DEPTH && !active.includes(r.list)) {
-            scanList(b, info, r.list, self, call, { ...ctxReqs(), at: r.location, active: [...active, r.list] });
+            // 셀프 스위치는 자식 인터프리터의 이벤트에 걸린다(맵 이벤트 호출은 KeepEventId가 꺼져 있으면 대상 이벤트).
+            const childSelf = self ? { mapId: self.mapId, eventId: r.ctx.event.id } : null;
+            scanList(b, info, r.list, childSelf, r.ctx, { ...ctxReqs(), at: r.location, active: [...active, r.list] });
           }
           break;
         }

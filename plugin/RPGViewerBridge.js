@@ -838,6 +838,21 @@
     return data && data.pages;
   }
 
+  // TemplateEvent: index of list among the event's own (original) pages, when they differ from its pages.
+  function originIndexOf(ev, pages, list) {
+    var orig = ev && typeof ev.getOriginalPages === "function" ? ev.getOriginalPages() : null;
+    return orig && orig !== pages ? pageIndexOf(orig, list) : -1;
+  }
+
+  // Original page "origin" run as a child. page = the template page of the same event that called it
+  // (parent interpreter); called from elsewhere (another event by name) page = origin.
+  function originSource(map, eventId, origin) {
+    var parent = childParentSrc;
+    var page = parent && parent.source === "map" && parent.mapId === map.mapId() && parent.eventId === eventId
+      ? parent.page : origin;
+    return { source: "map", mapId: map.mapId(), eventId: eventId, page: page, origin: origin };
+  }
+
   function resolveSource(list, eventId) {
     if (!list) return null;
     var i;
@@ -847,29 +862,22 @@
       var pages = eventPages(ev);
       i = pageIndexOf(pages, list);
       if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: eventId, page: i };
-      // TemplateEvent: the event's own (original) page run by TE_CALL_ORIGIN_EVENT from a template page.
-      // page = the template page that called it (parent interpreter), origin = the original page index.
-      var orig = ev && typeof ev.getOriginalPages === "function" ? ev.getOriginalPages() : null;
-      if (orig && orig !== pages) {
-        i = pageIndexOf(orig, list);
-        if (i >= 0) {
-          var parent = childParentSrc;
-          var page = parent && parent.source === "map" && parent.mapId === map.mapId() && parent.eventId === eventId
-            ? parent.page
-            : (typeof ev._pageIndex === "number" && ev._pageIndex >= 0 ? ev._pageIndex : i);
-          return { source: "map", mapId: map.mapId(), eventId: eventId, page: page, origin: i };
-        }
-      }
+      i = originIndexOf(ev, pages, list);
+      if (i >= 0) return originSource(map, eventId, i);
     }
-    // A page of another map event run by this one (TemplateEvent TE_CALL_MAP_EVENT).
+    // A page of another map event (TemplateEvent TE_CALL_MAP_EVENT with KeepEventId on): its pages,
+    // or its original pages when called by name.
     var all = map && map.events ? map.events() : null;
     if (all) {
       for (var k = 0; k < all.length; k++) {
         var other = all[k];
         var oid = other && other.eventId ? other.eventId() : 0;
         if (!(oid > 0) || oid === eventId) continue;
-        i = pageIndexOf(eventPages(other), list);
+        var opages = eventPages(other);
+        i = pageIndexOf(opages, list);
         if (i >= 0) return { source: "map", mapId: map.mapId(), eventId: oid, page: i };
+        i = originIndexOf(other, opages, list);
+        if (i >= 0) return originSource(map, oid, i);
       }
     }
     var ces = G.$dataCommonEvents;

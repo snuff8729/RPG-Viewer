@@ -136,14 +136,23 @@ describe("RPGViewerBridge", () => {
     });
   });
 
-  it("origin page without a parent interpreter falls back to the event's current page", () => {
+  it("origin page not called from the same event uses page = origin", () => {
     h = newGame();
     const original = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["x"]), cmd(0)];
     const ev = h.addMapEvent(5, [[cmd(0)], [cmd(0)]], 1);
-    ev.getOriginalPages = () => [{ list: original }];
+    ev.getOriginalPages = () => [{ list: [cmd(0)] }, { list: original }];
     const interp = h.newInterpreter();
     interp.setup(original, 5);
-    expect(interp._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 0 });
+    expect(interp._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 1 });
+    // 다른 이벤트가 이름으로 부름: KeepEventId 꺼짐(대상 id) / 켜짐(부른 이벤트 id)
+    const mine = [cmd(356, ["TE_CALL_MAP_EVENT 2 EV5"]), cmd(0)];
+    h.addMapEvent(4, [mine]);
+    const caller = h.g.$gameMap._interpreter;
+    caller.setup(mine, 4);
+    caller.setupChild(original, 5);
+    expect(caller._childInterpreter._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 1 });
+    caller.setupChild(original, 4);
+    expect(caller._childInterpreter._rpgvSrc).toEqual({ source: "map", mapId: 1, eventId: 5, page: 1, origin: 1 });
   });
 
   it("resolves another map event's page run by this event (TE_CALL_MAP_EVENT)", () => {

@@ -135,7 +135,7 @@ export function interpret(list: EventCommand[], data: GameData, ctx?: CallCtx | 
           const call = ctx ? parseTeCall(c) : null;
           const r = call && ctx && stack.length <= TE_MAX_DEPTH ? resolveTeCall(call, ctx) : null;
           if (r && !stack.includes(r.list)) {
-            const nodes = interpret(r.list, data, ctx, [...stack, r.list]);
+            const nodes = interpret(r.list, data, r.ctx, [...stack, r.list]);
             push({ kind: "call", cmd: here, label: r.label, location: r.location, nodes });
             continue;
           }

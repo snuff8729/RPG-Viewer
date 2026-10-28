@@ -53,7 +53,10 @@ export function parseTeCall(cmd: unknown): TeCall | null {
   return null;
 }
 
-/** 호출을 해석할 문맥: 실행 중 맵 이벤트와 그 (템플릿) 페이지. 원래 페이지에서 다시 부를 때도 page는 처음 템플릿 페이지. */
+/**
+ * 호출을 해석할 문맥: 실행 중 인터프리터의 이벤트(셀프 스위치·원래 이벤트 호출의 대상)와 그 페이지
+ * (원래 페이지 위치의 page — 원래 페이지에서 다시 부를 때도 처음 템플릿 페이지).
+ */
 export interface CallCtx { data: GameData; mapId: number; event: MapEvent; page: number }
 export interface ResolvedCall {
   list: EventCommand[];
@@ -61,12 +64,17 @@ export interface ResolvedCall {
   location: Location;
   /** `원래 이벤트 p2 실행` 같은 표시 글 */
   label: string;
+  /** list를 실행하는 자식 인터프리터의 문맥(이벤트 id = 셀프 스위치가 걸리는 이벤트) */
+  ctx: CallCtx;
 }
 
-/** 엔진 규칙: `pages[n - 1 || 현재 페이지] || pages[0]` (n 없음·1 → 현재 페이지). 페이지가 없으면 -1. */
-function pickPage(pages: unknown[], n: number | null, current: number): number {
-  const want = (n === null ? NaN : n - 1) || current;
-  if (Number.isInteger(want) && want >= 0 && isObj(pages[want])) return want;
+/**
+ * 엔진 규칙 `pages[n - 1 || interpreter._pageIndex] || pages[0]` — 인터프리터에는 _pageIndex가 없어
+ * n 없음·0·1 → 첫 페이지, n ≥ 2 → pages[n - 1](없으면 첫 페이지). 첫 페이지도 없으면 -1.
+ */
+function pickPage(pages: unknown[], n: number | null): number {
+  const want = n !== null && n >= 2 ? n - 1 : 0;
+  if (isObj(pages[want])) return want;
   return isObj(pages[0]) ? 0 : -1;
 }
 
@@ -78,28 +86,33 @@ export function resolveTeCall(call: TeCall, ctx: CallCtx): ResolvedCall | null {
     if (call.kind === "origin") {
       const orig = Array.isArray(ev.originalPages) ? ev.originalPages : null;
       const pages = arr<EventPage | null>(orig ?? ev.pages);
-      const i = pickPage(pages, call.page, ctx.page);
+      const i = pickPage(pages, call.page);
       if (i < 0) return null;
       const location: Location = orig
         ? { source: "map", mapId: ctx.mapId, eventId: ev.id, page: ctx.page, origin: i }
         : { source: "map", mapId: ctx.mapId, eventId: ev.id, page: i };
-      return { list: arr<EventCommand>(pages[i]!.list), location, label: `원래 이벤트 p${i + 1} 실행` };
+      return { list: arr<EventCommand>(pages[i]!.list), location, label: `원래 이벤트 p${i + 1} 실행`, ctx };
     }
+    // 번호로: 그 이벤트의 페이지(템플릿이면 템플릿 페이지). 이름으로: $dataMap의 원래 페이지.
     const events = arr<MapEvent | null>(ctx.data?.maps?.get(ctx.mapId)?.events);
     let target: MapEvent | null | undefined;
+    const byName = typeof call.target === "string";
     if (call.target === null || call.target === 0) target = ev;
     else if (typeof call.target === "number") target = events.find(e => isObj(e) && e.id === call.target);
     else target = events.find(e => isObj(e) && e.name === call.target);
     if (!isObj(target)) return null;
-    const pages = arr<EventPage | null>(target.pages);
-    const i = pickPage(pages, call.page, ctx.page);
+    const raw = byName && Array.isArray(target.originalPages) ? target.originalPages : null;
+    const pages = arr<EventPage | null>(raw ?? target.pages);
+    const i = pickPage(pages, call.page);
     if (i < 0) return null;
     const name = typeof target.name === "string" && target.name ? target.name : `EV${target.id}`;
-    return {
-      list: arr<EventCommand>(pages[i]!.list),
-      location: { source: "map", mapId: ctx.mapId, eventId: target.id, page: i },
-      label: `이벤트 ${name} p${i + 1} 실행`,
-    };
+    // 위치는 목록 주인(이름으로 부른 템플릿 이벤트면 원래 페이지 i — 부른 템플릿 페이지가 없어 page도 i).
+    const location: Location = raw
+      ? { source: "map", mapId: ctx.mapId, eventId: target.id, page: i, origin: i }
+      : { source: "map", mapId: ctx.mapId, eventId: target.id, page: i };
+    // KeepEventId가 꺼져 있으면(기본) 자식 인터프리터는 대상 이벤트 id로 돈다.
+    const child: CallCtx = ctx.data?.templateKeepEventId === true ? ctx : { ...ctx, event: target, page: i };
+    return { list: arr<EventCommand>(pages[i]!.list), location, label: `이벤트 ${name} p${i + 1} 실행`, ctx: child };
   } catch {
     return null;
   }
@@ -111,16 +124,16 @@ export function resolveTeCall(call: TeCall, ctx: CallCtx): ResolvedCall | null {
  */
 export function flattenCalls(list: unknown, ctx: CallCtx | null): EventCommand[] {
   const out: EventCommand[] = [];
-  const go = (l: unknown, stack: unknown[]) => {
+  const go = (l: unknown, stack: unknown[], cx: CallCtx | null) => {
     for (const c of arr<EventCommand | null>(l)) {
       if (!isObj(c)) continue;
-      const call = ctx ? parseTeCall(c) : null;
-      const r = call && ctx && stack.length <= MAX_DEPTH ? resolveTeCall(call, ctx) : null;
-      if (r && !stack.includes(r.list)) { go(r.list, [...stack, r.list]); continue; }
+      const call = cx ? parseTeCall(c) : null;
+      const r = call && cx && stack.length <= MAX_DEPTH ? resolveTeCall(call, cx) : null;
+      if (r && !stack.includes(r.list)) { go(r.list, [...stack, r.list], r.ctx); continue; }
       out.push(c);
     }
   };
-  try { go(list, [list]); } catch { /* 지금까지 */ }
+  try { go(list, [list], ctx); } catch { /* 지금까지 */ }
   return out;
 }
 

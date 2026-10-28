@@ -3,7 +3,7 @@ import type {
   Actor, CommonEvent, GameData, LoadError, MapData, MapInfo, NamedEntry, SystemData, Troop,
 } from "@/core/types";
 import { livePaths } from "@/core/live/installer";
-import { expandTemplateEvents, templateMapIdFromPlugins } from "./templateEvent";
+import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
   | { ok: true; data: GameData }
@@ -119,6 +119,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
 
   // TemplateEvent 플러그인: <TE:값> 이벤트의 페이지를 템플릿 맵 이벤트의 페이지로 바꾼다.
   let templateMapId: number | undefined;
+  let templateKeepEventId = false;
   try {
     let pluginsText: string | null = null;
     try { pluginsText = await folder.readText(livePaths(root.data).pluginsJs); } catch { pluginsText = null; }
@@ -129,6 +130,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       if (tplMap) {
         errors.push(...expandTemplateEvents(maps, tplMap, tplId, mapFile));
         templateMapId = tplId;
+        templateKeepEventId = templateKeepEventIdFromPlugins(pluginsText);
       }
     }
   } catch {
@@ -143,6 +145,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       imgRoot: root.img,
       system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, errors,
       ...(templateMapId !== undefined ? { templateMapId } : {}),
+      ...(templateKeepEventId ? { templateKeepEventId } : {}),
     },
   };
 }

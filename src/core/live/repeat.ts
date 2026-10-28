@@ -129,7 +129,7 @@ function hasWrites(list: unknown[], data: GameData, depth: number, call: CallCtx
     else if (call && depth < MAX_CALL_DEPTH) {
       const te = parseTeCall(c);
       const r = te ? resolveTeCall(te, call) : null;
-      if (r && hasWrites(r.list, data, depth + 1, call)) return true;
+      if (r && hasWrites(r.list, data, depth + 1, r.ctx)) return true;
     }
   }
   return false;
@@ -209,14 +209,20 @@ function run(sim: Sim, list: unknown[], prefix: string, depth: number, shown: Se
         break;
       }
       default: {
-        // TemplateEvent 호출: 불린 목록(원래 이벤트 페이지 등)을 자식으로 실행한다. 셀프 스위치는 같은 이벤트에 걸린다.
+        // TemplateEvent 호출: 불린 목록(원래 이벤트 페이지 등)을 자식으로 실행한다.
+        // 셀프 스위치는 자식 인터프리터의 이벤트(원래 이벤트 호출 = 같은 이벤트, 맵 이벤트 호출 = KeepEventId에 따라)에 걸린다.
         const te = sim.call ? parseTeCall(cmd) : null;
         const r = te && sim.call ? resolveTeCall(te, sim.call) : null;
         if (r) {
           if (depth >= MAX_CALL_DEPTH || sim.active.includes(r.list)) { sim.estimated = true; break; }
+          const saved = { call: sim.call, eventId: sim.eventId };
           sim.active.push(r.list);
+          sim.call = r.ctx;
+          sim.eventId = r.ctx.event.id;
           const ok = run(sim, r.list, `${locationKey(r.location)}:`, depth + 1, shown);
           sim.active.pop();
+          sim.call = saved.call;
+          sim.eventId = saved.eventId;
           if (!ok) return false;
           break;
         }
@@ -346,7 +352,7 @@ function scanReads(
         const res = te && call ? resolveTeCall(te, call) : null;
         if (res && depth < MAX_CALL_DEPTH && !seenLists.has(res.list)) {
           seenLists.add(res.list);
-          scanReads(r, res.list, data, depth + 1, seen, call, seenLists);
+          scanReads(r, res.list, data, depth + 1, seen, res.ctx, seenLists);
         }
         break;
       }

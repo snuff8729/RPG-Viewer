@@ -20,6 +20,22 @@ export function templateMapIdFromPlugins(text: string | null | undefined): numbe
   }
 }
 
+/**
+ * plugins.js 텍스트에서 켜진 TemplateEvent의 KeepEventId(맵 이벤트 호출 때 부른 이벤트 id를 유지).
+ * 값은 JSON으로 풀어 true 또는 "true"면 true. 없거나 이상하면 false. 예외를 던지지 않는다.
+ */
+export function templateKeepEventIdFromPlugins(text: string | null | undefined): boolean {
+  try {
+    if (typeof text !== "string") return false;
+    const te = (parsePluginsJs(text) ?? []).find((e) => !!e && typeof e === "object" && e.name === "TemplateEvent" && e.status === true);
+    let raw: unknown = te && te.parameters && typeof te.parameters === "object" ? te.parameters.KeepEventId : undefined;
+    if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { /* 그대로 */ } }
+    return raw === true || (typeof raw === "string" && raw.trim() === "true");
+  } catch {
+    return false;
+  }
+}
+
 /** 이벤트 메모의 `<TE:값>` / `<TemplateEvent:값>` 값(trim). 없으면 null. */
 export function parseTemplateNote(note: unknown): string | null {
   if (typeof note !== "string") return null;
