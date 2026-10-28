@@ -46,7 +46,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.18.0",
+    VERSION: "1.18.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1584,8 +1584,10 @@
   // into their own canvas (BYWorkElement images: the standing portrait that slides and changes on hits in battle)
   // show no picture URL. Bitmap.blt / bltImage of a whole picture onto the whole canvas tags the canvas with it
   // ({ name, w, h }: the picture and its own size); a full clear / clearRect forgets it. A part of a picture (a sheet
-  // frame) or a picture drawn into a part of the canvas (window contents) is no tag.
-  var DRAWN_KEY = "_rpgvDrawnPic";
+  // frame) or a picture drawn into a small part of the canvas (window contents) is no tag.
+  // 1.18.1: the tag also keeps where in the canvas the picture went (d = [x, y, w, h] canvas px, any size) and the
+  // canvas size then (cw, ch); plainEntry maps it through the sprite's frame (setFrame) to what is on screen.
+  var DRAWN_KEY = "_rpgvDrawnPic", DRAWN_COVER = 0.5;
   function drawnPicture(b) {
     if (!b || typeof b !== "object") return null;
     var d = b[DRAWN_KEY];
@@ -1599,18 +1601,25 @@
     if (name === null) return;
     var own = bitmapUrl(dest);
     if (own) return; // a loaded image drawn on: its own URL tells what it is
-    var sw = args[3], sh = args[4], dw = args[7], dh = args[8];
+    var sw = numOr(args[3], 0), sh = numOr(args[4], 0), dw = numOr(args[7], 0), dh = numOr(args[8], 0);
     if (!dw) dw = sw; // like Bitmap.blt: dw = dw || sw
     if (!dh) dh = sh;
+    var dx = numOr(args[5], 0), dy = numOr(args[6], 0);
     var w = numOr(src.width, 0), h = numOr(src.height, 0);
-    if (!(w > 0 && h > 0)) return;
-    if (!near(args[1], 0) || !near(args[2], 0) || !near(sw, w) || !near(sh, h)) return;
-    if (!near(args[5], 0) || !near(args[6], 0) || !near(dw, dest.width) || !near(dh, dest.height)) return;
+    var cw = numOr(dest.width, 0), ch = numOr(dest.height, 0);
+    if (!(w > 0 && h > 0 && cw > 0 && ch > 0)) return;
+    if (!near(args[1], 0) || !near(args[2], 0) || !near(sw, w) || !near(sh, h)) return; // the whole picture
+    // 1.18.1: drawn anywhere inside the canvas at any size, as long as it fills most of it (a picture in a corner of
+    // window contents is no tag); where it went (d, canvas px) and the canvas size then (cw, ch) are kept
+    if (!(dw > 0 && dh > 0) || dx < -1 || dy < -1 || dx + dw > cw + 1 || dy + dh > ch + 1) return;
+    if (dw * dh < cw * ch * DRAWN_COVER) return;
     var old = drawnPicture(dest);
-    if (old && old.name === name && old.w === w && old.h === h) return;
+    if (old && old.name === name && old.w === w && old.h === h && old.cw === cw && old.ch === ch && old.d &&
+      old.d[0] === dx && old.d[1] === dy && old.d[2] === dw && old.d[3] === dh) return;
+    var tag = { name: name, w: w, h: h, d: [dx, dy, dw, dh], cw: cw, ch: ch };
     try {
-      Object.defineProperty(dest, DRAWN_KEY, { value: { name: name, w: w, h: h }, configurable: true, writable: true, enumerable: false });
-    } catch (e) { dest[DRAWN_KEY] = { name: name, w: w, h: h }; }
+      Object.defineProperty(dest, DRAWN_KEY, { value: tag, configurable: true, writable: true, enumerable: false });
+    } catch (e) { dest[DRAWN_KEY] = tag; }
     markScreenDirty();
   }
   function forgetDrawn(dest, args) {
@@ -1709,22 +1718,61 @@
     if (!(op > 0) || !(sxw > 0)) return null;
     var syw = (m[0] * m[3] - m[1] * m[2]) / sxw;
     if (!syw) return null;
-    var bw = b.width, bh = b.height;
-    // 1.18.0: a picture drawn into a canvas: the picture's own size, scaled as the canvas stretched it
+    var bw = numOr(b.width, 0), bh = numOr(b.height, 0);
+    if (!(bw > 0 && bh > 0)) return null;
+    // the picture's own size (iw, ih) and where it lies in the bitmap (d, bitmap px): the bitmap itself, or
+    // 1.18.0 a picture drawn into a canvas (1.18.1 at any place / size; scaled if the canvas was resized since)
+    var iw = bw, ih = bh, d = [0, 0, bw, bh];
     var dr = it.drawn;
-    if (dr && dr.w > 0 && dr.h > 0 && bw > 0 && bh > 0) {
-      sxw *= bw / dr.w; syw *= bh / dr.h; bw = dr.w; bh = dr.h;
+    if (dr && dr.w > 0 && dr.h > 0) {
+      iw = dr.w; ih = dr.h;
+      var dd = dr.d;
+      if (dd && dd.length === 4 && dd[2] > 0 && dd[3] > 0) {
+        var rx = dr.cw > 0 ? bw / dr.cw : 1, ry = dr.ch > 0 ? bh / dr.ch : 1;
+        d = [dd[0] * rx, dd[1] * ry, dd[2] * rx, dd[3] * ry];
+      }
     }
+    // 1.18.1: the part of the bitmap the sprite shows (its frame, setFrame); the anchor is a share of the frame
+    var f = frameOf(s, bw, bh);
+    var vx0 = Math.max(f[0], d[0], 0), vy0 = Math.max(f[1], d[1], 0);
+    var vx1 = Math.min(f[0] + f[2], d[0] + d[2], bw), vy1 = Math.min(f[1] + f[3], d[1] + d[3], bh);
+    if (!(vx1 > vx0 && vy1 > vy0)) return null; // the picture is outside what the sprite shows
+    var kx = d[2] / iw, ky = d[3] / ih; // bitmap px per picture px
     var an = s.anchor || {};
     var ax = picNum(an.x, 0), ay = picNum(an.y, 0);
+    var x = m[4], y = m[5], w = iw, h = ih, crop = null;
+    var frameIsPicture = near(f[0], d[0]) && near(f[1], d[1]) && near(f[2], d[2]) && near(f[3], d[3]) &&
+      near(vx0, d[0]) && near(vy0, d[1]) && near(vx1, d[0] + d[2]) && near(vy1, d[1] + d[3]);
+    if (!frameIsPicture) {
+      // only a part of the picture shows, or it sits inside a larger frame: the shown part of the picture
+      // (crop, picture px) placed at its own top-left corner
+      var lx = vx0 - f[0] - ax * f[2], ly = vy0 - f[1] - ay * f[3];
+      x = m[0] * lx + m[2] * ly + m[4];
+      y = m[1] * lx + m[3] * ly + m[5];
+      ax = 0; ay = 0;
+      w = (vx1 - vx0) / kx; h = (vy1 - vy0) / ky;
+      crop = [picNum((vx0 - d[0]) / kx, 0), picNum((vy0 - d[1]) / ky, 0), picNum(w, 0), picNum(h, 0), picNum(iw, 0), picNum(ih, 0)];
+    }
+    // the picture's own size, scaled as the canvas stretched it
+    sxw *= kx; syw *= ky;
     var origin = ax === 0 && ay === 0 ? 0 : (ax === 0.5 && ay === 0.5 ? 1 : [ax, ay]);
     var tone = toneOf(s._colorTone);
     if (!tone && typeof s.getColorTone === "function") {
       try { tone = toneOf(s.getColorTone()); } catch (et) { tone = null; }
     }
-    return [0, picName(it.name), origin, picNum(m[4], 0), picNum(m[5], 0), picNum(sxw * 100, 100), picNum(syw * 100, 100), op,
+    var e = [0, picName(it.name), origin, picNum(x, 0), picNum(y, 0), picNum(sxw * 100, 100), picNum(syw * 100, 100), op,
       typeof s.blendMode === "number" ? s.blendMode : 0, tone || 0, picNum(Math.atan2(m[1], m[0]) * 180 / Math.PI, 0),
-      picNum(bw, 0), picNum(bh, 0), "sprite"];
+      picNum(w, 0), picNum(h, 0), "sprite"];
+    if (crop) { e.push(0); e.push(crop); } // index 14 (extension meta) stays free
+    return e;
+  }
+  // [x, y, w, h] the sprite shows of its bitmap (Sprite._frame, set by setFrame); the whole bitmap when it has none
+  function frameOf(s, bw, bh) {
+    var fr = s._frame;
+    if (fr && typeof fr === "object" && numOr(fr.width, 0) > 0 && numOr(fr.height, 0) > 0) {
+      return [numOr(fr.x, 0), numOr(fr.y, 0), fr.width, fr.height];
+    }
+    return [0, 0, bw, bh];
   }
 
   // The opacity a sprite is drawn with (own opacity times every parent's alpha); 0 when it or a parent is

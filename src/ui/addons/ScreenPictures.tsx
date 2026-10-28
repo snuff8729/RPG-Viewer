@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
-  DEFAULT_SCREEN, pictureRect, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type ScreenSize, type StandGroup,
+  DEFAULT_SCREEN, pictureDraw, standGroupLabel, standGroups, standViewOf,
+  type PictureView, type ScreenPicture, type ScreenShot, type ScreenSize, type StandGroup,
 } from "@/core/addons/screenPictures";
 import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,7 @@ function usePictureImages(names: string[]) {
 }
 
 /** 캔버스에 그릴 화면 부분(게임 화면 좌표) */
-interface View { left: number; top: number; width: number; height: number }
+type View = PictureView;
 
 /** 캔버스에 그림들을 번호 순으로 그린다(위치·기준점·크기·투명도·블렌드·색조·회전). view: 그릴 화면 부분. */
 function ScreenCanvas({ pictures, view, images, className }: {
@@ -122,9 +123,11 @@ function ScreenCanvas({ pictures, view, images, className }: {
         ctx.translate(p.x - view.left, p.y - view.top);
         if (p.angle) ctx.rotate((p.angle * Math.PI) / 180);
         ctx.scale(p.scaleX / 100, p.scaleY / 100);
-        const [ax, ay] = p.anchor ?? (p.origin === 1 ? [0.5, 0.5] : [0, 0]);
+        // 화면 사각형(standView의 pictureRect)과 같은 크기 기준: 기록의 크기(없으면 그림 파일 크기)에 crop 부분 또는 그림 전체
+        const d = pictureDraw(p, { w: img.width, h: img.height });
+        if (!d) continue;
         const src = p.tone ? toned(img, p.tone) : img;
-        ctx.drawImage(src, -ax * img.width, -ay * img.height);
+        ctx.drawImage(src, d.sx, d.sy, d.sw, d.sh, d.dx, d.dy, d.dw, d.dh);
       } catch { /* 그 그림만 건너뛴다 */ } finally {
         ctx.restore();
       }
@@ -134,26 +137,17 @@ function ScreenCanvas({ pictures, view, images, className }: {
 }
 
 /**
- * 스탠딩: 그림들의 보이는 부분(투명하지 않은 부분)을 합친 곳(화면 안으로 자른 것). 화면 크기의 투명한 겹으로 그린 스탠딩도
- * 캐릭터 부분만 잘린다. 크기를 아직 모르면 화면 전체.
+ * 스탠딩: 그림들의 보이는 부분(투명하지 않은 부분)을 합친 곳 — 그리는 것(ScreenCanvas의 pictureDraw)과 같은 크기 기준(core
+ * standViewOf). 화면 크기의 투명한 겹으로 그린 스탠딩도 캐릭터 부분만 잘린다. 그림을 아직 못 읽었으면 화면 전체.
  */
 function standView(pictures: ScreenPicture[], size: ScreenSize, images: Map<string, ImageBitmap>): View {
-  const full = { left: 0, top: 0, width: size.width, height: size.height };
-  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-  for (const p of pictures) {
-    const img = images.get(p.name);
-    if (!img) return full;
-    const stats = imageAlphaStats(img);
-    if (stats && !stats.box) continue; // 다 투명한 겹
-    // 그리는 크기 그대로(불러온 그림의 원래 크기 — 기록에 크기가 없는 0x0 그림도)
-    const r = pictureRect({ ...p, w: img.width, h: img.height }, null, stats?.box ?? null);
-    if (!r) return full;
-    left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
-  }
-  left = Math.max(0, Math.floor(left)); top = Math.max(0, Math.floor(top));
-  right = Math.min(size.width, Math.ceil(right)); bottom = Math.min(size.height, Math.ceil(bottom));
-  if (!(right > left && bottom > top)) return full;
-  return { left, top, width: right - left, height: bottom - top };
+  return standViewOf(pictures, size, (name) => {
+    const img = images.get(name);
+    return img ? { w: img.width, h: img.height } : null;
+  }, (name) => {
+    const img = images.get(name);
+    return img ? imageAlphaStats(img) : null;
+  });
 }
 
 /** 스탠딩 묶음 이름·설명: 그림에 붙은 어댑터의 뷰어 도움 → 기본("아마네 스탠딩") */

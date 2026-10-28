@@ -121,6 +121,61 @@ describe("pictures drawn into a plugin's canvas (1.18.0)", () => {
   });
 });
 
+describe("where a picture drawn into a canvas shows on screen (1.18.1)", () => {
+  /** a canvas sprite at (x, y) with the picture (800 x 1200) drawn into it by blt(src rect = whole, dest rect) */
+  function canvasWith(hh: Harness, x: number, y: number, cw: number, ch: number, dest: [number, number, number, number]) {
+    const ss = hh.mountSpriteset(10);
+    hh.setBitmapSize("tachie/body", 800, 1200);
+    const s = ss.spriteset.addChild(new hh.g.Sprite());
+    s.x = x; s.y = y;
+    s.bitmap = new hh.g.Bitmap(cw, ch);
+    const img = hh.g.ImageManager.loadNormalBitmap("img/pictures/tachie/body.png");
+    hh.completeLoads();
+    s.bitmap.blt(img, 0, 0, 800, 1200, ...dest);
+    return s;
+  }
+  const lastPics = (hh: Harness) => { settle(hh); const r = screens(hh); return r[r.length - 1].pics; };
+
+  it("a canvas half the picture's width with the whole picture stretched into it: the whole picture, squeezed", () => {
+    h = newGame();
+    canvasWith(h, 100, 0, 400, 1200, [0, 0, 400, 1200]);
+    h.frame();
+    expect(lastPics(h)).toEqual([[1000, "tachie/body", 0, 100, 0, 50, 100, 255, 0, 0, 0, 800, 1200, "sprite"]]);
+  });
+
+  it("a canvas of the picture's size whose sprite shows only the left half (setFrame): that half, cropped", () => {
+    h = newGame();
+    const s = canvasWith(h, 100, 20, 800, 1200, [0, 0, 800, 1200]);
+    s._frame = { x: 0, y: 0, width: 400, height: 1200 };
+    h.frame();
+    expect(lastPics(h)).toEqual([[1000, "tachie/body", 0, 100, 20, 100, 100, 255, 0, 0, 0, 400, 1200, "sprite", 0, [0, 0, 400, 1200, 800, 1200]]]);
+  });
+
+  it("the right half through a centred frame: the crop and the corner where it shows", () => {
+    h = newGame();
+    const s = canvasWith(h, 500, 600, 800, 1200, [0, 0, 800, 1200]);
+    s._frame = { x: 400, y: 0, width: 400, height: 1200 };
+    s.anchor = { x: 0.5, y: 0.5 };
+    h.frame();
+    expect(lastPics(h)).toEqual([[1000, "tachie/body", 0, 300, 0, 100, 100, 255, 0, 0, 0, 400, 1200, "sprite", 0, [400, 0, 400, 1200, 800, 1200]]]);
+  });
+
+  it("a sprite scaled to half: the whole picture at its own size, scale 50%", () => {
+    h = newGame();
+    const s = canvasWith(h, 0, 0, 800, 1200, [0, 0, 800, 1200]);
+    s.scale = { x: 0.5, y: 0.5 };
+    h.frame();
+    expect(lastPics(h)).toEqual([[1000, "tachie/body", 0, 0, 0, 50, 50, 255, 0, 0, 0, 800, 1200, "sprite"]]);
+  });
+
+  it("a picture drawn into a part of a larger canvas: the whole picture where it went", () => {
+    h = newGame();
+    canvasWith(h, 10, 20, 1000, 1300, [100, 50, 800, 1200]);
+    h.frame();
+    expect(lastPics(h)).toEqual([[1000, "tachie/body", 0, 110, 70, 100, 100, 255, 0, 0, 0, 800, 1200, "sprite", 0, [0, 0, 800, 1200, 800, 1200]]]);
+  });
+});
+
 describe("battles the plugin did not see start (1.18.0)", () => {
   it("records the start when the battle scene starts in battle without BattleManager.setup having run", () => {
     h = newGame(false);
