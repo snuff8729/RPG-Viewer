@@ -37,6 +37,17 @@ export interface LiveSnapshot {
   gold: number; party: number[];
   choice: { src: Location | null; cmd: number; options: string[] } | null;
   inBattle: boolean;
+  /** 게임 보조 상태(플러그인 1.1.0+, 없으면 구버전) */
+  assist?: LiveAssist;
+}
+export interface LiveAssist {
+  /** 기본 배속(단축키 F6으로 바뀔 수 있음) */
+  speed: number;
+  /** 지금 실제로 돌고 있는 배속(자동 배속 포함) */
+  effectiveSpeed: number;
+  skipSeen: boolean;
+  troopId: number | null;
+  lastCommand: string | null;
 }
 
 export interface BranchInfo {
