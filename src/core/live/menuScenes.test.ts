@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { menuCommonEventIdsFromPlugins, menuCommonEventsOf, withoutMenuRecords } from "./menuScenes";
+import { afterMenuCommonEventFromPlugins, menuCommonEventIdsFromPlugins, menuCommonEventsOf, withoutMenuRecords } from "./menuScenes";
 import { picturesBySeq } from "../addons/screenPictures";
 import type { LogRecord } from "./types";
 import type { CommonEvent } from "../types";
@@ -77,6 +77,43 @@ describe("menu pictures are left out of the reader", () => {
     ];
     expect(withoutMenuRecords(path, false, menu).map(r => r.seq)).toEqual([1, 4, 5]);
     expect(withoutMenuRecords(path, false, null).map(r => r.seq)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("1.17.0 logs (따거모드 shape): untagged menu pictures and screen scene=map records in the menu span are dropped", () => {
+    const ces: (CommonEvent | null)[] = [];
+    ces[805] = { id: 805, name: "メニュー", trigger: 0, switchId: 1, list: [] };
+    const menu = menuCommonEventsOf([805, 802, 810], ces, 886);
+    const screen = (seq: number, pics: unknown[], scene = "map"): LogRecord =>
+      ({ ...base, seq, type: "screen", scene, pics }) as LogRecord;
+    const path = [
+      msg(1, mapSrc, { pics: [STAND] }),
+      screen(2, [STAND]),
+      erase(3, ce(805)), // the menu opens: メニュー erases the map stand
+      pic(4, ce(806), "stand_menu"),
+      screen(5, [MENU_STAND]), // 1.17.0 wrote the menu's own picture spriteset as scene "map"
+      msg(6, ce(809), { pics: [MENU_STAND] }),
+      screen(7, [MENU_STAND]),
+      erase(8, ce(886)), // after-menu common event on the map: map activity
+      screen(9, []),
+      msg(10, mapSrc, { picsSame: true }),
+    ];
+    const out = withoutMenuRecords(path, false, menu);
+    expect(out.map(r => r.seq)).toEqual([1, 2, 6, 8, 9, 10]);
+    expect(out.find(r => r.seq === 6)).toMatchObject({ picsSame: true });
+    const pics = picturesBySeq(out);
+    for (const list of pics.values()) expect(list.map(p => p.name)).not.toContain("stand_menu");
+    expect(pics.get(6)?.map(p => p.name)).toEqual(["stand_a"]);
+    expect(pics.get(10)).toEqual([]);
+  });
+
+  it("reads CommonEventBeforeAfterMenu's after-menu common event", () => {
+    const plugins = (params: Record<string, string>, status = true) =>
+      `var $plugins = [${JSON.stringify({ name: "CommonEventBeforeAfterMenu", status, description: "", parameters: params })}];`;
+    expect(afterMenuCommonEventFromPlugins(plugins({ "Common Event ID (before Menu)": "0", "Common Event ID (after Menu)": "886" }))).toBe(886);
+    expect(afterMenuCommonEventFromPlugins(plugins({ "Common Event ID (after Menu)": "886" }, false))).toBeNull();
+    expect(afterMenuCommonEventFromPlugins(plugins({ "Common Event ID (after Menu)": "0" }))).toBeNull();
+    expect(afterMenuCommonEventFromPlugins("garbage")).toBeNull();
+    expect(afterMenuCommonEventFromPlugins(null)).toBeNull();
   });
 
   it("returns the same array when nothing is a menu record", () => {

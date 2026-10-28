@@ -1008,7 +1008,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.17.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.17.1", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1795,13 +1795,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.17\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.17\.1"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.17.0");
+    expect(h.bridge.VERSION).toBe("1.17.1");
   });
 
   it("uses ES2015-compatible syntax only", () => {
@@ -2032,7 +2032,7 @@ describe("screen picture capture (1.6.0 / 1.7.0)", () => {
   it("falls back to Game_Screen pictures when the scene has no picture sprites", () => {
     h = newGame();
     setCapture(h, true);
-    h.g.SceneManager._scene = { _spriteset: { children: [] }, children: [] };
+    h.g.SceneManager._scene = Object.assign(new h.g.Scene_Map(), { _spriteset: { children: [] }, children: [] });
     h.g.$gameScreen.showPicture(3, "c", 0, 1, 2, 100, 100, 255, 0);
     talk(h);
     expect(messages(h)[0].pics).toEqual([[3, "c", 0, 1, 2, 100, 100, 255, 0]]);

@@ -45,7 +45,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.17.0",
+    VERSION: "1.17.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1051,17 +1051,33 @@
     return !!(p && p.inBattle && p.inBattle());
   }
 
-  // 1.17.0: the current scene is neither the map nor a battle (Scene_MenuBase descendants, save / load, game over…).
-  // A scene with a spriteset counts as the map.
-  function inMenuScene() {
+  // 1.17.1: scene kind by its constructor — "map" (Scene_Map or a subtype), "battle" (Scene_Battle), null (no scene,
+  // title, boot), "menu" for everything else (Scene_MenuBase descendants, save / load, game over, custom scenes).
+  // A spriteset says nothing: MenuCommonEvent gives menu scenes their own picture spriteset.
+  function classChainHas(sc, name) {
+    var p = Object.getPrototypeOf(sc), n = 0;
+    while (p && n++ < 32) {
+      if (p.constructor && p.constructor.name === name) return true;
+      p = Object.getPrototypeOf(p);
+    }
+    return false;
+  }
+  function sceneKindOf(sc) {
     try {
-      var sc = G.SceneManager && G.SceneManager._scene;
-      if (!sc || sc._spriteset) return false;
-      if ((G.Scene_Map && sc instanceof G.Scene_Map) || (G.Scene_Battle && sc instanceof G.Scene_Battle)) return false;
-      if (G.Scene_Boot && sc instanceof G.Scene_Boot) return false;
-      if (G.Scene_Title && sc instanceof G.Scene_Title) return false;
-      return !inBattleNow();
-    } catch (e) { return false; }
+      if (!sc) return null;
+      if ((G.Scene_Map && sc instanceof G.Scene_Map) || classChainHas(sc, "Scene_Map")) return "map";
+      if ((G.Scene_Battle && sc instanceof G.Scene_Battle) || classChainHas(sc, "Scene_Battle")) return "battle";
+      if (G.Scene_Boot && sc instanceof G.Scene_Boot) return null;
+      if (G.Scene_Title && sc instanceof G.Scene_Title) return null;
+      return inBattleNow() ? "battle" : "menu";
+    } catch (e) { return null; }
+  }
+  function sceneKind() {
+    return sceneKindOf(G.SceneManager && G.SceneManager._scene);
+  }
+  // 1.17.0: the current scene is neither the map nor a battle (1.17.1: by its constructor).
+  function inMenuScene() {
+    return sceneKind() === "menu";
   }
   // 1.17.0: the map's last snapshot is kept aside while a menu is open (menu common events may show / erase pictures
   // on the shared Game_Screen) and comes back when the menu closes, so the map compares against its own pictures.
@@ -1859,8 +1875,8 @@
     screenSettle = null;
     lastPicsKey = JSON.stringify(out);
     lastPicsSet = set;
-    var scn = G.SceneManager && G.SceneManager._scene;
-    emit("screen", { scene: inBattleNow() ? "battle" : (scn && !scn._spriteset ? "menu" : "map"), pics: out });
+    var kind = sceneKind();
+    emit("screen", { scene: inBattleNow() ? "battle" : (kind === "menu" ? "menu" : "map"), pics: out });
   }
   // After each real frame's scene update (what is about to be rendered).
   function screenFrame() {
@@ -1876,8 +1892,10 @@
     // the map coming back): the half-built screen is no "gone" picture. lastPicsSet survives the scene change, so
     // the map that comes back with the same pictures writes nothing.
     if (sc && (sm._nextScene || sm._exiting || sm._sceneStarted === false)) { screenDirty = true; return; }
-    syncPicsScene();
-    var snap = sc && (sc._spriteset || extCaptures(sc)) ? screenNow() : null;
+    // 1.17.1: a menu scene (even with its own spriteset) only when the viewer asked for menu scenes
+    var menuNow = syncPicsScene();
+    var snap = sc && (menuNow ? captureMenuScenes && (sc._spriteset || extCaptures(sc)) : (sc._spriteset || extCaptures(sc)))
+      ? screenNow() : null;
     screenDirty = false;
     if (!snap) { screenSettle = null; return; }
     screenWatch.lastT = t;

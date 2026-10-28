@@ -96,7 +96,7 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const flow = useMemo(() => {
     if (!data) return [];
     // 메뉴 화면 그림은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
-    const path = withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuCommonEventsOf(data.menuCommonEvents, data.commonEvents));
+    const path = withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuCommonEventsOf(data.menuCommonEvents, data.commonEvents, data.afterMenuCommonEvent));
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: hiddenImageMatcher(hiddenImages) });
     const choiceText = choiceTexts(path, data);
     // 읽기에서 숨긴 그림은 다시 쌓은 화면에서도 뺀다

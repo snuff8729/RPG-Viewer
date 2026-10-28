@@ -66,7 +66,7 @@ export interface Harness {
   readLog(): any[];
   readLive(): any;
   addMapEvent(eventId: number, pages: Cmd[][], pageIndex?: number): any;
-  /** Puts a Scene_Map-like scene with a spriteset (one Sprite_Picture per id in _pictureContainer) on SceneManager. */
+  /** Puts a Scene_Map with a spriteset (one Sprite_Picture per id in _pictureContainer) on SceneManager. */
   mountSpriteset(maxPictures?: number): { scene: any; spriteset: any; container: any; sprites: any[]; update(): void };
   setBitmapSize(name: string, w: number, h: number): void;
   /** The message window opens and starts drawing text (Window_Message.updateMessage with a text state). */
@@ -428,6 +428,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     this.scale = { x: 1, y: 1 }; this.anchor = { x: 0, y: 0 }; this.blendMode = 0; this.rotation = 0; this.bitmap = null;
     this._colorTone = [0, 0, 0, 0];
   }
+  Object.setPrototypeOf(Scene_Map.prototype, Sprite.prototype);
   Object.defineProperty(Sprite.prototype, "opacity", {
     get(this: any) { return this.alpha * 255; },
     set(this: any, v: number) { this.alpha = Math.max(0, Math.min(255, v)) / 255; },
@@ -593,6 +594,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     },
     mountSpriteset(maxPictures = 100) {
       const scene = new (Sprite as any)();
+      Object.setPrototypeOf(scene, Scene_Map.prototype); // a Scene_Map (1.17.1 tells the map by its class)
       const spriteset = scene.addChild(new (Sprite as any)());
       const container = spriteset.addChild(new (Sprite as any)());
       scene._spriteset = spriteset;

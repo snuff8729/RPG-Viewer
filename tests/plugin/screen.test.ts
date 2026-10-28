@@ -380,3 +380,44 @@ describe("screen record signature (1.10.1)", () => {
     expect(screens(h)).toHaveLength(2);
   });
 });
+
+describe("menu scenes with their own spriteset (1.17.1)", () => {
+  it("MenuCommonEvent-like Scene_Menu with a spriteset: records tagged menu, no screen record, the map comes back unchanged", () => {
+    h = newGame();
+    const ss = h.mountSpriteset(10);
+    h.setBitmapSize("stand_a", 400, 600);
+    h.setBitmapSize("stand_menu", 400, 600);
+    h.g.$gameScreen.showPicture(1, "stand_a", 0, 100, 0, 100, 100, 255, 0);
+    ss.update();
+    h.completeLoads();
+    h.frame();
+    settle(h, 300);
+    expect(screens(h)).toEqual([expect.objectContaining({ scene: "map" })]);
+    // the menu opens: a Scene_Menu that has a picture spriteset of its own (MenuCommonEvent)
+    function Scene_Menu(this: any) {}
+    Object.setPrototypeOf(Scene_Menu.prototype, h.g.Sprite.prototype);
+    Object.setPrototypeOf(ss.scene, Scene_Menu.prototype);
+    expect(ss.scene._spriteset).toBeTruthy();
+    const interp = h.newInterpreter();
+    interp.setup([cmd(235, [1]), cmd(231, [2, "stand_menu", 0, 0, 100, 0, 100, 100, 255, 0]), cmd(0)], 0);
+    h.runCommand(interp, 0);
+    h.runCommand(interp, 1);
+    ss.update();
+    h.completeLoads();
+    h.frame();
+    settle(h, 300);
+    expect(screens(h)).toHaveLength(1);
+    const pics = h.readLog().filter((r) => r.type === "picture");
+    expect(pics).toHaveLength(2);
+    for (const p of pics) expect(p.scene).toBe("menu");
+    // the stand comes back and the menu closes: the map's own snapshot is the same as before
+    h.g.$gameScreen.erasePicture(2);
+    h.g.$gameScreen.showPicture(1, "stand_a", 0, 100, 0, 100, 100, 255, 0);
+    Object.setPrototypeOf(ss.scene, h.g.Scene_Map.prototype);
+    ss.update();
+    h.completeLoads();
+    h.frame();
+    settle(h, 300);
+    expect(screens(h)).toHaveLength(1);
+  });
+});
