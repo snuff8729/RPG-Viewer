@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LogRecord } from "../live/types";
 import {
   alphaStatsOf, DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf,
-  screenSizeOf, seenPictures, snapshotCounts, type PictureContext, type PictureRoles, type ScreenPicture,
+  screenSizeOf, seenPictures, snapshotCounts, standGroupLabel, standGroups, type PictureContext, type PictureRoles, type ScreenPicture,
 } from "./screenPictures";
 
 const base = { v: 1, t: 0, run: 1, branch: 1 } as const;
@@ -179,6 +179,32 @@ describe("picture groups", () => {
       expect([...s.cg, ...s.stand]).toHaveLength(10);
     });
 
+    it("before the alpha stats are known (encrypted files still loading), stacked full-canvas layers are a stand", () => {
+      // 크기는 기록·PNG 머리로 알지만 투명도 통계는 아직 모른다
+      const unknown: PictureContext = { screen: S, sizeOf: () => ({ w: 816, h: 624 }) };
+      const s = sceneOf(pics(), unknown);
+      expect(s.cg).toEqual([]);
+      expect(s.stand).toHaveLength(10);
+      expect(nextShot(null, s).shot?.kind).toBe("stand");
+      // 크기도 모르는 겹(0×0 기록 + 머리를 못 읽음)은 원래대로 스탠딩
+      expect(sceneOf(pics(), { screen: S }).cg).toEqual([]);
+      // 1.13.0 기록 그대로(18겹 모두 816×624, 통계·파일 크기 모름)
+      const all = names.map((n, i) => layer(i + 2, n));
+      expect(sceneOf(all, { screen: S }).stand).toHaveLength(10);
+    });
+
+    it("an event image with one or two full-screen overlays stays an event image while stats are unknown", () => {
+      const cg = P([1, "OP_Past", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
+      const dark = P([61, "Darkness", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
+      expect(sceneOf([cg, dark], { screen: S })).toEqual({ cg: [cg, dark], stand: [] });
+      // 다른 자리(줌한 그림)는 같은 겹으로 세지 않는다
+      const zoomed = P([2, "OP_Past2", 0, -100, -50, 120, 120, 255, 0, 0, 0, 816, 624]);
+      expect(sceneOf([cg, zoomed, dark], { screen: S }).cg).toHaveLength(3);
+      // 통계를 읽은 뒤에는 통계로 정한다: 불투명한 그림이면 겹쳐 있어도 이벤트 그림
+      const opaque: PictureContext = { screen: S, statsOf: () => ({ opaque: 1, box: [0, 0, 1, 1] }) };
+      expect(sceneOf(names.map((n, i) => layer(i + 2, n)), opaque).cg.length).toBeGreaterThan(0);
+    });
+
     it("an opaque full-screen picture is still an event image", () => {
       const cg = P([60, "eve_01", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624]);
       expect(roleOf(cg, { ...ctx, statsOf: () => ({ opaque: 1, box: [0, 0, 1, 1] }) })).toBe("cg");
@@ -191,6 +217,50 @@ describe("picture groups", () => {
       expect(alphaStatsOf(px, w, h)).toEqual({ opaque: 1 / 8, box: [0.25, 0, 0.75, 1] });
       expect(alphaStatsOf(new Uint8Array(32), w, h)).toEqual({ opaque: 0, box: null });
       expect(alphaStatsOf(null, w, h)).toBeNull();
+    });
+  });
+
+  // 따거모드(1.10+): 스탠딩은 그림 111–143(380,0), 컷인은 플러그인이 띄운 그림(1000~, 240,256 근처)
+  describe("cut-ins apart from the stand (ddaggeo)", () => {
+    const HAIR = P([112, "hair/01_1", 0, 380, 0, 100, 100, 255, 0, 0, 0, 922, 922]);
+    const cut = (id: number, name: string, x: number, y: number, w: number, h: number) =>
+      P([id, name, 0, x, y, 100, 100, 255, 0, 0, 0, w, h, "sprite"]);
+    const BREAST = cut(1000, "actor01_cutin_breast_0001", 240, 256, 336, 368);
+    const ORGAN_C = cut(1001, "organ/02c", 248, 260, 320, 360);
+    const MARK = cut(1002, "mark/heart_01", 520, 300, 64, 64);
+    const cutin = [BREAST, ORGAN_C, MARK];
+
+    it("groups picture-command layers and plugin sprites separately, never merged", () => {
+      const groups = standGroups([BODY, HAIR, ...cutin]);
+      expect(groups.map(g => [g.key, g.kind, standGroupLabel(g), g.pictures.map(p => p.id)])).toEqual([
+        ["", undefined, "스탠딩", [111, 112]],
+        ["c0", "cutin", "컷인", [1000, 1001, 1002]],
+      ]);
+      // 떨어진 그림 명령 스탠딩 두 덩어리는 따로
+      const left = P([20, "left_body", 0, 0, 0, 100, 100, 255, 0, 0, 0, 300, 700]);
+      const leftFace = P([21, "left_face", 0, 4, 2, 100, 100, 255, 0, 0, 0, 0, 0]); // 크기 없음: 같은 자리라서 함께
+      expect(standGroups([left, BODY, leftFace]).map(g => [g.key, g.pictures.map(p => p.id)])).toEqual([["", [20, 21]], ["p1", [111]]]);
+    });
+
+    it("each group re-shows only when its own layers change", () => {
+      const stand = (...more: ScreenPicture[]) => ({ cg: [], stand: [BODY, HAIR, ...more] });
+      const a = nextShot(null, stand());
+      expect(a.shot?.pictures.map(p => p.id)).toEqual([111, 112]);
+      // 컷인이 나타남: 컷인만 새로 보인다
+      const b = nextShot(a.key, stand(...cutin));
+      expect(b.shot?.kind).toBe("stand");
+      expect(b.shot?.pictures.map(p => p.name)).toEqual(["actor01_cutin_breast_0001", "organ/02c", "mark/heart_01"]);
+      expect(standGroups(b.shot!.pictures).map(standGroupLabel)).toEqual(["컷인"]);
+      // 컷인 다음 장: 컷인만
+      const next = { ...BREAST, name: "actor01_cutin_breast_0002" };
+      const c = nextShot(b.key, stand(next, ORGAN_C, MARK));
+      expect(c.shot?.pictures.map(p => p.id)).toEqual([1000, 1001, 1002]);
+      // 컷인이 사라짐: 스탠딩은 그대로라 다시 보이지 않는다
+      const d = nextShot(c.key, stand());
+      expect(d.shot).toBeNull();
+      // 스탠딩만 바뀜(표정): 스탠딩만
+      const e = nextShot(nextShot(d.key, stand(...cutin)).key, { cg: [], stand: [{ ...BODY, name: "actor01_pose01_body_0004" }, HAIR, ...cutin] });
+      expect(e.shot?.pictures.map(p => p.id)).toEqual([111, 112]);
     });
   });
 

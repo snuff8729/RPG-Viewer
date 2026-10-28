@@ -196,7 +196,7 @@ function ShotButton({ pictures, view, images, stand, title, names, caption }: {
  * 화면 그림 따라 그리기: 대사가 나올 때 게임 화면에 보이던 그림을 그린다.
  * - 이벤트 그림(cg): 게임 화면 비율 그대로(그 위에 보이던 스탠딩 포함).
  * - 스탠딩(stand): 스탠딩 겹만, 차지하는 부분으로 잘라 작게. 게임 전용 확장이 배우를 붙인 스탠딩(1.13.0)은
- *   배우마다 따로 잘라 나란히("아마네 스탠딩").
+ *   배우마다, 플러그인이 띄운 컷인은 스탠딩과 따로, 떨어진 스탠딩 덩어리도 따로 잘라 나란히("아마네 스탠딩"·"컷인"·"스탠딩").
  * 누르면 크게 본다. 게임 폴더에 없는 그림은 아래에 이름을 적는다.
  */
 export function ScreenPictures({ shot }: { shot: ScreenShot }) {
@@ -209,8 +209,9 @@ export function ScreenPictures({ shot }: { shot: ScreenShot }) {
   const failed = names.some((n) => status(n) === "failed");
   const stand = shot.kind === "stand";
   const groups = stand ? standGroups(pictures) : [];
-  const byActor = groups.some((g) => typeof g.actorId === "number");
-  const body = byActor ? (
+  // 배우별·컷인·떨어진 스탠딩이 있으면 묶음마다 따로 잘라 나란히(좁으면 줄바꿈)
+  const separate = groups.length > 1 || groups.some((g) => typeof g.actorId === "number" || g.kind === "cutin");
+  const body = separate ? (
     <div className="flex flex-wrap items-end gap-2">
       {groups.map((g) => {
         const { label, title } = groupText(g);

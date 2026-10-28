@@ -371,18 +371,48 @@ function chosenRole(p: ScreenPicture, ctx: PictureContext): PictureRole | null {
   return null;
 }
 
-/** 크기로 정하는 구분. small = 작아서 화면 장식으로 본 것 */
-function autoRole(p: ScreenPicture, ctx: PictureContext): { role: PictureRole; small: boolean } {
+/**
+ * 크기로 정하는 구분. small = 작아서 화면 장식으로 본 것.
+ * stacked = 투명도 통계를 아직 모르는 화면 크기 그림인데 같은 자리·크기로 여러 겹 겹쳐 있다(stackedLayers) —
+ * 화면 크기의 투명한 겹으로 몸을 나눠 그린 스탠딩으로 본다(통계를 읽으면 그것으로 다시 정한다).
+ */
+function autoRole(p: ScreenPicture, ctx: PictureContext, stacked = false): { role: PictureRole; small: boolean } {
   // 크기는 실제로 보이는 부분으로 본다: 화면 크기의 투명한 그림 위에 몸 한 부분만 그린 겹(스탠딩 부품)은 이벤트 그림이 아니다
   const r = contentRect(p, ctx);
   if (r) {
     const cover = coverage(r, ctx.screen);
     const st = statsOfPic(p, ctx);
-    if (cover >= CG_COVER && (!st || st.opaque >= CG_OPAQUE)) return { role: "cg", small: false };
+    if (cover >= CG_COVER && (st ? st.opaque >= CG_OPAQUE : !stacked)) return { role: "cg", small: false };
     // 1.10.1: 작은 그림은 화면 장식(플러그인이 띄운 것은 화면의 5%, 그림 명령은 2%보다 작을 때 — 티커 배경 막대 등)
     if (cover < (p.kind === "sprite" ? SMALL_SPRITE : SMALL_PICTURE)) return { role: "hud", small: true };
   }
   return { role: "stand", small: false };
+}
+
+/** 같은 자리·크기로 이만큼 이상 겹친 화면 크기 그림은(투명도 통계를 모를 때) 스탠딩 겹으로 본다 */
+const STACKED_LAYERS = 3;
+
+/**
+ * 투명도 통계를 아직 모르는(암호화된 그림을 읽는 중이거나 읽을 수 없는) 화면 크기 그림 중, 같은 자리·기준점·배율·각도·크기로
+ * STACKED_LAYERS개 이상 겹친 것들. 캐릭터를 화면 크기의 투명한 겹(몸·팔·눈·입…)으로 나눠 그리는 게임의 스탠딩이다
+ * (이벤트 그림 한 장 + 어둡게 덮는 그림 한 장은 이보다 적다). 예외를 던지지 않는다.
+ */
+function stackedLayers(pics: ScreenPicture[], ctx: PictureContext): Set<ScreenPicture> {
+  const out = new Set<ScreenPicture>();
+  try {
+    const groups = new Map<string, ScreenPicture[]>();
+    for (const p of pics) {
+      if (statsOfPic(p, ctx)) continue;
+      const s = sizeOfPic(p, ctx.sizeOf);
+      const r = s ? pictureRect(p, ctx.sizeOf) : null;
+      if (!s || !r || coverage(r, ctx.screen) < CG_COVER) continue;
+      const k = [p.origin, p.anchor?.join(",") ?? "", p.x, p.y, p.scaleX, p.scaleY, p.angle ?? 0, s.w, s.h].join("|");
+      const g = groups.get(k);
+      if (g) g.push(p); else groups.set(k, [p]);
+    }
+    for (const g of groups.values()) if (g.length >= STACKED_LAYERS) for (const p of g) out.add(p);
+  } catch { /* 겹 판정 없음 */ }
+  return out;
 }
 
 const overlaps = (a: Rect, b: Rect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -395,9 +425,11 @@ export function rolesOf(pics: ScreenPicture[], ctx: PictureContext): Map<ScreenP
   const out = new Map<ScreenPicture, PictureRole>();
   const small: ScreenPicture[] = [];
   const drawnRects: Rect[] = [];
+  const chosen = new Map(pics.map(p => [p, chosenRole(p, ctx)] as const));
+  const stacked = stackedLayers(pics.filter(p => chosen.get(p) === null), ctx);
   for (const p of pics) {
-    const chosen = chosenRole(p, ctx);
-    const a = chosen ? { role: chosen, small: false } : autoRole(p, ctx);
+    const c = chosen.get(p);
+    const a = c ? { role: c, small: false } : autoRole(p, ctx, stacked.has(p));
     out.set(p, a.role);
     if (a.small && p.kind !== "sprite") small.push(p);
     else if (a.role === "cg" || a.role === "stand") { const r = contentRect(p, ctx); if (r) drawnRects.push(r); }
@@ -481,46 +513,108 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
       return { shot: key === prevKey ? null : { kind: "cg", pictures, cg: [...scene.cg] }, key };
     }
     if (scene.stand.length > 0) {
-      const key = "stand:" + JSON.stringify(scene.stand);
-      return { shot: key === prevKey ? null : { kind: "stand", pictures: scene.stand }, key };
+      // 묶음(스탠딩·컷인·배우별)마다 따로: 앞에 보인 것과 겹이 달라진 묶음만 다시 보인다
+      const groups = standGroups(scene.stand);
+      const keys = groups.map(g => JSON.stringify(g.pictures));
+      const key = STAND_KEY + JSON.stringify(keys);
+      const before = shownGroupKeys(prevKey);
+      const changed = groups.filter((_, i) => !before.has(keys[i]));
+      if (changed.length === 0) return { shot: null, key };
+      const pictures = changed.length === groups.length ? scene.stand : changed.flatMap(g => g.pictures);
+      return { shot: { kind: "stand", pictures }, key };
     }
   } catch { /* 없음으로 */ }
   return { shot: null, key: "" };
 }
 
-/** 스탠딩 묶음 하나: 배우별(확장이 배우를 붙인 그림) 또는 나머지 */
-export interface StandGroup { key: string; actorId?: number; actorName?: string; pictures: ScreenPicture[] }
+const STAND_KEY = "stand:";
+
+/** 스탠딩만 보인 열쇠(nextShot)에서 그때 보인 묶음들의 열쇠. 다른 열쇠면 빈 집합. */
+function shownGroupKeys(prevKey: string | null): Set<string> {
+  if (!prevKey || !prevKey.startsWith(STAND_KEY)) return new Set();
+  try {
+    const v: unknown = JSON.parse(prevKey.slice(STAND_KEY.length));
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
 
 /**
- * 스탠딩 그림을 배우별로 나눈다(1.13.0 확장이 붙인 actorId 기준, 처음 나온 순서). 배우가 없는 그림은 한 묶음("").
- * 배우가 붙은 그림이 없으면 전체가 한 묶음. 각 묶음 안은 그리는 순서 그대로.
+ * 스탠딩 묶음 하나: 배우별(확장이 배우를 붙인 그림), 컷인(플러그인이 띄운 그림 kind "sprite" 덩어리), 또는 스탠딩(그림 명령 덩어리).
+ * kind "cutin" = 컷인 묶음.
+ */
+export interface StandGroup { key: string; actorId?: number; actorName?: string; kind?: "cutin"; pictures: ScreenPicture[] }
+
+/** 같은 자리로 보는 위치 차이(px)·배율 차이(%) */
+const PLACE_PX = 8, PLACE_SCALE = 1;
+
+function samePlacement(a: ScreenPicture, b: ScreenPicture): boolean {
+  return a.origin === b.origin && (a.anchor?.join(",") ?? "") === (b.anchor?.join(",") ?? "")
+    && Math.abs(a.x - b.x) <= PLACE_PX && Math.abs(a.y - b.y) <= PLACE_PX
+    && Math.abs(a.scaleX - b.scaleX) <= PLACE_SCALE && Math.abs(a.scaleY - b.scaleY) <= PLACE_SCALE;
+}
+
+/**
+ * 겹들을 덩어리로 나눈다: 같은 자리(위치·기준점·배율이 거의 같다)거나 차지하는 사각형(기록의 크기)이 겹치면 같은 덩어리
+ * (이어져 있으면 모두 한 덩어리). 덩어리는 처음 나온 순서, 안은 그리는 순서 그대로.
+ */
+function clusters(pics: ScreenPicture[]): ScreenPicture[][] {
+  const parent = pics.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const rects = pics.map(p => pictureRect(p));
+  for (let i = 0; i < pics.length; i++) {
+    for (let j = i + 1; j < pics.length; j++) {
+      const ri = rects[i], rj = rects[j];
+      if (samePlacement(pics[i], pics[j]) || (ri && rj && overlaps(ri, rj))) parent[find(j)] = find(i);
+    }
+  }
+  const byRoot = new Map<number, ScreenPicture[]>();
+  pics.forEach((p, i) => {
+    const r = find(i);
+    const g = byRoot.get(r);
+    if (g) g.push(p); else byRoot.set(r, [p]);
+  });
+  return [...byRoot.values()];
+}
+
+/**
+ * 스탠딩 그림을 따로 보일 묶음으로 나눈다(처음 나온 순서, 각 묶음 안은 그리는 순서 그대로):
+ * - 확장이 배우를 붙인 그림(1.13.0 actorId)은 배우별("a{id}").
+ * - 나머지는 플러그인이 띄운 그림(kind "sprite" — 컷인)과 그림 명령 그림을 섞지 않고, 각각 덩어리(clusters)로 나눈다.
+ *   그림 명령 덩어리는 스탠딩(열쇠 "", 둘째부터 "p1"…), 플러그인 그림 덩어리는 컷인("c0"…, kind "cutin").
  */
 export function standGroups(pictures: ScreenPicture[] | null | undefined): StandGroup[] {
-  const out: StandGroup[] = [];
-  const byKey = new Map<string, StandGroup>();
+  const found: { first: number; g: StandGroup }[] = [];
   try {
-    for (const p of Array.isArray(pictures) ? pictures : []) {
-      if (!p) continue;
+    const byActor = new Map<number, StandGroup>();
+    const plain: ScreenPicture[] = [], sprites: ScreenPicture[] = [];
+    const firstAt = new Map<ScreenPicture, number>();
+    (Array.isArray(pictures) ? pictures : []).forEach((p, i) => {
+      if (!p) return;
+      firstAt.set(p, i);
       const id = p.tag?.actorId;
-      const key = typeof id === "number" ? `a${id}` : "";
-      let g = byKey.get(key);
+      if (typeof id !== "number") { (p.kind === "sprite" ? sprites : plain).push(p); return; }
+      let g = byActor.get(id);
       if (!g) {
-        g = { key, pictures: [] };
-        if (typeof id === "number") g.actorId = id;
-        byKey.set(key, g);
-        out.push(g);
+        g = { key: `a${id}`, actorId: id, pictures: [] };
+        byActor.set(id, g);
+        found.push({ first: i, g });
       }
       if (!g.actorName && p.tag?.actorName) g.actorName = p.tag.actorName;
       g.pictures.push(p);
-    }
+    });
+    clusters(plain).forEach((c, n) => found.push({ first: firstAt.get(c[0]) ?? 0, g: { key: n === 0 ? "" : `p${n}`, pictures: c } }));
+    clusters(sprites).forEach((c, n) => found.push({ first: firstAt.get(c[0]) ?? 0, g: { key: `c${n}`, kind: "cutin", pictures: c } }));
   } catch { /* 모은 데까지 */ }
-  return out;
+  return found.sort((a, b) => a.first - b.first).map(x => x.g);
 }
 
-/** 스탠딩 묶음의 이름: "아마네 스탠딩", 이름 모르는 배우는 "배우 3 스탠딩", 배우 없음은 "스탠딩" */
+/** 스탠딩 묶음의 이름: "아마네 스탠딩", 이름 모르는 배우는 "배우 3 스탠딩", 컷인은 "컷인", 배우 없음은 "스탠딩" */
 export function standGroupLabel(g: StandGroup): string {
   if (g.actorName) return `${g.actorName} 스탠딩`;
   if (typeof g.actorId === "number") return `배우 ${g.actorId} 스탠딩`;
+  if (g.kind === "cutin") return "컷인";
   return "스탠딩";
 }
 

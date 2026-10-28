@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import {
-  DEFAULT_SCREEN, hudKeys, pngSize, snapshotCounts, type AlphaStats, type PicSize, type PictureContext, type ScreenPicture,
+  DEFAULT_SCREEN, hudKeys, snapshotCounts, type AlphaStats, type PicSize, type PictureContext, type ScreenPicture,
 } from "@/core/addons/screenPictures";
 import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
-import { blobAlphaStats } from "./imageStats";
+import { pictureInfo } from "./imageStats";
 import type { LogRecord } from "@/core/live/types";
 
 /** 그림 이름 → 크기(PNG 머리에서 읽은 것, 게임 그림 저장소별). null = 읽을 수 없음 */
@@ -59,13 +59,10 @@ export function usePictureContext(records: LogRecord[], on: boolean, compose = f
     const worker = async () => {
       for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
         try {
-          const blob = await assets.load("pictures", name);
-          if (!blob) { c.set(name, null); st.set(name, null); continue; }
-          const head = c.has(name) ? c.get(name) ?? null : pngSize(new Uint8Array(await blob.slice(0, 24).arrayBuffer()));
-          // 머리에서 크기를 못 읽으면 디코드한 원래 크기를 쓴다
-          const r = await blobAlphaStats(blob, head);
-          c.set(name, head ?? r.size);
-          st.set(name, r.stats);
+          // 그림 저장소에서(암호화된 그림은 풀어서) 크기·투명도 통계를 읽는다
+          const info = await pictureInfo(assets, name, c.has(name) ? c.get(name) ?? null : undefined);
+          c.set(name, info?.size ?? null);
+          st.set(name, info?.stats ?? null);
         } catch {
           // 읽기 실패는 기억하지 않는다(다음에 다시 읽는다)
         } finally {
