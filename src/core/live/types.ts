@@ -48,6 +48,8 @@ export interface LiveAssist {
   skipSeen: boolean;
   troopId: number | null;
   lastCommand: string | null;
+  /** 게임에 실제로 걸린 단축키 keyCode(null = 끔). 없으면 기본 단축키가 고정인 구버전 플러그인. */
+  hotkeys?: { speed: number | null; skip: number | null; win: number | null; lose: number | null };
 }
 
 export interface BranchInfo {

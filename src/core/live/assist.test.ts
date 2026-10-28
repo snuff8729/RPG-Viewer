@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
-import { controlJson, DEFAULT_ASSIST, normalizeAssist, seenSets, versionAtLeast } from "./assist";
+import {
+  controlJson, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys, normalizeAssist, normalizeHotkeys,
+  seenSets, validateHotkey, versionAtLeast,
+} from "./assist";
 import { pageNewCounts } from "./interactable";
 import type { Coverage, PickInfo } from "./types";
 
@@ -70,6 +73,7 @@ describe("controlJson", () => {
     const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win" }, 123));
     expect(j).toEqual({
       v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
+      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122 },
       seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win" },
     });
   });
@@ -83,7 +87,9 @@ describe("normalizeAssist / versionAtLeast", () => {
   it("normalizes stored values", () => {
     expect(normalizeAssist(null)).toEqual(DEFAULT_ASSIST);
     expect(normalizeAssist({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2 }))
-      .toEqual({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2 });
+      .toEqual({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS });
+    const hk = { speed: 65, skip: null, win: 121, lose: 122 };
+    expect(normalizeAssist({ ...DEFAULT_ASSIST, hotkeys: hk }).hotkeys).toEqual(hk);
     expect(normalizeAssist({ speed: "4", autoSpeed: 16 })).toEqual(DEFAULT_ASSIST);
   });
   it("compares versions", () => {
@@ -93,5 +99,53 @@ describe("normalizeAssist / versionAtLeast", () => {
     expect(versionAtLeast("2", "1.1.0")).toBe(true);
     expect(versionAtLeast(null, "1.1.0")).toBe(false);
     expect(versionAtLeast("1.1.0-beta", "1.1.0")).toBe(false);
+  });
+});
+
+describe("hotkeys", () => {
+  it("keyLabel names F keys, letters, digits, numpad, else the code", () => {
+    expect(keyLabel(117)).toBe("F6");
+    expect(keyLabel(123)).toBe("F12");
+    expect(keyLabel(112)).toBe("F1");
+    expect(keyLabel(65)).toBe("A");
+    expect(keyLabel(48)).toBe("0");
+    expect(keyLabel(96)).toBe("Num 0");
+    expect(keyLabel(105)).toBe("Num 9");
+    expect(keyLabel(186)).toBe("키 186");
+  });
+  it("validateHotkey rejects reserved keys and duplicates", () => {
+    expect(validateHotkey(null, "speed", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(117, "speed", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(65, "speed", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(116, "speed", DEFAULT_HOTKEYS)).toBe("F5은(는) 게임이 이미 쓰는 키예요");
+    expect(validateHotkey(90, "win", DEFAULT_HOTKEYS)).toMatch(/게임이 이미 쓰는/);
+    expect(validateHotkey(13, "win", DEFAULT_HOTKEYS)).toMatch(/게임이 이미 쓰는/);
+    expect(validateHotkey(118, "speed", DEFAULT_HOTKEYS)).toBe("F7은(는) 이미 '본 대사 넘기기 켜고 끄기'에 쓰고 있어요");
+    expect(validateHotkey(1.5, "speed", DEFAULT_HOTKEYS)).toBe("쓸 수 없는 키예요");
+    expect(validateHotkey(300, "speed", DEFAULT_HOTKEYS)).toBe("쓸 수 없는 키예요");
+  });
+  it("normalizeHotkeys: old settings get defaults, bad/duplicate keys fall back", () => {
+    expect(normalizeHotkeys(undefined)).toEqual(DEFAULT_HOTKEYS);
+    expect(normalizeHotkeys({ speed: 116, skip: "x" })).toEqual(DEFAULT_HOTKEYS);
+    expect(normalizeHotkeys({ speed: null, skip: 65, win: 66, lose: 67 })).toEqual({ speed: null, skip: 65, win: 66, lose: 67 });
+    // skip이 speed와 겹치면 기본값 F7
+    expect(normalizeHotkeys({ speed: 65, skip: 65 })).toEqual({ speed: 65, skip: 118, win: 121, lose: 122 });
+    // 기본값도 이미 쓰이면 끔
+    expect(normalizeHotkeys({ speed: 118, skip: 118 })).toEqual({ speed: 118, skip: null, win: 121, lose: 122 });
+    expect(normalizeAssist({ speed: 2 }).hotkeys).toEqual(DEFAULT_HOTKEYS);
+  });
+  it("liveHotkeys reads the echo; missing echo = fixed defaults", () => {
+    expect(liveHotkeys(undefined)).toEqual(DEFAULT_HOTKEYS);
+    expect(liveHotkeys({ speed: 1 })).toEqual(DEFAULT_HOTKEYS);
+    expect(liveHotkeys({ hotkeys: { speed: 65, skip: null, win: "x" } })).toEqual({ speed: 65, skip: null, win: 121, lose: 122 });
+  });
+  it("hotkeySummary lists bound keys only", () => {
+    expect(hotkeySummary(DEFAULT_HOTKEYS)).toBe("게임 창 단축키: F6 배속, F7 본 대사 넘기기, F10 전투 중 이기기, F11 전투 중 지기");
+    expect(hotkeySummary({ speed: 65, skip: null, win: null, lose: null })).toBe("게임 창 단축키: A 배속");
+    expect(hotkeySummary({ speed: null, skip: null, win: null, lose: null })).toBe("게임 창 단축키를 모두 껐어요");
+  });
+  it("controlJson writes custom hotkeys", () => {
+    const hotkeys = { speed: 65, skip: null, win: 121, lose: 122 };
+    expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual(hotkeys);
   });
 });
