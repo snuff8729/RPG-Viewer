@@ -56,12 +56,23 @@ describe("loadGame", () => {
     const r = await loadGame(new MemoryFolder({
       "data/System.json": JSON.stringify({ gameTitle: "t", currencyUnit: "G", switches: [], variables: [] }),
       "data/MapInfos.json": JSON.stringify([null, { id: 1, name: "a", parentId: 0, order: 1 }]),
-      "data/Map001.json": JSON.stringify({ displayName: "들판", data: [1, 2, 3, 4], tilesetId: 1, events: [null] }),
+      "data/Map001.json": JSON.stringify({ displayName: "들판", width: 17, height: 13, data: [1, 2, 3, 4], tilesetId: 1, events: [null] }),
     }));
     if (!r.ok) throw new Error();
     const m = r.data.maps.get(1)!;
-    expect(m).toEqual({ displayName: "들판", events: [null] });
+    expect(m).toEqual({ displayName: "들판", width: 17, height: 13, events: [null] });
     expect("data" in m).toBe(false);
+  });
+  it("defaults missing or bad map width/height to 0", async () => {
+    const r = await loadGame(new MemoryFolder({
+      "data/System.json": JSON.stringify({ gameTitle: "t", currencyUnit: "G", switches: [], variables: [] }),
+      "data/MapInfos.json": JSON.stringify([null, { id: 1, name: "a", parentId: 0, order: 1 }]),
+      "data/Map001.json": JSON.stringify({ displayName: "x", width: "wide", events: [] }),
+    }));
+    if (!r.ok) throw new Error();
+    const m = r.data.maps.get(1)!;
+    expect(m.width).toBe(0);
+    expect(m.height).toBe(0);
   });
   it("loads maps with bounded parallelism and stable error order", async () => {
     const N = 20;

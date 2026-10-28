@@ -99,7 +99,11 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
     }
     const m = v as MapData;
     // 타일 데이터(data) 등은 버리고 필요한 필드만 보관한다.
-    return { displayName: typeof m.displayName === "string" ? m.displayName : "", events: m.events };
+    const dim = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+    return {
+      displayName: typeof m.displayName === "string" ? m.displayName : "",
+      width: dim(m.width), height: dim(m.height), events: m.events,
+    };
   }
   let next = 0;
   const worker = async () => {
