@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
-import { clampScroll, clampZoom, fitZoom, isDrag, pinchZoom, wheelFactor } from "./mapZoom";
+import { clampScroll, clampZoom, fitZoom, followScroll, isDrag, pinchZoom, scrollChange, shouldRefit, wheelFactor } from "./mapZoom";
 import { MapLegend } from "./MapLegend";
 import { useMapLegend } from "./mapLegendState";
 import { gameKeyOf } from "./readPosition";
@@ -497,13 +497,19 @@ export function MapCanvas({
     return p;
   }, [map, tiles.tileset]);
 
+  /** 스크롤을 정수 px로 옮긴다. 지금과 1px 안쪽이면 그대로(같은 입력이 반복돼도 떨리지 않게) */
+  const scrollTo = (el: HTMLDivElement, left: number, top: number) => {
+    const ch = scrollChange(el.scrollLeft, el.scrollTop, left, top);
+    if (!ch) return;
+    el.scrollLeft = ch.left;
+    el.scrollTop = ch.top;
+  };
   /** 확대 크기를 바꾸고, 바뀐 크기가 화면에 반영된 뒤 (x, y)칸 좌표를 가운데로 */
   const zoomAndCenter = (z: number, x: number, y: number) => {
     const el = scrollRef.current;
     if (el && z === zoomRef.current) {
       pendingCenter.current = null;
-      el.scrollLeft = x * z - el.clientWidth / 2;
-      el.scrollTop = y * z - el.clientHeight / 2;
+      scrollTo(el, x * z - el.clientWidth / 2, y * z - el.clientHeight / 2);
       return;
     }
     pendingCenter.current = { x, y, zoom: z };
@@ -518,8 +524,7 @@ export function MapCanvas({
     const el = scrollRef.current;
     if (!el) return;
     if (z === zoomRef.current && !pendingCenter.current) {
-      el.scrollLeft = x * z - ax;
-      el.scrollTop = y * z - ay;
+      scrollTo(el, x * z - ax, y * z - ay);
       return;
     }
     pendingCenter.current = { x, y, zoom: z, ax, ay };
@@ -529,8 +534,7 @@ export function MapCanvas({
       if (!p) return;
       if (p.zoom === zoomRef.current) {
         pendingCenter.current = null;
-        el.scrollLeft = p.x * p.zoom - (p.ax ?? el.clientWidth / 2);
-        el.scrollTop = p.y * p.zoom - (p.ay ?? el.clientHeight / 2);
+        scrollTo(el, p.x * p.zoom - (p.ax ?? el.clientWidth / 2), p.y * p.zoom - (p.ay ?? el.clientHeight / 2));
       } else setZoom(p.zoom);
     });
   };
@@ -559,10 +563,13 @@ export function MapCanvas({
   };
 
   /** 맵 전체가 보이게(맞춤). 보이는 영역이 아직 0 크기면 false(크기가 잡히면 아래 ResizeObserver가 다시 부른다) */
+  /** 마지막으로 맞춘 보이는 영역 크기(작게 바뀐 것은 다시 맞추지 않는다) */
+  const fittedSize = useRef<{ w: number; h: number } | null>(null);
   const fitNow = (): boolean => {
     const el = scrollRef.current;
     const z = el && fitZoom(el.clientWidth, el.clientHeight, map.width, map.height);
     if (!z) return false;
+    fittedSize.current = { w: el.clientWidth, h: el.clientHeight };
     if (compact && z < COMPACT_MIN_ZOOM) zoomAndCenter(COMPACT_MIN_ZOOM, player.x + 0.5, player.y + 0.5);
     else zoomAndCenter(z, map.width / 2, map.height / 2);
     return true;
@@ -570,23 +577,33 @@ export function MapCanvas({
   const fitRef = useRef(fitNow);
   useLayoutEffect(() => { fitRef.current = fitNow; });
 
-  // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때는 그대로 둔다.
-  const initFor = useRef<LoadedTiles | null>(null);
+  // 처음·다른 맵으로 옮겼을 때: 맞춤. 같은 맵에서 움직이거나 다시 그릴 때(타일 객체가 새로 와도)는 그대로 둔다.
+  const mapKey = `${map.mapId}:${map.width}x${map.height}`;
+  const initFor = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (initFor.current === tiles) return;
-    initFor.current = tiles;
+    if (initFor.current === mapKey) return;
+    initFor.current = mapKey;
     manualZoom.current = false;
     followPaused.current = false;
+    fittedSize.current = null;
     fitRef.current();
-  }, [tiles]);
+  }, [mapKey]);
 
   // 보이는 영역 크기가 바뀌면(레이아웃이 자리 잡힌 뒤·창 크기 변경) 직접 확대하지 않았으면 다시 맞춤
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (!manualZoom.current) fitRef.current(); });
+    // 크기가 RESIZE_SLACK px 넘게 바뀌었을 때만, 한 프레임에 한 번
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (manualZoom.current || !shouldRefit(fittedSize.current, el.clientWidth, el.clientHeight)) return;
+        fitRef.current();
+      });
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
   // 가운데 맞추기는 확대 크기가 반영된 뒤에
@@ -595,8 +612,7 @@ export function MapCanvas({
     const p = pendingCenter.current;
     if (!el || !p || zoom !== p.zoom) return;
     pendingCenter.current = null;
-    el.scrollLeft = p.x * zoom - (p.ax ?? el.clientWidth / 2);
-    el.scrollTop = p.y * zoom - (p.ay ?? el.clientHeight / 2);
+    scrollTo(el, p.x * zoom - (p.ax ?? el.clientWidth / 2), p.y * zoom - (p.ay ?? el.clientHeight / 2));
   });
 
   useEffect(() => {
@@ -612,16 +628,12 @@ export function MapCanvas({
     const el = scrollRef.current;
     const z = zoomRef.current;
     if (!compact || !el || z == null || pendingCenter.current || followPaused.current) return;
-    const cx = (px + 0.5) * z, cy = (py + 0.5) * z;
-    const mx = Math.min(el.clientWidth / 4, 2 * z), my = Math.min(el.clientHeight / 4, 2 * z);
-    const inside = cx >= el.scrollLeft + mx && cx <= el.scrollLeft + el.clientWidth - mx
-      && cy >= el.scrollTop + my && cy <= el.scrollTop + el.clientHeight - my;
-    // 맵 전체가 보이면(스크롤할 곳이 없으면) 움직일 필요가 없다
-    const scrollable = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
-    if (!inside && scrollable) {
-      el.scrollLeft = cx - el.clientWidth / 2;
-      el.scrollTop = cy - el.clientHeight / 2;
-    }
+    // 안쪽 여백 밖으로 나갔을 때만(맵 전체가 보이면 움직이지 않는다), 끌고 있는 중에는 안 한다
+    if (pointers.current.size > 0) return;
+    const next = followScroll((px + 0.5) * z, (py + 0.5) * z, {
+      left: el.scrollLeft, top: el.scrollTop, width: el.clientWidth, height: el.clientHeight, scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight,
+    }, z);
+    if (next) scrollTo(el, next.left, next.top);
   }, [compact, px, py]);
   // numbers는 부모가 매번 새로 만드므로 내용이 같으면 같은 값으로 본다(스냅샷마다 다시 그리지 않게)
   const numbersKey = [...numbers].join(";");
@@ -830,7 +842,7 @@ export function MapCanvas({
         )}
         <div
           ref={scrollRef}
-          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
+          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none [scrollbar-gutter:stable] ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}
