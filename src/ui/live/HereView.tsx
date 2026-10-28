@@ -3,7 +3,7 @@ import { ChevronRight, Info } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { routeTo, standTiles } from "@/core/map/route";
-import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
+import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -12,17 +12,27 @@ import { cn } from "@/lib/utils";
 import { ChecklistCard } from "./ChecklistCard";
 import { MapCanvas } from "./MapCanvas";
 import { MapGrid } from "./MapGrid";
-import { blockersFor, currentEvents, pagesKey, targetOf } from "./mapEvents";
-import { sectionStyle } from "./sectionStyle";
+import { blockersFor, currentEvents, mapMarkers, pagesKey, targetOf } from "./mapEvents";
+import { eventStyle, sectionStyle, type SectionStyle } from "./sectionStyle";
 import { useMapChecklist } from "./useMapChecklist";
 import { useMapTiles } from "./useMapTiles";
 
 const HIGHLIGHT_MS = 1500;
-const SECTIONS: [Exclude<Section, "done">, string][] = [
-  ["now", "지금 할 수 있어요"],
-  ["repeat", "반복하면 달라져요"],
-  ["locked", "아직 잠겨 있어요"],
+/** 조사·대화 가능이 이보다 많으면 처음엔 접어 둔다 */
+const TALK_FOLD = 8;
+type GroupKey = "now" | "item" | "repeat" | "talk" | "locked" | "story" | "done";
+/** 목록 구역 순서. numbered: 맵 번호를 매기는 구역 */
+const GROUPS: { key: GroupKey; numbered: boolean; test: (e: ChecklistEvent) => boolean }[] = [
+  { key: "now", numbered: true, test: (e) => e.section === "now" },
+  { key: "item", numbered: true, test: (e) => e.section === "item" },
+  { key: "repeat", numbered: true, test: (e) => e.section === "repeat" },
+  { key: "talk", numbered: true, test: (e) => e.section === "talk" },
+  { key: "locked", numbered: true, test: (e) => e.section === "locked" && !e.story },
+  { key: "story", numbered: false, test: (e) => e.section === "locked" && e.story },
+  { key: "done", numbered: false, test: (e) => e.section === "done" },
 ];
+const groupOf = (e: ChecklistEvent): GroupKey => (e.section === "locked" && e.story ? "story" : e.section);
+const groupStyle = (k: GroupKey): SectionStyle => (k === "story" ? eventStyle({ section: "locked", story: true }) : sectionStyle(k));
 
 type CardRefs = Map<number, HTMLDivElement>;
 
@@ -51,13 +61,14 @@ function Cards({ events, numbers, refs, highlight, selected, route, onLocate }: 
   );
 }
 
-/** 이 맵 탭: 지금 있는 맵에서 할 수 있는 것·반복하면 달라지는 것·잠긴 것·다 본 것. */
+/** 이 맵 탭: 지금 있는 맵의 새 대화·아이템·반복하면 달라지는 것·조사할 곳·잠긴 것·이야기 진행 조건·다 본 것. */
 export function HereView() {
   const { connection, live } = useLive();
   const checklist = useMapChecklist();
   // 카드 DOM 맵(바뀌지 않는 객체 하나)
   const [refs] = useState<CardRefs>(() => new Map());
-  const [doneOpen, setDoneOpen] = useState(false);
+  /** 접을 수 있는 구역을 사용자가 펼치거나 접은 상태(없으면 기본값) */
+  const [open, setOpen] = useState<Partial<Record<GroupKey, boolean>>>({});
   /** n: 같은 점을 다시 눌러도 스크롤·강조가 다시 일어나게 */
   const [pick, setPick] = useState<{ id: number; n: number } | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -86,7 +97,7 @@ export function HereView() {
 
   useEffect(() => {
     if (!pick) return;
-    // 다 봤어요 구역을 방금 펼쳤다면 카드가 그려진 뒤에 찾는다
+    // 접힌 구역을 방금 펼쳤다면 카드가 그려진 뒤에 찾는다
     const raf = requestAnimationFrame(() => refs.get(pick.id)?.scrollIntoView({ block: "center", behavior: "smooth" }));
     const t = window.setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
     return () => { cancelAnimationFrame(raf); window.clearTimeout(t); };
@@ -102,11 +113,16 @@ export function HereView() {
   }
   if (!checklist) return <p className="text-sm text-muted-foreground">지금 맵 정보를 찾을 수 없어요</p>;
 
-  const bySection = (s: Section) => checklist.events.filter((e) => e.section === s);
-  const done = bySection("done");
-  // 목록 순서(지금 → 반복 → 잠김)대로 1..n 번호. 맵 점과 카드 제목이 같이 쓴다
+  const groups = new Map(GROUPS.map((g) => [g.key, checklist.events.filter(g.test)]));
+  // 목록 순서(새 대화 → 아이템 → 반복 → 조사 → 잠김)대로 1..n 번호. 맵 점과 카드 제목이 같이 쓴다
   const numbers = new Map<number, number>();
-  for (const [s] of SECTIONS) for (const e of bySection(s)) numbers.set(e.eventId, numbers.size + 1);
+  for (const g of GROUPS) if (g.numbered) for (const e of groups.get(g.key) ?? []) numbers.set(e.eventId, numbers.size + 1);
+  /** 접을 수 있는 구역과 처음에 접혀 있는지 */
+  const foldable: Partial<Record<GroupKey, boolean>> = {
+    talk: (groups.get("talk")?.length ?? 0) > TALK_FOLD, story: true, done: true,
+  };
+  const isOpen = (k: GroupKey) => open[k] ?? !foldable[k];
+  const setGroupOpen = (k: GroupKey, v: boolean) => setOpen((o) => ({ ...o, [k]: v }));
   const onLocate = (ev: ChecklistEvent) => {
     setSel({ mapId: checklist.mapId, id: ev.eventId });
     setFocus((f) => ({ x: ev.x, y: ev.y, n: (f?.n ?? 0) + 1 }));
@@ -114,7 +130,8 @@ export function HereView() {
   /** 고른 카드의 길 설명: 타일을 못 읽으면 보여주지 않는다 */
   const routeText = tiles ? (route?.text ?? null) : undefined;
   const onPick = (id: number) => {
-    if (done.some((e) => e.eventId === id)) setDoneOpen(true);
+    const ev = checklist.events.find((e) => e.eventId === id);
+    if (ev && !isOpen(groupOf(ev))) setGroupOpen(groupOf(ev), true);
     setSel({ mapId: checklist.mapId, id });
     setHighlight(id);
     setPick((p) => ({ id, n: (p?.n ?? 0) + 1 }));
@@ -142,34 +159,39 @@ export function HereView() {
         />
       )}
       {tilesState.status === "failed" && (
-        <MapGrid width={checklist.width} height={checklist.height} events={checklist.events} player={{ x: live.x, y: live.y }} numbers={numbers} onPick={onPick} />
+        <MapGrid width={checklist.width} height={checklist.height} events={mapMarkers(checklist.events, false)} player={{ x: live.x, y: live.y }} numbers={numbers} onPick={onPick} />
       )}
       {checklist.events.length === 0 && <p className="text-sm text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}
-      {SECTIONS.map(([s, label]) => {
-        const evs = bySection(s);
+      {GROUPS.map(({ key }) => {
+        const evs = groups.get(key) ?? [];
         if (evs.length === 0) return null;
-        const st = sectionStyle(s);
+        const st = groupStyle(key);
+        const done = key === "done";
+        const title = (
+          <>
+            {!done && <st.Icon className="size-4 shrink-0" aria-hidden />}
+            {done ? "다 봤어요" : st.label} <span className="font-normal text-muted-foreground">({evs.length})</span>
+          </>
+        );
+        const cards = <Cards events={evs} numbers={numbers} refs={refs} highlight={highlight} selected={selected} route={routeText} onLocate={onLocate} />;
+        if (!foldable[key]) {
+          return (
+            <section key={key} className="space-y-2">
+              <h3 className={cn("flex items-center gap-1.5 text-sm font-semibold", st.text)}>{title}</h3>
+              {cards}
+            </section>
+          );
+        }
         return (
-          <section key={s} className="space-y-2">
-            <h3 className={cn("flex items-center gap-1.5 text-sm font-semibold", st.text)}>
-              <st.Icon className="size-4 shrink-0" aria-hidden />
-              {label} <span className="font-normal text-muted-foreground">({evs.length})</span>
-            </h3>
-            <Cards events={evs} numbers={numbers} refs={refs} highlight={highlight} selected={selected} route={routeText} onLocate={onLocate} />
-          </section>
+          <Collapsible key={key} open={isOpen(key)} onOpenChange={(v) => setGroupOpen(key, v)}>
+            <CollapsibleTrigger className={cn("group flex items-center gap-1.5 text-sm font-semibold", !done && st.text)}>
+              <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+              {title}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">{cards}</CollapsibleContent>
+          </Collapsible>
         );
       })}
-      {done.length > 0 && (
-        <Collapsible open={doneOpen} onOpenChange={setDoneOpen}>
-          <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-semibold">
-            <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-            다 봤어요 ({done.length})
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2">
-            <Cards events={done} numbers={numbers} refs={refs} highlight={highlight} selected={selected} route={routeText} onLocate={onLocate} />
-          </CollapsibleContent>
-        </Collapsible>
-      )}
     </div>
   );
 }

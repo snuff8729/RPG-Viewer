@@ -15,6 +15,8 @@ export interface EventPage {
   priorityType?: number;
   through?: boolean;
   directionFix?: boolean;
+  /** 페이지의 이동 경로(자율 이동 "사용자 정의"). */
+  moveRoute?: { list?: EventCommand[] };
 }
 export interface MapEvent { id: number; name: string; note?: string; x: number; y: number; pages: EventPage[] }
 export interface MapData { displayName: string; width: number; height: number; events: (MapEvent | null)[] }

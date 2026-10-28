@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { HowToView } from "./HowToView";
-import { sectionStyle } from "./sectionStyle";
+import { eventStyle } from "./sectionStyle";
 
 /** `새 대화 N · 선택지 N` (0인 쪽 생략) */
 function newText(unseen: number, unpicked: number): string {
@@ -55,7 +55,7 @@ function Locked({ lp }: { lp: LockedPage }) {
 }
 
 export function ChecklistCard({ ev, number, highlighted, selected, route, onLocate, ref }: {
-  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 이벤트는 없음 */ number?: number; highlighted: boolean;
+  ev: ChecklistEvent; /** 목록 번호(1부터). 다 본 것·이야기 진행 조건은 없음 */ number?: number; highlighted: boolean;
   /** 맵에서 고른 이벤트 */
   selected?: boolean;
   /** 고른 이벤트까지 가는 길 설명. null = 길을 못 찾음, undefined = 보여주지 않음 */
@@ -64,9 +64,11 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
   onLocate?: () => void;
   ref?: Ref<HTMLDivElement>;
 }) {
-  const st = sectionStyle(ev.section);
+  const st = eventStyle(ev);
   const target = ev.location ?? ev.locked[0]?.location ?? null;
   const lockedPages = ev.locked.length;
+  /** 조사·대화 가능 카드에만 보이는 플러그인 명령 글 */
+  const hint = ev.section === "talk" ? ev.pluginHint : undefined;
   return (
     <Card ref={ref} className={cn("gap-3 border-l-4 py-4 transition-shadow", st.border, selected && "ring-1 ring-ring", highlighted && "ring-2 ring-ring")}>
       <CardHeader className="px-4">
@@ -89,8 +91,14 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           </p>
         )}
       </CardHeader>
-      {(ev.repeat.length > 0 || lockedPages > 0) && (
+      {(ev.repeat.length > 0 || lockedPages > 0 || ev.gains.length > 0 || hint) && (
         <CardContent className="space-y-2 px-4">
+          {ev.gains.length > 0 && (
+            <ul className="space-y-0.5 text-sm">
+              {ev.gains.map((g, i) => <li key={i}>{g}</li>)}
+            </ul>
+          )}
+          {hint && <p className="text-sm text-muted-foreground">플러그인: {hint}</p>}
           {ev.repeat.length > 0 && (
             <ul className="space-y-0.5 text-sm">
               {ev.repeat.map((r, i) => <li key={i}>{r.text}{r.estimated ? " (추정)" : ""}</li>)}

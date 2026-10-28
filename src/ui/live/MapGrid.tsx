@@ -1,8 +1,8 @@
 import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
-import { sectionStyle } from "./sectionStyle";
+import { eventStyle, sectionStyle } from "./sectionStyle";
 
-const LEGEND: Section[] = ["now", "repeat", "locked", "done"];
+const LEGEND: Section[] = ["now", "item", "repeat", "talk", "locked"];
 const GRID_MAX = 60;
 
 function GridLines({ width, height }: { width: number; height: number }) {
@@ -41,7 +41,7 @@ export function MapGrid({ width, height, events, player, numbers, onPick }: {
               cx={ev.x + 0.5}
               cy={ev.y + 0.5}
               r={n != null ? r * 1.5 : r}
-              className={`${sectionStyle(ev.section).fill} cursor-pointer stroke-background`}
+              className={`${eventStyle(ev).fill} cursor-pointer stroke-background`}
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
               role="button"
