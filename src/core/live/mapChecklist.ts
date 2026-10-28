@@ -73,7 +73,7 @@ export interface ChecklistEvent {
   /** 자율 이동이 무작위·다가옴이라 돌아다님 */
   moves: boolean;
   /**
-   * 맵 번호(1부터): 맵 데이터만으로 정해져(직접 실행할 수 있는 페이지가 있고 background가 아닌 이벤트를 id 순으로)
+   * 맵 번호(1부터): 맵 데이터만으로 정해져(트리거 0~2이고 명령이 있는 페이지가 있는 이벤트를 id 순으로, 타일·지금 상태와 무관)
    * 확인해도 바뀌지 않는다. 이야기·자동 진행이면 없음
    */
   number?: number;
@@ -361,8 +361,8 @@ export function mapChecklist(
     for (const ev of sorted) {
       try {
         const bg = backgroundOf(ev, mapId, data, reach);
-        // 번호는 데이터만으로: 걸어서 실행하는 페이지가 있고 background가 아닌 이벤트
-        const number = !bg && ev.pages.some(directPage) ? ++n : undefined;
+        // 번호는 맵 데이터만으로(타일·지금 상태와 무관): 걸어서 실행하는 페이지가 있는 이벤트. 이야기·자동 진행이면 번호를 안 보일 뿐(빈 번호)
+        const number = ev.pages.some(directPage) ? ++n : undefined;
         const item = checkEvent(ev, mapId, data, byKey, coverage, live, livePages, bg);
         if (!item) continue;
         if (number !== undefined && !item.story) item.number = number;

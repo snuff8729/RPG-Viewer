@@ -179,9 +179,17 @@ describe("mapChecklist background events", () => {
 
 describe("mapChecklist numbers", () => {
   const numbers = (m: ReturnType<typeof mapChecklist>) => new Map(m!.events.filter(e => e.number != null).map(e => [e.eventId, e.number] as const).sort((a, b) => a[0] - b[0]));
-  it("fixed by map data in event id order, story excluded", () => {
+  it("fixed by map data in event id order; story events leave a gap", () => {
     const m = mapChecklist(data, index, coverage(), live())!;
-    expect([...numbers(m)]).toEqual([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [8, 7], [9, 8], [12, 9], [13, 10], [14, 11]]);
+    // 7·10(다른 이벤트가 부름)은 번호 7·10을 갖지만 안 보인다. 11은 자동 실행뿐이라 번호 없음
+    expect([...numbers(m)]).toEqual([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [8, 8], [9, 9], [12, 11], [13, 12], [14, 13]]);
+  });
+  it("are identical with and without map tiles", () => {
+    const without = numbers(mapChecklist(data, index, coverage(), live()));
+    const withTiles = numbers(mapChecklist(data, index, coverage(), live(), passage()));
+    expect(withTiles.has(12)).toBe(false); // 갈 수 없어 이야기·자동 진행 — 번호만 안 보임
+    without.delete(12);
+    expect(withTiles).toEqual(without);
   });
   it("do not change when sections change", () => {
     const before = mapChecklist(data, index, coverage(), live())!;
