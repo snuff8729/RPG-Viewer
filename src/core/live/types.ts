@@ -4,6 +4,8 @@ export interface RecordBase {
   v: 1; seq: number; t: number; run: number; branch: number;
   /** 1.17.0+: 맵·전투가 아닌 화면(메뉴 등)에서 쓴 기록이면 "menu". screen 기록은 1.10.0+ 맵·전투·메뉴 */
   scene?: "battle" | "map" | "menu";
+  /** 1.18.2+: 게임의 실제 화면 크기(Graphics.width·height). 화면 기록·그림이 있는 기록에, 갈래에서 처음과 바뀔 때만. */
+  sw?: number; sh?: number;
 }
 export interface StateChange {
   kind: "switch" | "variable" | "selfSwitch"; id: number | string; value: number | boolean;
@@ -92,6 +94,8 @@ export interface LiveSnapshot {
   assist?: LiveAssist;
   /** 파티 캐릭터 자세히(플러그인 1.14.0+, 뷰어가 control.json `liveActors: true`로 부탁할 때만) */
   actors?: LiveActor[];
+  /** 게임의 실제 화면 크기(플러그인 1.18.2+, Graphics.width·height) */
+  screen?: { w: number; h: number };
 }
 /**
  * 실행 중에 만든 이벤트의 원본: from = 원본 이벤트 번호(tpl이면 TemplateEvent 템플릿 맵, 아니면 같은 맵).

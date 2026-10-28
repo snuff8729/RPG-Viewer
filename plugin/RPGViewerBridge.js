@@ -46,7 +46,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.18.1",
+    VERSION: "1.18.2",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -279,7 +279,33 @@
 
   function pushLine(rec) {
     if (buffer.length >= MAX_BUFFER) buffer.shift();
+    stampScreenSize(rec);
     buffer.push(JSON.stringify(rec));
+  }
+
+  // 1.18.2: the game's real screen size (Graphics.width / height; a plugin can set it in code, so System.json alone
+  // can be wrong). A screen record or a record with pictures carries sw / sh when the size differs from the last one
+  // written in this branch (so once, then on change).
+  var lastScreenSize = null; // "w,h" written last in this branch
+  function screenSize() {
+    try {
+      var g = G.Graphics;
+      if (!g) return null;
+      var w = g.width, h = g.height;
+      if (typeof w !== "number" || typeof h !== "number" || !isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) return null;
+      return { w: Math.round(w), h: Math.round(h) };
+    } catch (e) { reportError(e); return null; }
+  }
+  function stampScreenSize(rec) {
+    try {
+      if (rec.type !== "screen" && !rec.pics) return;
+      var sz = screenSize();
+      if (!sz) return;
+      var key = sz.w + "," + sz.h;
+      if (key === lastScreenSize) return;
+      lastScreenSize = key;
+      rec.sw = sz.w; rec.sh = sz.h;
+    } catch (e) { reportError(e); }
   }
 
   function closeState() {
@@ -325,6 +351,7 @@
     try { pf = picsFields(); } catch (e) { reportError(e); }
     if (pf && pf.pics) h.rec.pics = pf.pics;
     else if (pf) h.rec.picsSame = true;
+    stampScreenSize(h.rec);
     for (var i = 0; i < buffer.length; i++) {
       if (buffer[i] === h) { buffer[i] = JSON.stringify(h.rec); return; }
     }
@@ -473,6 +500,7 @@
     branch = meta.nextBranch++;
     lastChoices = null;
     lastPicsKey = null; lastPicsSet = null; screenSettle = null; mapPicsKey = null; mapPicsSet = null;
+    lastScreenSize = null;
     battleLog = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
@@ -489,6 +517,7 @@
     branch = b;
     lastChoices = null;
     lastPicsKey = null; lastPicsSet = null; screenSettle = null; mapPicsKey = null; mapPicsSet = null;
+    lastScreenSize = null;
     battleLog = null;
     deferredNewGame = false;
   }
@@ -637,6 +666,8 @@
       }
     };
     if (liveActors) snap.actors = actorDetails();
+    var sz = screenSize();
+    if (sz) snap.screen = sz; // 1.18.2: the game's real screen size
     return snap;
   }
 

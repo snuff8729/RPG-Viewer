@@ -214,6 +214,20 @@ describe("cutinRuns", () => {
     expect(runs.map(r => r.frames.map(names))).toEqual([["FinishBlow_Whiteout+cutin_1"], ["cutin(Mermeia)_1", "cutin(Mermeia)_2"]]);
   });
 
+  it("gives each frame the game's real screen size at that record (1.18.2), none for old logs", () => {
+    seq = 0;
+    const v = { origin: 0, x: 0, y: 0, scaleX: 100, scaleY: 100, opacity: 255, blend: 0 };
+    const recs = [pic(9, 0, 2, "cutin_1", 1000, v), pic(9, 1, 2, "", 1100, { op: "erase" })];
+    let stack: ReadonlyMap<number, StackPicture> = new Map();
+    const steps: CutinStep[] = [];
+    for (const r of recs) { const s = step(stack, r); stack = s.stack; steps.push(s.step); }
+    const seg = { start: new Map(), steps, end: stack, endT: 1200 };
+    const real = { width: 1280, height: 720 };
+    const sized = cutinRuns(seg, { ...ctx, sizes: [{ seq: recs[0].seq, size: real }] });
+    expect(sized.map(r => r.frames.map(f => f.screen))).toEqual([[real]]);
+    expect(cutinRuns(seg, ctx)[0].frames[0].screen).toBeUndefined();
+  });
+
   it("never throws on broken input", () => {
     expect(cutinRuns({ start: new Map(), steps: [null as unknown as CutinStep], end: new Map(), endT: 0 }, ctx)).toEqual([]);
     expect(eraseCmdAfter(null as unknown as RecordOf<"picture">, null, data)).toBeNull();

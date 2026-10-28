@@ -19,7 +19,7 @@ const FRAME_MS = 120;
  */
 export function CutinPictures({ frames, best }: { frames: ScreenShot[]; best: number }) {
   const { data } = useGame();
-  const size = data?.screenSize ?? DEFAULT_SCREEN;
+  const guessed = data?.screenSize ?? DEFAULT_SCREEN;
   const names = useMemo(() => [...new Set(frames.flatMap((f) => f.pictures.map((p) => p.name)))], [frames]);
   const { images, status, retry } = usePictureImages(names);
   const [index, setIndex] = useState(() => Math.max(0, Math.min(best, frames.length - 1)));
@@ -34,12 +34,16 @@ export function CutinPictures({ frames, best }: { frames: ScreenShot[]; best: nu
   const all = useMemo<ScreenShot | null>(() => {
     if (count === 0) return null;
     const pictures = frames.flatMap((f) => f.pictures);
-    return frames[0].kind === "cg" ? { kind: "cg", pictures, cg: frames.flatMap((f) => f.cg ?? []) } : { kind: "stand", pictures };
+    const all: ScreenShot = frames[0].kind === "cg" ? { kind: "cg", pictures, cg: frames.flatMap((f) => f.cg ?? []) } : { kind: "stand", pictures };
+    if (frames[0].screen) all.screen = frames[0].screen;
+    return all;
   }, [frames, count]);
   if (count === 0 || !all) return null;
   const i = Math.min(index, count - 1);
   const shot = frames[i];
   const cg = shot.kind === "cg";
+  // 1.18.2: 그때 게임의 실제 화면 크기(모르면 게임 설정에서 짐작한 크기)
+  const size = shot.screen ?? all.screen ?? guessed;
   const only = count === 1 && shot.pictures.length === 1 ? images.get(shot.pictures[0].name) : undefined;
   if (only && isFlatImage(only)) return null;
   const view = cg ? { left: 0, top: 0, width: size.width, height: size.height } : standView(all.pictures, size, images);

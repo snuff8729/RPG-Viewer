@@ -6,7 +6,8 @@ import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
 import { readerItems } from "@/core/live/reader";
 import { useAddons } from "@/app/AddonsProvider";
 import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
-import { DEFAULT_SCREEN, withoutMenuScreens } from "@/core/addons/screenPictures";
+import { withoutMenuScreens } from "@/core/addons/screenPictures";
+import { useScreenSizes } from "../addons/pictureContext";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { useNoticesShown } from "./noticeDisplay";
 import type { HistoryModel } from "@/core/live/types";
@@ -92,6 +93,7 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const [battlesShown] = useBattlesShown();
   const [noticesShown] = useNoticesShown();
   const { hiddenImages, menuPicturesShown } = useAddons();
+  const screens = useScreenSizes(records);
 
   const flow = useMemo(() => {
     if (!data) return [];
@@ -100,10 +102,10 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: hiddenImageMatcher(hiddenImages) });
     const choiceText = choiceTexts(path, data);
     // 읽기에서 숨긴 그림은 다시 쌓은 화면에서도 뺀다
-    const ctx = { screen: data.screenSize ?? DEFAULT_SCREEN, hidden: hiddenImageMatcher(hiddenImages) };
+    const ctx = { ...screens, hidden: hiddenImageMatcher(hiddenImages) };
     const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown, notices: noticesShown, compose: { ctx } });
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenImages, menuPicturesShown]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenImages, menuPicturesShown, screens]);
 
   if (!data) return null;
 

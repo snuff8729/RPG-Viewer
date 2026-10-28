@@ -1,4 +1,6 @@
-import { pictureRect, sceneOf, type PictureContext, type ScreenPicture, type ScreenShot } from "../addons/screenPictures";
+import {
+  ctxAt, knownScreenAt, pictureRect, sceneOf, withScreen, type PictureContext, type ScreenPicture, type ScreenShot,
+} from "../addons/screenPictures";
 import { locationKey } from "../index/locations";
 import type { EventCommand, GameData, Location } from "../types";
 import { pageList } from "./mismatch";
@@ -231,12 +233,17 @@ export function cutinRuns(seg: CutinSegment, ctx: PictureContext): CutinRun[] {
       const all = stackPictures(s.stack);
       const pics = all.filter(p => transient.has(p.id) && start.get(p.id) !== p && p.opacity > 0);
       if (pics.length === 0) { cut(); continue; }
-      const scene = sceneOf(pics, ctx);
+      // 1.18.2: 그때 게임의 실제 화면 크기로 나눈다
+      const sctx = ctxAt(ctx, s.rec.seq);
+      const scene = sceneOf(pics, sctx);
       const drawn = [...scene.cg, ...scene.stand].sort((a, b) => a.id - b.id);
       if (drawn.length === 0) { cut(); continue; }
-      const shot: ScreenShot = scene.cg.length > 0 ? { kind: "cg", pictures: drawn, cg: [...scene.cg] } : { kind: "stand", pictures: drawn };
+      const shot: ScreenShot = withScreen<ScreenShot>(
+        scene.cg.length > 0 ? { kind: "cg", pictures: drawn, cg: [...scene.cg] } : { kind: "stand", pictures: drawn },
+        knownScreenAt(ctx, s.rec.seq),
+      );
       const f: Frame = {
-        first: s.rec.seq, seq: s.rec.seq, shot, n: drawn.length, area: areaOf(drawn, ctx), sig: sigOf(drawn),
+        first: s.rec.seq, seq: s.rec.seq, shot, n: drawn.length, area: areaOf(drawn, sctx), sig: sigOf(drawn),
         opacity: drawn.reduce((a, p) => a + p.opacity, 0),
       };
       const last = cur[cur.length - 1];
@@ -254,9 +261,9 @@ export function cutinRuns(seg: CutinSegment, ctx: PictureContext): CutinRun[] {
     for (const run of runs) {
       const frames = sample(run, CUTIN_MAX_FRAMES);
       const cg = frames.some(f => f.shot.kind === "cg");
-      const shots: ScreenShot[] = frames.map(f => (cg
+      const shots: ScreenShot[] = frames.map(f => withScreen<ScreenShot>(cg
         ? { kind: "cg", pictures: f.shot.pictures, cg: f.shot.cg ?? [] }
-        : { kind: "stand", pictures: f.shot.pictures }));
+        : { kind: "stand", pictures: f.shot.pictures }, f.shot.screen));
       let best = 0;
       frames.forEach((f, i) => {
         const b = frames[best];

@@ -421,3 +421,52 @@ describe("menu scenes with their own spriteset (1.17.1)", () => {
     expect(screens(h)).toHaveLength(1);
   });
 });
+
+describe("the game's real screen size (1.18.2)", () => {
+  /** shows a cut-in, lets it settle, removes it and lets that settle (two screen records) */
+  function showAndRemove(hh: Harness, ss: ReturnType<Harness["mountSpriteset"]>, base: string) {
+    const total = callCutin(hh, ss.spriteset, base);
+    hh.completeLoads();
+    hh.frame();
+    settle(hh, 300);
+    ss.spriteset.removeChild(total);
+    hh.g.ImageManager.loadPicture(`actor01_cutin_${base}_0001`);
+    hh.frame();
+    settle(hh, 300);
+  }
+
+  it("writes sw / sh on the first picture record and again only when the size changes; live.json has screen", () => {
+    h = newGame();
+    h.g.Graphics = { width: 1280, height: 720 };
+    const ss = h.mountSpriteset(10);
+    showAndRemove(h, ss, "A");
+    let recs = screens(h);
+    expect(recs).toHaveLength(2);
+    expect(recs[0]).toMatchObject({ sw: 1280, sh: 720 });
+    expect(recs[1].sw).toBeUndefined();
+    expect(recs[1].sh).toBeUndefined();
+    h.bridge._snapshotNow();
+    expect(h.readLive().screen).toEqual({ w: 1280, h: 720 });
+    // the game changes its resolution: the next picture record carries the new size once
+    h.g.Graphics = { width: 1920, height: 1080 };
+    showAndRemove(h, ss, "B");
+    recs = screens(h);
+    expect(recs).toHaveLength(4);
+    expect(recs[2]).toMatchObject({ sw: 1920, sh: 1080 });
+    expect(recs[3].sw).toBeUndefined();
+    h.bridge._snapshotNow();
+    expect(h.readLive().screen).toEqual({ w: 1920, h: 1080 });
+  });
+
+  it("writes no size when Graphics is missing or odd", () => {
+    h = newGame();
+    h.g.Graphics = { width: NaN, height: 720 };
+    const ss = h.mountSpriteset(10);
+    showAndRemove(h, ss, "A");
+    const recs = screens(h);
+    expect(recs).toHaveLength(2);
+    for (const r of recs) expect("sw" in r || "sh" in r).toBe(false);
+    h.bridge._snapshotNow();
+    expect(h.readLive().screen).toBeUndefined();
+  });
+});

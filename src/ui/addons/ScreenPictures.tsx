@@ -138,7 +138,8 @@ export function ShotButton({ pictures, view, images, stand, title, names, captio
  */
 export function ScreenPictures({ shot }: { shot: ScreenShot }) {
   const { data } = useGame();
-  const size = data?.screenSize ?? DEFAULT_SCREEN;
+  // 1.18.2: 그때 게임의 실제 화면 크기(모르면 게임 설정에서 짐작한 크기)
+  const size = shot.screen ?? data?.screenSize ?? DEFAULT_SCREEN;
   const { pictures } = shot;
   const names = [...new Set(pictures.map((p) => p.name))];
   const { images, status, retry } = usePictureImages(names);
