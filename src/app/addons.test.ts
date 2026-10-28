@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GameFolder, WritableGameFolder } from "@/core/fs/folder";
-import { addonsFile, addonsStorageKey, loadAddonState, saveAddonState, type KeyStorage } from "./addons";
+import { addonsFile, addonsStorageKey, loadAddonFile, loadAddonState, saveAddonFile, saveAddonState, type KeyStorage } from "./addons";
 
 const memStorage = (): KeyStorage & { map: Map<string, string> } => {
   const map = new Map<string, string>();
@@ -37,6 +37,15 @@ describe("add-on settings storage", () => {
     expect(s.map.get(addonsStorageKey("G|www/data"))).toContain("true");
     s.setItem(addonsStorageKey("G|www/data"), JSON.stringify({ v: 1, enabled: { screenPictures: false } }));
     expect(await loadAddonState(f, "www/data", "G|www/data", s)).toEqual({ screenPictures: true });
+  });
+
+  it("saves and loads picture groups with the add-on state", async () => {
+    const f = folder();
+    const s = memStorage();
+    await saveAddonFile(f, "data", "K", { state: { screenPictures: true }, pictureRoles: { 111: "stand" } }, s);
+    expect(await loadAddonFile(f, "data", "K", s)).toEqual({ state: { screenPictures: true }, pictureRoles: { 111: "stand" } });
+    expect(await loadAddonFile(null, "data", "K", s)).toEqual({ state: { screenPictures: true }, pictureRoles: { 111: "stand" } });
+    expect(await loadAddonFile(null, "data", "none", s)).toEqual({ state: {}, pictureRoles: {} });
   });
 
   it("falls back to localStorage for read-only folders or a missing file, else all off", async () => {

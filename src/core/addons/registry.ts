@@ -22,7 +22,7 @@ export const ADDONS: readonly AddonDef[] = [
     id: "screenPictures",
     label: "화면 그림 따라 그리기 (스탠딩 이미지)",
     description: "게임이 화면에 띄우는 그림(스탠딩 이미지 등)을 대사마다 기록해서 읽기에서 같이 보여줘요. 이 게임에서만 켜져요.",
-    note: "게임이 기록 플러그인 1.6.0 이상으로 실행 중이어야 하고, 켠 뒤에 나오는 대사부터 그림이 붙어요.",
+    note: "게임이 기록 플러그인 1.6.0 이상으로 실행 중이어야 하고, 켠 뒤에 나오는 대사부터 그림이 붙어요. 1.7.0부터는 화면에 실제로 보이는 그림만 기록해요.",
     minPluginVersion: "1.6.0",
     controlFlags: { capturePictures: true },
   },
