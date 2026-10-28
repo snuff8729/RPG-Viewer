@@ -31,6 +31,9 @@ import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
 import { MissingView } from "@/ui/live/MissingView";
 import { HereView } from "@/ui/live/HereView";
+import { DiagnosisProvider } from "@/app/DiagnosisProvider";
+import { DiagnoseView } from "@/ui/diagnose/DiagnoseView";
+import { DiagnoseBanner } from "@/ui/diagnose/DiagnoseBanner";
 
 function Shell() {
   const { status, data, index, close } = useGame();
@@ -134,12 +137,14 @@ function Shell() {
           </div>
         </header>
         <main className="flex-1 p-4">
+          {route.kind !== "diagnose" && <DiagnoseBanner />}
           {route.kind === "home" && <ExplorerView state={explorer} onStateChange={setExplorer} />}
           {route.kind === "page" && <EventView route={route} />}
           {route.kind === "read" && <ReaderView />}
           {route.kind === "here" && <HereView />}
           {route.kind === "history" && <HistoryView />}
           {route.kind === "missing" && <MissingView key={missingSeed.n} initialQuery={missingSeed.query} />}
+          {route.kind === "diagnose" && <DiagnoseView />}
         </main>
         </>)}
       </SidebarInset>
@@ -154,7 +159,9 @@ export default function App() {
       <GameProvider>
         <AddonsProvider>
           <LiveProvider>
-            <Shell />
+            <DiagnosisProvider>
+              <Shell />
+            </DiagnosisProvider>
           </LiveProvider>
         </AddonsProvider>
       </GameProvider>
