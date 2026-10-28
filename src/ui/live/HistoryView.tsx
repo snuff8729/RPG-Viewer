@@ -6,6 +6,8 @@ import { locationKey } from "@/core/index/locations";
 import { findNodePathByCmd } from "@/core/interpret/interpret";
 import type { Location } from "@/core/types";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { openPage } from "../navigation";
@@ -14,6 +16,7 @@ import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
 import { TimelineItem, type TimelineCtx } from "./TimelineItem";
 import { choiceTexts } from "./historyText";
+import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { ALL_KINDS, filterItems, loadKinds, saveKinds, type Kind } from "./historyFilter";
 
 const PAGE = 500;
@@ -77,6 +80,8 @@ export function HistoryView() {
   // 타임라인 영역이 바닥 근처(80px 이내)일 때만 새 기록에 맞춰 스크롤
   const scroller = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
+  const autoRef = useRef(autoFollow);
   const [atBottom, setAtBottom] = useState(true);
   const [fresh, setFresh] = useState(0);
   const prevLen = useRef(0);
@@ -114,7 +119,7 @@ export function HistoryView() {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (nearBottom.current) el.scrollTop = el.scrollHeight;
+      if (nearBottom.current || autoRef.current) el.scrollTop = el.scrollHeight;
       onScroll();
     });
     ro.observe(el);
@@ -126,13 +131,20 @@ export function HistoryView() {
     const reset = key !== prevKey.current;
     prevKey.current = key;
     prevLen.current = filtered.length;
-    if (reset || nearBottom.current) scrollToBottom();
+    if (reset || nearBottom.current || autoRef.current) scrollToBottom();
     else if (grew > 0) {
       setFresh(n => n + grew);
       // 읽는 중이면 보이는 창의 시작을 그대로 두도록 새 항목 수만큼 넓힌다(창이 밀리지 않게)
       setShown(s => s + grew);
     }
   }, [filtered.length, selected, kinds, scrollToBottom]);
+
+  const onAutoFollow = (on: boolean) => {
+    setAutoFollow(on);
+    autoRef.current = on;
+    saveAutoFollow(on);
+    if (on) scrollToBottom();
+  };
 
   const onKinds = (v: string[]) => {
     const next = new Set(ALL_KINDS.filter(k => v.includes(k)));
@@ -170,6 +182,10 @@ export function HistoryView() {
           <ToggleGroup type="multiple" variant="outline" size="sm" value={[...kinds]} onValueChange={onKinds}>
             {KIND_LABELS.map(([k, label]) => <ToggleGroupItem key={k} value={k}>{label}</ToggleGroupItem>)}
           </ToggleGroup>
+          <div className="flex items-center gap-2">
+            <Switch id="history-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
+            <Label htmlFor="history-auto-follow">자동으로 맨 아래로</Label>
+          </div>
         </div>
       )}
       <div className="relative min-h-0 flex-1">
