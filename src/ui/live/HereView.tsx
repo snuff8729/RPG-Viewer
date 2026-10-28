@@ -19,7 +19,7 @@ import { useMapChecklist } from "./useMapChecklist";
 import { useMapTiles } from "./useMapTiles";
 
 const HIGHLIGHT_MS = 1500;
-/** 조사·대화 가능이 이보다 많으면 처음엔 접어 둔다 */
+/** 다 봄 (다시 가능)이 이보다 많으면 처음엔 접어 둔다 */
 const TALK_FOLD = 8;
 type GroupKey = ChecklistEvent["section"] | "story";
 /** 목록 구역 순서. 이야기·자동 진행(story)은 구역과 상관없이 따로 모은다 */
@@ -54,7 +54,7 @@ function Cards({ events, numbers, refs, highlight, selected, route, onLocate }: 
   );
 }
 
-/** 이 맵 탭: 지금 있는 맵의 새 대화·아이템·반복하면 달라지는 것·조사할 곳·잠긴 것·이야기 진행 조건·다 본 것. */
+/** 이 맵 탭: 지금 있는 맵의 안 본 내용·아이템·반복하면 달라지는 것·조사할 곳·잠긴 것·이야기 진행 조건·다 본 것. */
 export function HereView() {
   const { connection, live } = useLive();
   const checklist = useMapChecklist();

@@ -4,7 +4,7 @@ import type { Location } from "@/core/types";
 
 export type NowItem = ChecklistEvent & { location: Location };
 
-/** 사이드바 "지금": 이 맵 체크리스트에서 새 대화 → 아이템 → 반복 순으로, 열 수 있는 것만 최대 limit개. */
+/** 사이드바 "지금": 이 맵 체크리스트에서 안 본 내용 → 아이템 → 반복 순으로, 열 수 있는 것만 최대 limit개. */
 export function nowItems(checklist: MapChecklist | null, limit = 6): NowItem[] {
   if (!checklist) return [];
   const pick = (s: ChecklistEvent["section"]) =>

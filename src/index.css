@@ -21,6 +21,14 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    --color-section-now: var(--section-now);
+    --color-section-item: var(--section-item);
+    --color-section-repeat: var(--section-repeat);
+    --color-section-exit: var(--section-exit);
+    --color-section-talk: var(--section-talk);
+    --color-section-locked: var(--section-locked);
+    --color-section-done: var(--section-done);
+    --color-section-story: var(--section-story);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -72,6 +80,15 @@
     --chart-3: oklch(0.398 0.07 227.392);
     --chart-4: oklch(0.828 0.189 84.429);
     --chart-5: oklch(0.769 0.188 70.08);
+    /* 이 맵 구역 색: 안 본 내용 파랑 · 아이템 호박 · 반복 분홍 · 이동 보라 · 다시 가능 초록 · 잠김 회청 · 다 봄 연회색 · 이야기 돌색 */
+    --section-now: oklch(0.546 0.245 262.881);
+    --section-item: oklch(0.666 0.179 58.318);
+    --section-repeat: oklch(0.592 0.249 0.584);
+    --section-exit: oklch(0.541 0.281 293.009);
+    --section-talk: oklch(0.596 0.145 163.225);
+    --section-locked: oklch(0.554 0.046 257.417);
+    --section-done: oklch(0.82 0 0);
+    --section-story: oklch(0.709 0.01 56.259);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -107,6 +124,14 @@
     --chart-3: oklch(0.769 0.188 70.08);
     --chart-4: oklch(0.627 0.265 303.9);
     --chart-5: oklch(0.645 0.246 16.439);
+    --section-now: oklch(0.707 0.165 254.624);
+    --section-item: oklch(0.828 0.189 84.429);
+    --section-repeat: oklch(0.718 0.202 349.761);
+    --section-exit: oklch(0.702 0.183 293.541);
+    --section-talk: oklch(0.765 0.177 163.223);
+    --section-locked: oklch(0.704 0.04 256.788);
+    --section-done: oklch(0.439 0 0);
+    --section-story: oklch(0.553 0.013 58.071);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);

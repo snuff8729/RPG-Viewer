@@ -12,13 +12,14 @@ import { evaluate } from "./evaluate";
 import { seenKey } from "./coverage";
 import { activePageIndex, pageEntries, pageNewCounts } from "./interactable";
 import { calledBy, entryPoints, findTransfer, type TransferTarget } from "./mapScan";
+import { remainingLines, type RemainingLine } from "./remainingLines";
 import { repeatInfo, type RepeatInfo } from "./repeat";
 import type { Coverage, LiveSnapshot } from "./types";
 
 /**
  * 지금 할 수 있는 것으로 나눈다(잠긴 페이지가 있어도 지금 할 수 있으면 그쪽 구역).
- * now: 지금 상호작용 + 안 본 대사·선택지(또는 아직 안 해 본 플러그인 조사 지점) / item: 지금 상호작용 + 얻는 것 / repeat: 반복하면 달라짐 /
- * talk: 그 밖에 지금 조사·대화 가능 / exit: 다른 곳으로 이동하는 이벤트(어느 페이지든 장소 이동) /
+ * now: 지금 상호작용 + 지금 볼 수 있는 안 본 대사·선택지(또는 아직 안 해 본 플러그인 조사 지점) / item: 지금 상호작용 + 얻는 것 / repeat: 반복하면 달라짐 /
+ * talk: 그 밖에 지금 조사·대화 가능(다 봄, 다시 가능) / exit: 다른 곳으로 이동하는 이벤트(어느 페이지든 장소 이동) /
  * locked: 지금은 못 하고 새 내용이 잠김 / done: 나머지
  */
 export type Section = "now" | "item" | "repeat" | "exit" | "talk" | "locked" | "done";
@@ -39,8 +40,15 @@ export interface ChecklistEvent {
   location: Location | null;
   /** 활성 페이지가 자동 실행·병렬 처리 */
   auto: boolean;
-  /** 활성 페이지의 안 본 대사·안 고른 선택지 */
+  /**
+   * 활성 페이지의 안 본 대사 중 지금 볼 수 있는 것(선택지 갈래 안 포함, 지금 틀린 조건 뒤는 뺌)·안 고른 선택지.
+   * 활성 페이지가 없으면 0
+   */
   unseen: number; unpicked: number;
+  /** 지금 볼 수 있는 남은 대사(최대 3개, 가는 길과 함께). 전체 수는 unseen */
+  remainingLines: RemainingLine[];
+  /** 조건이 맞으면 볼 수 있는 대사(최대 3개)와 전체 수(later) */
+  laterLines: RemainingLine[]; later: number;
   repeat: RepeatInfo[];
   locked: LockedPage[];
   /** 지금 상호작용 가능: 활성 페이지가 결정 키·접촉 트리거(0/1/2)이고 명령이 있다 */
@@ -279,7 +287,9 @@ function checkEvent(
 
   const active = !!activeEntry && isObj(activePg);
   const auto = active && (trigger === 3 || trigger === 4);
-  const { unseen, unpicked } = activeEntry ? pageNewCounts(activeEntry, coverage) : { unseen: 0, unpicked: 0 };
+  const { unpicked } = activeEntry ? pageNewCounts(activeEntry, coverage) : { unpicked: 0 };
+  const rem = active ? remainingLines(activeEntry, coverage, data, live, ev, mapId, activePage) : null;
+  const unseen = rem?.nowCount ?? 0;
   const repeat = active && trigger <= 4 ? repeatInfo(ev, mapId, data, live, activePage) : [];
   const gains = interactable ? gainsOf(runCommands, data) : [];
   const pluginHint = interactable ? pluginHintOf(runCommands) : undefined;
@@ -331,7 +341,8 @@ function checkEvent(
     eventId: ev.id, name: typeof ev.name === "string" ? ev.name : "", title: anyEntry?.title ?? (ev.name || `EV${ev.id}`),
     x: num(ev.x), y: num(ev.y), section, activePage,
     location: activeEntry ? activeEntry.location : null,
-    auto, unseen, unpicked, repeat, locked, interactable, gains, story, describe, moves,
+    auto, unseen, unpicked, remainingLines: rem?.now ?? [], laterLines: rem?.later ?? [], later: rem?.laterCount ?? 0,
+    repeat, locked, interactable, gains, story, describe, moves,
   };
   if (exitFound) item.exit = { mapId: exitFound.target.mapId, mapName: mapNameOf(data, exitFound.target.mapId), now: exitFound.now };
   if (bg) {
@@ -344,7 +355,7 @@ function checkEvent(
 }
 
 /**
- * 지금 있는 맵(live.mapId)의 체크리스트: 새 대화·얻을 것·반복하면 달라지는 것·조사할 수 있는 것·잠긴 것·다 본 것.
+ * 지금 있는 맵(live.mapId)의 체크리스트: 안 본 내용·얻을 것·반복하면 달라지는 것·조사할 수 있는 것·잠긴 것·다 본 것.
  * 활성 페이지는 live.events가 있으면 그것을, 없으면 activePageIndex로 계산한다.
  * live 없음·맵 없음 → null. 예외를 던지지 않는다.
  */
