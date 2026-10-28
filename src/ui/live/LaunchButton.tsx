@@ -23,7 +23,8 @@ export function LaunchButton() {
   const { supported, connection } = useLive();
   const available = useLauncherAvailable();
   const gameKey = data ? gameKeyOf(data) : null;
-  const [savedPath, setSavedPath] = useGamePath(gameKey);
+  const { path: savedPath, save: setSavedPath, fromServer } = useGamePath(gameKey);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const [dialog, setDialog] = useState<{ open: boolean; path: string; error: string | null }>({ open: false, path: "", error: null });
   const [busy, setBusy] = useState(false);
@@ -58,18 +59,24 @@ export function LaunchButton() {
   };
 
   const onMainClick = async () => {
+    setLaunchError(null);
     if (savedPath === null) { openDialog("", null); return; }
     const err = await launch(savedPath);
-    if (err !== null) openDialog(savedPath, err);
+    // 뷰어 서버로 연 게임은 경로를 이미 알므로 묻지 않고 오류만 보여 준다.
+    if (err !== null) {
+      if (fromServer) setLaunchError(err);
+      else openDialog(savedPath, err);
+    }
   };
 
   return (
     <>
       {launchedAt !== null && <span className="text-sm text-muted-foreground">실행했어요</span>}
+      {launchError !== null && <span className="text-sm text-destructive">{launchError}</span>}
       <Button variant="outline" size="sm" disabled={running || busy} onClick={() => void onMainClick()}>
         <Play />{running ? "실행 중" : "게임 실행"}
       </Button>
-      {savedPath !== null && (
+      {savedPath !== null && !fromServer && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" aria-label="위치 바꾸기" onClick={() => openDialog(savedPath, null)}>

@@ -4,23 +4,32 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGame } from "@/app/GameProvider";
-import { loadRecent } from "@/app/recent";
+import { loadRecent, type RecentEntry } from "@/app/recent";
+import { fsApiInfo, openFolderOnServer, pickFolderOnServer, type FsApiInfo } from "@/app/serverFolder";
 import { fsAccessSupport, type FsAccessWindow } from "./fsAccess";
 
 type PickerWindow = Window & { showDirectoryPicker?: (o?: { mode?: "read" }) => Promise<FileSystemDirectoryHandle> };
 type PermHandle = FileSystemDirectoryHandle & { requestPermission?: (d: { mode: "read" }) => Promise<PermissionState> };
 
 export function StartScreen() {
-  const { status, error, openHandle, openFiles } = useGame();
-  const [recent, setRecent] = useState<FileSystemDirectoryHandle | null>(null);
+  const { status, error, openHandle, openFiles, openServer } = useGame();
+  const [recent, setRecent] = useState<RecentEntry | null>(null);
+  const [server, setServer] = useState<FsApiInfo>({ available: false, pick: false });
+  /** 기본 폴더 선택 창이 실패하면 이후엔 브라우저 선택 창을 쓴다. */
+  const [nativeFailed, setNativeFailed] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const native = server.pick && !nativeFailed;
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
 
-  useEffect(() => { void loadRecent().then(setRecent); }, []);
+  useEffect(() => {
+    void loadRecent().then(setRecent);
+    void fsApiInfo().then(setServer);
+  }, []);
 
-  const pick = async () => {
-    setDenied(false);
+  const browserPick = async () => {
     const w = window as PickerWindow;
     if (w.showDirectoryPicker) {
       let h: FileSystemDirectoryHandle;
@@ -31,15 +40,42 @@ export function StartScreen() {
     }
   };
 
+  const pick = async () => {
+    setDenied(false);
+    setOpenError(null);
+    if (!native) { await browserPick(); return; }
+    setPicking(true);
+    let r: Awaited<ReturnType<typeof pickFolderOnServer>>;
+    try { r = await pickFolderOnServer(); } finally { setPicking(false); }
+    if (!r.ok) {
+      if (r.pickerFailed) { setNativeFailed(true); setOpenError(`${r.error}. 다시 누르면 브라우저 창으로 열어요.`); }
+      else setOpenError(r.error);
+      return;
+    }
+    if ("cancelled" in r) return;
+    await openServer(r.session);
+  };
+
   const reopen = async () => {
     if (!recent) return;
     setDenied(false);
+    setOpenError(null);
+    if (recent.kind === "server") {
+      const r = await openFolderOnServer(recent.path);
+      if (!r.ok) { setOpenError(r.error); return; }
+      if ("session" in r) await openServer(r.session);
+      return;
+    }
     try {
-      const perm = await (recent as PermHandle).requestPermission?.({ mode: "read" });
+      const perm = await (recent.handle as PermHandle).requestPermission?.({ mode: "read" });
       if (perm !== "granted") { setDenied(true); return; }
     } catch { setDenied(true); return; }
-    await openHandle(recent);
+    await openHandle(recent.handle);
   };
+
+  // 서버 경로는 서버가 있을 때만 다시 열 수 있다.
+  const showRecent = recent !== null && (recent.kind === "handle" || server.available);
+  const showAccessWarning = access.message !== null && !native;
 
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
@@ -56,14 +92,18 @@ export function StartScreen() {
             </div>
           ) : (
             <>
-              {access.message && (
+              {showAccessWarning && (
                 <Alert>
                   <AlertDescription>{access.message}</AlertDescription>
                 </Alert>
               )}
-              <Button onClick={pick}>게임 폴더 열기</Button>
-              {recent && (
-                <Button variant="outline" onClick={reopen}>최근 게임 다시 열기: {recent.name}</Button>
+              <Button onClick={() => void pick()} disabled={picking}>
+                {picking ? "폴더 선택 창에서 고르는 중…" : "게임 폴더 열기"}
+              </Button>
+              {showRecent && (
+                <Button variant="outline" onClick={() => void reopen()} disabled={picking}>
+                  최근 게임 다시 열기: {recent.name}
+                </Button>
               )}
             </>
           )}
@@ -78,6 +118,11 @@ export function StartScreen() {
           {denied && (
             <Alert variant="destructive">
               <AlertDescription>권한이 거부되었어요. 폴더를 다시 선택해 주세요.</AlertDescription>
+            </Alert>
+          )}
+          {openError !== null && (
+            <Alert variant="destructive">
+              <AlertDescription>{openError}</AlertDescription>
             </Alert>
           )}
           {status === "error" && error && !error.ok && (
