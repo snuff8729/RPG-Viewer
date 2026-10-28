@@ -3,7 +3,7 @@ import { evaluate } from "../live/evaluate";
 import type { LiveSnapshot } from "../live/types";
 import { actorName, armorName, itemName, switchName, variableName, weaponName } from "../text/names";
 import type { CompareOp, GameData, Location, MapEvent } from "../types";
-import { atomKey, buildDepGraph, isTraceableWrite, type Atom, type CtxId, type CtxInfo, type DepGraph, type Req, type Writer } from "./graph";
+import { atomKey, buildDepGraph, isTraceableWriteFor, type Atom, type CtxId, type CtxInfo, type DepGraph, type Req, type Writer } from "./graph";
 
 export interface HowToStep {
   writer: Writer;
@@ -191,7 +191,30 @@ function stepOf(c: Ctx, w: Writer, req: Req): HowToStep | null {
 }
 
 /** 같은 문맥 안의 쓰는 곳 묶음. 대표(rep)는 지금 할 수 있는 것 → 요구에 가장 잘 맞는 동작 → 먼저 나온 것 순으로 고른다. */
-interface Group { ctx: CtxId; rep: Writer; avail: boolean; level: number; unmet: number }
+interface Group { ctx: CtxId; rep: Writer; avail: boolean; level: number; unmet: number; debug: boolean }
+
+const DEBUG_NAME = /debug|デバッグ|デバック|テスト|test|디버그|테스트/i;
+const GENERIC_EVENT_NAME = /^EV\d+$/;
+
+/** 문맥 이름(맵 이벤트 이름 — 이름이 EV001 같으면 첫 대사 —, 공통 이벤트 이름, 적 군단 이름)이 디버그·테스트용으로 보이는가. */
+function isDebugCtx(data: GameData, info: CtxInfo): boolean {
+  const loc = info.location;
+  const names: unknown[] = [];
+  switch (loc.source) {
+    case "map": {
+      const ev = eventOf(data, loc.mapId, loc.eventId);
+      names.push(ev?.name);
+      if (typeof ev?.name !== "string" || GENERIC_EVENT_NAME.test(ev.name)) {
+        const first = arr<{ code: number; parameters: unknown[] } | null>(ev?.pages?.[loc.page]?.list).find(cmd => isObj(cmd) && cmd.code === 401);
+        names.push(arr(first?.parameters)[0]);
+      }
+      break;
+    }
+    case "common": names.push(arr<{ name: string } | null>(data.commonEvents)[loc.commonEventId]?.name); break;
+    case "troop": names.push(arr<{ name: string } | null>(data.troops)[loc.troopId]?.name); break;
+  }
+  return names.some(n => typeof n === "string" && DEBUG_NAME.test(n));
+}
 
 /** 동작 순위(작을수록 좋음): 변수는 값을 바로 정하는 set, 그다음 큰 증감. */
 function actionRank(w: Writer): [number, number] {
@@ -211,17 +234,24 @@ function groupWriters(c: Ctx, writers: Writer[]): Group[] {
     const best = list
       .map((w, i) => ({ w, i, a: writerAvailable(c, w), r: actionRank(w) }))
       .sort((x, y) => Number(y.a) - Number(x.a) || x.r[0] - y.r[0] || x.r[1] - y.r[1] || x.i - y.i)[0];
-    out.push({ ctx, rep: best.w, avail: best.a, level: c.g.ctxLevel(ctx), unmet: best.w.reqs.filter(r => !reqMet(r, c.live)).length });
+    const info = c.g.ctxs.get(ctx);
+    out.push({
+      ctx, rep: best.w, avail: best.a, level: c.g.ctxLevel(ctx), unmet: best.w.reqs.filter(r => !reqMet(r, c.live)).length,
+      debug: !!info && isDebugCtx(c.data, info),
+    });
   }
   return out;
 }
 
 const byCtxId = (a: CtxId, b: CtxId) => a.localeCompare(b, undefined, { numeric: true });
 
-/** 갈림길 후보 순서: 닿을 수 없는 문맥은 맨 뒤, 지금 가능 → 낮은 문맥 레벨 → 안 된 요구 적은 것 → 문맥 id. */
+/**
+ * 갈림길 후보 순서: 디버그·테스트 문맥은 맨 뒤, 지금 가능(레벨과 무관) → 닿을 수 있는 것 →
+ * 낮은 문맥 레벨 → 안 된 요구 적은 것 → 문맥 id.
+ */
 function compareGroups(x: Group, y: Group): number {
   const xu = x.level === Infinity, yu = y.level === Infinity;
-  return Number(xu) - Number(yu) || Number(y.avail) - Number(x.avail)
+  return Number(x.debug) - Number(y.debug) || Number(y.avail) - Number(x.avail) || Number(xu) - Number(yu)
     || (xu || yu ? 0 : x.level - y.level) || x.unmet - y.unmet || byCtxId(x.ctx, y.ctx);
 }
 
@@ -259,13 +289,14 @@ function solve(run: Run, req: Req, ancestors: Set<string>): HowToEnd {
     run.from = undefined;
   } else {
     const useful = c.g.writersOf(req.atom).filter(w => canSatisfy(w, req));
-    const traceable = useful.filter(w => isTraceableWrite(w.write));
+    const traceable = useful.filter(w => isTraceableWriteFor(w.write, req.test));
     if (traceable.length === 0) {
       return { kind: "opaque", reason: useful.some(w => w.write.op === "script") ? "script" : "noWriter" };
     }
     // 같은 문맥의 여러 쓰기는 하나로 본다. 닿을 수 있는 문맥이 있으면 닿을 수 없는 문맥(호출자 없는 디버그 이벤트 등)은 판단에서 뺀다.
+    // 지금 할 수 있는 문맥은 정적 레벨이 Infinity여도(스크립트·플러그인이 조건을 만든 경우) 닿을 수 있다고 본다.
     const groups = groupWriters(c, traceable);
-    const reachable = groups.filter(gr => gr.level !== Infinity);
+    const reachable = groups.filter(gr => gr.level !== Infinity || gr.avail);
     const deciding = reachable.length ? reachable : groups;
     const avail = deciding.filter(gr => gr.avail);
     if (deciding.length === 1) chosen = deciding[0].rep;

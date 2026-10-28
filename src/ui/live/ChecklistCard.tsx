@@ -46,6 +46,9 @@ function Locked({ lp }: { lp: LockedPage }) {
           </li>
         ))}
       </ul>
+      {lp.shadowed && (
+        <p className="text-xs text-muted-foreground">더 뒤 페이지가 먼저 나와서 지금은 안 나와요 — 그 페이지의 조건이 바뀌면 나와요</p>
+      )}
     </div>
   );
 }

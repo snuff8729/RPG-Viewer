@@ -253,6 +253,50 @@ describe("howTo", () => {
     expect(howTo(req, data, live()).steps.map(s => s.action)).toEqual(["셀프 스위치 A 켜기"]);
   });
 
+  it("OFF requirement follows writers that turn it off", () => {
+    const data = game([[2, map([ev(1, [page([c(121, [4, 4, 1])], sw1(2))]), ev(2, [page([swOn(2)])])])]]);
+    const off: Req = { atom: { kind: "switch", id: 4 }, test: { kind: "switch", id: 4, on: false } };
+    const r = howTo(off, data, live({ switches: [4] }));
+    expect(r.end).toEqual({ kind: "done" });
+    expect(r.steps.map(s => s.action)).toEqual(["스위치 [S2] 켜기", "스위치 [S4] 끄기"]);
+
+    const self = game([[2, map([ev(4, [page([c(123, ["B", 1])])])])]]);
+    const selfOff: Req = { atom: { kind: "selfSwitch", mapId: 2, eventId: 4, ch: "B" }, test: { kind: "selfSwitch", letter: "B", on: false } };
+    expect(howTo(selfOff, self, live({ selfSwitches: ["2,4,B"] })).steps.map(s => s.action)).toEqual(["셀프 스위치 B 끄기"]);
+  });
+
+  it("a context available now counts as reachable even when its static level is Infinity", () => {
+    // E1: S3(쓰는 곳 없음 → 레벨 Infinity)가 필요하지만 지금 켜져 있다. E2: 레벨 2, 지금은 못 함.
+    const data = game([[2, map([
+      ev(1, [page([swOn(5)], sw1(3))]), ev(2, [page([swOn(5)], sw1(1))]), ev(3, [page([swOn(1)])]),
+    ])]]);
+    const r = howTo(swReq(5), data, live({ switches: [3] }));
+    expect(r.end).toEqual({ kind: "done" });
+    expect(r.steps.map(s => [s.where, s.availableNow])).toEqual([["숲 › E1 › p1", true]]);
+
+    // 지금 되는 곳이 여럿이면 레벨과 상관없이 앞에 온다
+    const two = game([[2, map([
+      ev(1, [page([swOn(5)], sw1(3))]), ev(4, [page([swOn(5)], sw1(3))]), ev(2, [page([swOn(5)], sw1(1))]), ev(3, [page([swOn(1)])]),
+    ])]]);
+    const f = howTo(swReq(5), two, live({ switches: [3] }));
+    expect(f.end.kind === "fork" && f.end.candidates.map(s => [s.where, s.availableNow])).toEqual([
+      ["숲 › E1 › p1", true], ["숲 › E4 › p1", true], ["숲 › E2 › p1", false],
+    ]);
+  });
+
+  it("debug / test contexts are ranked last but still listed", () => {
+    const data = game([[2, map([
+      ev(1, [page([swOn(5)])], "デバッグ"), ev(2, [page([swOn(5)])], "Test NPC"), ev(3, [page([swOn(5)])], "촌장"),
+      ev(4, [page([c(101), c(401, ["디버그 메뉴"]), swOn(5)])], "EV004"), ev(5, [page([swOn(5)], sw1(1))], "상인"),
+    ])]], [ce(1, [swOn(5)], 1, 9)]);
+    data.commonEvents[1]!.name = "테스트용";
+    const r = howTo(swReq(5), data, live());
+    expect(r.end.kind === "fork" && r.end.candidates.map(s => s.where)).toEqual([
+      "숲 › 촌장 › p1", "숲 › 상인 › p1", "숲 › デバッグ › p1", "숲 › Test NPC › p1", "숲 › EV004 › p1",
+    ]);
+    expect(r.end.kind === "fork" && r.end.more).toBe(1);
+  });
+
   it("never throws on garbage", () => {
     expect(() => howTo(null as unknown as Req, null as unknown as GameData, null as unknown as LiveSnapshot)).not.toThrow();
     expect(howTo(swReq(1), {} as GameData, live()).end.kind).toBe("opaque");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventCommand, EventPage, GameData, MapEvent, PageConditions } from "../types";
-import { repeatInfo } from "./repeat";
+import { REPEAT_CACHE_LIMIT, repeatCacheSize, repeatInfo } from "./repeat";
 import type { LiveSnapshot } from "./types";
 
 const conds = (over: Partial<PageConditions> = {}): PageConditions => ({
@@ -105,6 +105,31 @@ describe("repeatInfo", () => {
 
   it("no active page → []", () => {
     expect(repeatInfo(event([page(msg(), { switch1Valid: true })]), 3, data, live())).toEqual([]);
+  });
+
+  it("cache keys only on state the simulation reads", () => {
+    const d = { ...data } as GameData;
+    const counter = event([page([
+      c(122, 0, [1, 1, 1, 0, 1]),
+      c(111, 0, [1, 1, 0, 3, 1]), ...msg(1), c(0, 1),
+      c(412, 0),
+    ])]);
+    const a = repeatInfo(counter, 3, d, live({ variables: { 1: 0 } }));
+    expect(repeatCacheSize(d)).toBe(1);
+    // 시뮬레이션이 읽지 않는 스위치·변수·아이템이 달라도 같은 항목을 쓴다
+    const b = repeatInfo(counter, 3, d, live({ variables: { 1: 0, 7: 99 }, switches: [4, 8], items: { 2: 1 }, gold: 500 }));
+    expect(b).toEqual(a);
+    expect(repeatCacheSize(d)).toBe(1);
+    // 읽는 변수가 달라지면 새로 계산한다
+    expect(repeatInfo(counter, 3, d, live({ variables: { 1: 5 } }))).toEqual([]);
+    expect(repeatCacheSize(d)).toBe(2);
+  });
+
+  it("cache is bounded (LRU)", () => {
+    const d = { ...data } as GameData;
+    const ev = event([page([...msg(), c(111, 0, [1, 1, 0, 3, 1]), ...msg(1), c(0, 1), c(412, 0)])]);
+    for (let i = 0; i < REPEAT_CACHE_LIMIT + 300; i++) repeatInfo(ev, 3, d, live({ variables: { 1: i } }));
+    expect(repeatCacheSize(d)).toBe(REPEAT_CACHE_LIMIT);
   });
 
   it("never throws on garbage", () => {

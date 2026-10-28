@@ -13,6 +13,8 @@ export interface LockedPage {
   page: number; location: Location; unseen: number; unpicked: number;
   /** 트리거 설명을 뺀 출현 조건. req는 의존 그래프 원자로 바꿀 수 있을 때만 */
   conditions: { text: string; met: boolean; req?: Req }[];
+  /** 조건은 다 됐지만 더 뒤(번호가 큰) 활성 페이지가 먼저 나와 지금은 안 나온다 */
+  shadowed?: true;
 }
 export interface ChecklistEvent {
   eventId: number; name: string; title: string; x: number; y: number;
@@ -49,7 +51,9 @@ function hasContent(entry: PageEntry): boolean {
   return found;
 }
 
-function lockedPage(ev: MapEvent, pi: number, mapId: number, entry: PageEntry, data: GameData, coverage: Coverage, live: LiveSnapshot): LockedPage | null {
+function lockedPage(
+  ev: MapEvent, pi: number, mapId: number, entry: PageEntry, data: GameData, coverage: Coverage, live: LiveSnapshot, activePage: number,
+): LockedPage | null {
   const { unseen, unpicked } = pageNewCounts(entry, coverage);
   if (unseen === 0 && unpicked === 0) return null;
   const pg = ev.pages[pi];
@@ -63,7 +67,9 @@ function lockedPage(ev: MapEvent, pi: number, mapId: number, entry: PageEntry, d
     if (req) item.req = req;
     conditions.push(item);
   }
-  return { page: pi, location: entry.location, unseen, unpicked, conditions };
+  const lp: LockedPage = { page: pi, location: entry.location, unseen, unpicked, conditions };
+  if (activePage > pi && conditions.every(cd => cd.met)) lp.shadowed = true;
+  return lp;
 }
 
 function checkEvent(
@@ -86,7 +92,7 @@ function checkEvent(
   const locked: LockedPage[] = [];
   entries.forEach((entry, pi) => {
     if (pi === activePage || !entry || !entry.hasDialogue || !isObj(pages[pi])) return;
-    const lp = lockedPage(ev, pi, mapId, entry, data, coverage, live);
+    const lp = lockedPage(ev, pi, mapId, entry, data, coverage, live, activePage);
     if (lp) locked.push(lp);
   });
 

@@ -67,6 +67,17 @@ export function isTraceableWrite(w: WriteOp): boolean {
   return w.op !== "other" && w.op !== "script";
 }
 
+/**
+ * 이 요구를 따라갈 때 쓸 수 있는 쓰기. OFF 요구(스위치·셀프 스위치 OFF)는 끄는 쓰기(other)도 추적할 수 있다.
+ * 그 밖에는 isTraceableWrite와 같다(level 계산은 바꾸지 않는다).
+ */
+export function isTraceableWriteFor(w: WriteOp, test: ConditionTest): boolean {
+  if ((test.kind === "switch" || test.kind === "selfSwitch") && !test.on && w.op === "other") {
+    return w.atom.kind === "switch" || w.atom.kind === "selfSwitch";
+  }
+  return isTraceableWrite(w);
+}
+
 // ---- 구축 ----
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0);
 const MAX_RANGE = 5000;

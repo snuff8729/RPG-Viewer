@@ -1,8 +1,8 @@
-import { describeBranchCondition } from "../conditions/describe";
+import { describeBranchCondition, describePageConditions } from "../conditions/describe";
 import { switchName, variableName } from "../text/names";
-import type { EventCommand, GameData, MapEvent } from "../types";
+import type { ConditionTest, EventCommand, GameData, MapEvent, PageConditions } from "../types";
 import { evaluate } from "./evaluate";
-import { activePageIndex, conditionsKey } from "./interactable";
+import { activePageIndex } from "./interactable";
 import type { LiveSnapshot } from "./types";
 
 export interface RepeatInfo {
@@ -246,9 +246,135 @@ function counterNote(ch: Change[], data: GameData): string {
   }
 }
 
-const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(x => b.has(x));
+// ---- 시뮬레이션이 읽는 상태 ----
+/** 시뮬레이션 결과에 영향을 주는 원자: 조건·연산 값으로 읽거나 쓰는 것(쓰는 것도 바뀐 내용을 알려 주므로 넣는다). */
+interface Reads {
+  switches: Set<number>; variables: Set<number>;
+  items: Set<number>; weapons: Set<number>; armors: Set<number>; actors: Set<number>;
+  gold: boolean; selfSwitch: boolean;
+}
+const ID_SETS = ["switches", "variables", "items", "weapons", "armors", "actors"] as const;
+const newReads = (): Reads => ({
+  switches: new Set(), variables: new Set(), items: new Set(), weapons: new Set(), armors: new Set(), actors: new Set(),
+  gold: false, selfSwitch: false,
+});
+function mergeReads(into: Reads, from: Reads) {
+  for (const k of ID_SETS) for (const id of from[k]) into[k].add(id);
+  into.gold ||= from.gold;
+  into.selfSwitch ||= from.selfSwitch;
+}
+function addRange(set: Set<number>, start: number, end: number) {
+  for (let id = start; id <= end && id - start < 10_000; id++) set.add(id);
+}
+function addTest(r: Reads, t: ConditionTest | undefined) {
+  if (!t) return;
+  switch (t.kind) {
+    case "switch": r.switches.add(t.id); break;
+    case "variable": r.variables.add(t.id); break;
+    case "variableVar": r.variables.add(t.id); r.variables.add(t.otherId); break;
+    case "selfSwitch": r.selfSwitch = true; break;
+    case "item": r.items.add(t.id); break;
+    case "weapon": r.weapons.add(t.id); break;
+    case "armor": r.armors.add(t.id); break;
+    case "actorInParty": r.actors.add(t.id); break;
+    case "gold": r.gold = true; break;
+  }
+}
 
-function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot, first: number): RepeatInfo[] {
+/** data → (페이지 객체 → 출현 조건이 읽는 원자) / (페이지 객체 → 명령 목록이 읽고 쓰는 원자) */
+const condReadsCache = new WeakMap<object, WeakMap<object, Reads>>();
+const listReadsCache = new WeakMap<object, WeakMap<object, Reads>>();
+function memo(store: WeakMap<object, WeakMap<object, Reads>>, data: GameData, key: object, make: () => Reads): Reads {
+  let m = store.get(data);
+  if (!m) { m = new WeakMap(); store.set(data, m); }
+  let hit = m.get(key);
+  if (!hit) { hit = make(); m.set(key, hit); }
+  return hit;
+}
+
+function pageCondReads(pg: unknown, data: GameData): Reads {
+  if (!isObj(pg)) return newReads();
+  return memo(condReadsCache, data, pg, () => {
+    const r = newReads();
+    if (isObj(pg.conditions)) for (const cd of describePageConditions(pg.conditions as PageConditions, num(pg.trigger), data)) addTest(r, cd?.test);
+    return r;
+  });
+}
+
+function scanReads(r: Reads, list: unknown[], data: GameData, depth: number, seen: Set<number>) {
+  for (const cmd of list) {
+    if (!isObj(cmd)) continue;
+    const p = arr<any>(cmd.parameters);
+    switch (cmd.code) {
+      case 111: if (p[0] !== 12) addTest(r, describeBranchCondition(p, data).test); break;
+      case 117: {
+        const id = num(p[0]);
+        if (depth < MAX_CALL_DEPTH && !seen.has(id)) {
+          seen.add(id);
+          scanReads(r, arr(data.commonEvents?.[id]?.list), data, depth + 1, seen);
+        }
+        break;
+      }
+      case 121: addRange(r.switches, num(p[0]), num(p[1])); break;
+      case 122:
+        addRange(r.variables, num(p[0]), num(p[1]));
+        if (num(p[3]) === 1) r.variables.add(num(p[4]));
+        break;
+      case 123: r.selfSwitch = true; break;
+      case 125:
+        r.gold = true;
+        if (num(p[1]) === 1) r.variables.add(num(p[2]));
+        break;
+      case 126: case 127: case 128:
+        (cmd.code === 126 ? r.items : cmd.code === 127 ? r.weapons : r.armors).add(num(p[0]));
+        if (num(p[2]) === 1) r.variables.add(num(p[3]));
+        break;
+      case 129: r.actors.add(num(p[0])); break;
+    }
+  }
+}
+
+function pageListReads(pg: unknown, data: GameData): Reads {
+  if (!isObj(pg)) return newReads();
+  return memo(listReadsCache, data, pg, () => {
+    const r = newReads();
+    scanReads(r, arr(pg.list), data, 0, new Set());
+    return r;
+  });
+}
+
+/** 이 이벤트의 시뮬레이션이 읽는 원자: 모든 페이지의 출현 조건 + 시작 페이지 명령(호출한 공통 이벤트 포함, 깊이 5). */
+function eventReads(ev: MapEvent, page: number, data: GameData): Reads {
+  const r = newReads();
+  for (const pg of arr<unknown>(ev.pages)) mergeReads(r, pageCondReads(pg, data));
+  mergeReads(r, pageListReads(ev.pages[page], data));
+  return r;
+}
+
+/** reads에 든 원자의 값만으로 만든 상태 키. */
+function stateKey(s: LiveSnapshot, r: Reads, mapId: number, eventId: number): string {
+  const sorted = (ids: Set<number>) => [...ids].sort((a, b) => a - b);
+  const vals = (bag: unknown, ids: Set<number>) => {
+    const b = isObj(bag) ? bag : {};
+    return sorted(ids).map(id => `${id}=${num(b[String(id)])}`).join(",");
+  };
+  const flags = (list: unknown, ids: Set<number>) => {
+    const have = new Set(arr<number>(list));
+    return sorted(ids).filter(id => have.has(id)).join(",");
+  };
+  const prefix = `${mapId},${eventId},`;
+  return [
+    flags(s.switches, r.switches), vals(s.variables, r.variables),
+    vals(s.items, r.items), vals(s.weapons, r.weapons), vals(s.armors, r.armors),
+    flags(s.party, r.actors),
+    r.gold ? String(num(s.gold)) : "",
+    r.selfSwitch ? arr<unknown>(s.selfSwitches).map(String).filter(k => k.startsWith(prefix)).sort().join(",") : "",
+  ].join("|");
+}
+
+const sameSet =(a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(x => b.has(x));
+
+function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot, first: number, reads: Reads): RepeatInfo[] {
   const start = cloneLive(live);
   if (first < 0) return [];
   /** 시뮬레이션 상태로 계산한 기준 페이지. live.events가 알려 준 실제 활성 페이지(first)와 다를 수 있다. */
@@ -259,7 +385,8 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
   };
   const found: Omit<RepeatInfo, "estimated">[] = [];
   let firstShown: Set<string> | null = null;
-  let prevKey = conditionsKey(sim.state);
+  const keyOf = (st: LiveSnapshot) => stateKey(st, reads, mapId, ev.id);
+  let prevKey = keyOf(sim.state);
   for (let k = 1; k <= MAX_RUNS; k++) {
     if (k > 1 && activePageIndex(ev, mapId, data, sim.state) !== base) break;
     const before = cloneLive(sim.state);
@@ -280,7 +407,7 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
       }
       break;
     }
-    const key = conditionsKey(sim.state);
+    const key = keyOf(sim.state);
     if (key === prevKey) break;   // 상태가 그대로면 다음에도 똑같다
     prevKey = key;
   }
@@ -289,8 +416,22 @@ function analyse(ev: MapEvent, mapId: number, data: GameData, live: LiveSnapshot
   return found.map(f => ({ ...f, estimated: sim.estimated }));
 }
 
-/** data → (페이지 객체 → (이벤트·조건 키 → 결과)) */
-const cache = new WeakMap<object, WeakMap<object, Map<string, RepeatInfo[]>>>();
+export const REPEAT_CACHE_LIMIT = 2000;
+const CACHE_LIMIT = REPEAT_CACHE_LIMIT;
+/** data → (맵·이벤트·페이지 + 시뮬레이션이 읽는 상태 키 → 결과). 가장 오래 안 쓴 것부터 버린다(LRU). */
+const cache = new WeakMap<object, Map<string, RepeatInfo[]>>();
+/** 페이지 객체마다 붙이는 번호: 같은 data 안에서 다른 페이지 객체가 같은 키를 쓰지 않게 한다. */
+const pageIds = new WeakMap<object, number>();
+let nextPageId = 1;
+function pageId(pg: object): number {
+  let id = pageIds.get(pg);
+  if (id === undefined) { id = nextPageId++; pageIds.set(pg, id); }
+  return id;
+}
+/** 테스트용: data의 캐시 항목 수 */
+export function repeatCacheSize(data: GameData): number {
+  return isObj(data) ? cache.get(data)?.size ?? 0 : 0;
+}
 
 /**
  * 이벤트의 지금 활성 페이지를 여러 번(최대 5번) 상호작용한다고 보고 live 복사본에서 시뮬레이션해,
@@ -303,13 +444,23 @@ export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: Li
     const pg = typeof startPage === "number" && startPage >= 0 ? startPage : activePageIndex(ev, mapId, data, live);
     const pageObj = ev.pages[pg];
     if (!isObj(pageObj)) return [];
-    let byPage = cache.get(data);
-    if (!byPage) { byPage = new WeakMap(); cache.set(data, byPage); }
-    let byKey = byPage.get(pageObj);
-    if (!byKey) { byKey = new Map(); byPage.set(pageObj, byKey); }
-    const key = `${mapId},${ev.id},${pg}|${conditionsKey({ ...live, events: [] })}|${num(live.gold)}`;
+    const reads = eventReads(ev, pg, data);
+    let byKey = cache.get(data);
+    if (!byKey) { byKey = new Map(); cache.set(data, byKey); }
+    // 모든 페이지 객체 번호: 활성 페이지 판정에 다른 페이지도 쓰인다
+    const pagesKey = ev.pages.map(p => (isObj(p) ? pageId(p) : 0)).join(",");
+    const key = `${pagesKey}|${mapId},${ev.id},${pg}|${stateKey(live, reads, mapId, ev.id)}`;
     let hit = byKey.get(key);
-    if (!hit) { hit = analyse(ev, mapId, data, live, pg); byKey.set(key, hit); }
+    if (hit) {
+      byKey.delete(key);   // 최근에 쓴 것으로 옮긴다
+    } else {
+      hit = analyse(ev, mapId, data, live, pg, reads);
+      if (byKey.size >= CACHE_LIMIT) {
+        const oldest = byKey.keys().next().value;
+        if (oldest !== undefined) byKey.delete(oldest);
+      }
+    }
+    byKey.set(key, hit);
     return hit.map(r => ({ ...r }));
   } catch {
     return [];

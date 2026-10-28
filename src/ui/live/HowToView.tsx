@@ -45,20 +45,23 @@ function StepLine({ step }: { step: HowToStep }) {
   );
 }
 
+const candKey = (s: HowToStep) => `${s.writer.ctx}:${s.writer.cmd}`;
+
 function Fork({ end }: { end: Extract<HowToEnd, { kind: "fork" }> }) {
-  const [picked, setPicked] = useState<number | null>(null);
-  const cand = picked !== null ? end.candidates[picked] : undefined;
+  // 후보 순서는 live가 바뀌면 달라질 수 있어, 고른 후보를 위치가 아니라 쓰는 곳(문맥 + 명령)으로 기억한다.
+  const [picked, setPicked] = useState<string | null>(null);
+  const cand = picked !== null ? end.candidates.find(s => candKey(s) === picked) : undefined;
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground">먼저 아래 중 한 곳에서 만들어야 해요. 골라서 이어 보세요.</p>
       <div className="flex flex-wrap gap-2">
-        {end.candidates.map((s, i) => (
+        {end.candidates.map((s) => (
           <Button
-            key={`${s.writer.ctx}:${s.writer.cmd}`}
-            variant={picked === i ? "secondary" : "outline"}
+            key={candKey(s)}
+            variant={picked === candKey(s) ? "secondary" : "outline"}
             size="sm"
             className="h-auto whitespace-normal py-1 text-left"
-            onClick={() => setPicked(picked === i ? null : i)}
+            onClick={() => setPicked(picked === candKey(s) ? null : candKey(s))}
           >
             {s.where} · {s.action}{s.availableNow ? " (지금 할 수 있음)" : ""}
           </Button>

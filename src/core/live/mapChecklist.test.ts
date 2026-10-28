@@ -91,6 +91,19 @@ describe("mapChecklist", () => {
     expect([merchant.activePage, merchant.location, merchant.section, merchant.locked.map(l => l.page)]).toEqual([-1, null, "locked", [0]]);
   });
 
+  it("met page shadowed by a later active page is marked shadowed and still counts", () => {
+    // 문지기 p1(조건 없음)은 다 봤고 p2가 활성. 그 앞의 p1이 안 본 채라면 조건은 다 됐지만 가려진 것.
+    const m = mapChecklist(data, index, coverage([at(2, 0), at(2, 1), at(3, 1), at(4, 0)]), live({ switches: [2] }))!;
+    const guard = m.events.find(e => e.eventId === 3)!;
+    expect(guard.activePage).toBe(1);
+    expect(guard.section).toBe("locked");
+    expect(guard.locked).toEqual([{ page: 0, location: at(3, 0), unseen: 1, unpicked: 0, conditions: [], shadowed: true }]);
+    expect(m.remaining).toBe(4);
+    // 조건이 안 된 잠긴 페이지는 shadowed가 아니다
+    const locked = mapChecklist(data, index, cov, live())!.events.find(e => e.eventId === 3)!.locked[0];
+    expect(locked.shadowed).toBeUndefined();
+  });
+
   it("null when not connected or the map is not loaded; never throws", () => {
     expect(mapChecklist(data, index, cov, null as unknown as LiveSnapshot)).toBeNull();
     expect(mapChecklist(data, index, cov, live({ mapId: 99 }))).toBeNull();
