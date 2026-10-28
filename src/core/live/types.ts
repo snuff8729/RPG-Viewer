@@ -72,8 +72,11 @@ export interface LiveSnapshot {
   running: Location | null;
   /** 실행 중인 명령 인덱스(구버전 플러그인엔 없음) */
   runningCmd?: number | null;
-  /** page 0부터, -1 = 없음. x·y·d: 지금 위치·방향(플러그인 1.4.0+, 없으면 구버전 — 맵 데이터 위치를 쓴다) */
-  events: { eventId: number; page: number; x?: number; y?: number; d?: number }[];
+  /**
+   * page 0부터, -1 = 없음. x·y·d: 지금 위치·방향(플러그인 1.4.0+, 없으면 구버전 — 맵 데이터 위치를 쓴다).
+   * spawn: 게임이 실행 중에 만든 이벤트(플러그인 1.16.0+, EventReSpawn 등)의 원본 — page는 원본 페이지 번호
+   */
+  events: { eventId: number; page: number; x?: number; y?: number; d?: number; spawn?: LiveSpawn }[];
   switches: number[];                             // ON인 id
   variables: Record<string, number>;              // 0이 아닌 값
   selfSwitches: string[];                         // ON인 "mapId,eventId,A"
@@ -86,6 +89,11 @@ export interface LiveSnapshot {
   /** 파티 캐릭터 자세히(플러그인 1.14.0+, 뷰어가 control.json `liveActors: true`로 부탁할 때만) */
   actors?: LiveActor[];
 }
+/**
+ * 실행 중에 만든 이벤트의 원본: from = 원본 이벤트 번호(tpl이면 TemplateEvent 템플릿 맵, 아니면 같은 맵).
+ * from이 없으면 원본을 못 찾은 것(name = 그 이벤트 데이터의 이름).
+ */
+export interface LiveSpawn { from?: number; tpl?: boolean; name?: string }
 /** params: 지금 능력치 8개(장비·상태 포함, actor.param(0~7)) */
 export interface LiveActor {
   id: number; name: string; level: number; exp: number; params: number[]; hp: number; mp: number;
@@ -105,6 +113,8 @@ export interface LiveAssist {
   controlT?: number | null;
   /** 게임이 화면 그림을 기록하고 있는가(플러그인 1.6.0+, 없으면 구버전) */
   capturePictures?: boolean;
+  /** 게임이 메뉴 화면 그림도 기록하는가(플러그인 1.16.0+, control.json captureMenuScenes) */
+  captureMenuScenes?: boolean;
   /** 게임이 알림 문구를 기록하고 있는가(플러그인 1.9.0+) */
   captureNotices?: boolean;
   /** 게임이 감싼 알림 함수 경로들(플러그인 1.9.0+) */

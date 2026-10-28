@@ -10,7 +10,7 @@ import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/scree
 import { gameKeyOf } from "@/ui/live/readPosition";
 import { BUNDLED_ADAPTERS } from "./adapterBundle";
 import type { BundledAdapter } from "@/core/adapters/bundle";
-import { applyAddonDefaults, defaultRoleOf, matchesGame, roleDefaultsOf } from "@/core/adapters/manifest";
+import { adapterControlFlags, applyAddonDefaults, defaultRoleOf, matchesGame, roleDefaultsOf } from "@/core/adapters/manifest";
 import type { ScreenPicture } from "@/core/addons/screenPictures";
 
 /** 게임별 애드온(부가 기능) 켜짐 상태와 화면 그림 구분. */
@@ -49,6 +49,12 @@ export interface AddonsValue {
   setAdapterOn(id: string, on: boolean): void;
   /** 켠 어댑터들이 정한 그림 기본 구분(없으면 null) */
   defaultRole: ((p: ScreenPicture) => PictureRole | null) | null;
+  /** 어댑터 카드의 설정이 켜져 있는가(기본 꺼짐) */
+  isAdapterOptionOn(adapterId: string, optionId: string): boolean;
+  /** 어댑터 카드의 설정을 켜고 끈다. 클릭 핸들러 안에서 부를 것. */
+  setAdapterOption(adapterId: string, optionId: string, on: boolean): void;
+  /** 메뉴 화면 그림(screen 기록 scene "menu")도 읽기에 보이는가: 켠 어댑터의 `메뉴 화면 그림도 기록`이 켜졌을 때만 */
+  menuPicturesShown: boolean;
 }
 
 const EMPTY: AddonState = {};
@@ -61,7 +67,9 @@ const NONE: AddonsValue = {
   spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {},
   storyProgress: null, setStoryProgress: () => {}, controlFlags: {}, savedInFolder: false,
   adapters: [], enabledAdapters: [], isAdapterOn: () => false, setAdapterOn: () => {}, defaultRole: null,
+  isAdapterOptionOn: () => false, setAdapterOption: () => {}, menuPicturesShown: false,
 };
+const NO_OPTIONS: Record<string, Record<string, boolean>> = {};
 const AddonsContext = createContext<AddonsValue | null>(null);
 
 interface Loaded { key: string; file: AddonFile; inFolder: boolean }
@@ -102,6 +110,13 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     if (d.pictureRoles.length === 0 && d.spriteRoles.length === 0) return null;
     return (p: ScreenPicture) => defaultRoleOf(p, d);
   }, [enabledAdapters]);
+  const adapterOptions = current?.file.adapterOptions ?? NO_OPTIONS;
+  const adapterFlags = useMemo(
+    () => adapterControlFlags(enabledAdapters.map((a) => a.manifest), (id, opt) => adapterOptions[id]?.[opt] === true),
+    [enabledAdapters, adapterOptions],
+  );
+  const addonFlags = useMemo(() => addonControlFlags(state, { noticeHooks }), [state, noticeHooks]);
+  const controlFlags = useMemo(() => ({ ...addonFlags, ...adapterFlags }), [addonFlags, adapterFlags]);
   const storyText = current?.file.storyProgress ?? null;
   const storyProgress = useMemo(() => parseKeyText(storyText), [storyText]);
 
@@ -158,6 +173,14 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     }));
   }, [update]);
 
+  const setAdapterOption = useCallback((adapterId: string, optionId: string, on: boolean) => {
+    update((prev) => {
+      const all = { ...(prev.adapterOptions ?? {}) };
+      all[adapterId] = { ...(all[adapterId] ?? {}), [optionId]: on };
+      return { ...prev, adapterOptions: all };
+    });
+  }, [update]);
+
   const setNoticeHooks = useCallback((paths: string[]) => {
     update((prev) => {
       const hooks = cleanNoticeHooks(paths);
@@ -188,15 +211,18 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     setNoticeHooks,
     storyProgress,
     setStoryProgress,
-    controlFlags: addonControlFlags(state, { noticeHooks }),
+    controlFlags,
     savedInFolder: current?.inFolder ?? false,
     adapters,
     enabledAdapters,
     isAdapterOn: (id) => enabledAdapters.some((a) => a.manifest.id === id),
     setAdapterOn,
     defaultRole,
+    isAdapterOptionOn: (id, opt) => adapterOptions[id]?.[opt] === true,
+    setAdapterOption,
+    menuPicturesShown: adapterFlags.captureMenuScenes === true,
   }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, storyProgress, setStoryProgress,
-    current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole]);
+    controlFlags, current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole, adapterOptions, setAdapterOption, adapterFlags]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

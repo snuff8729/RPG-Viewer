@@ -49,7 +49,7 @@ export async function loadAddonState(
 export async function saveAddonFile(
   folder: GameFolder | null | undefined, dataRoot: string, gameKey: string, file: AddonFile, storage: KeyStorage | null = storageOf(),
 ): Promise<boolean> {
-  const body = addonsJson(file.state, file.pictureRoles, file.noticeHooks, file.spriteRoles, file.adapters, file.storyProgress);
+  const body = addonsJson(file.state, file.pictureRoles, file.noticeHooks, file.spriteRoles, file.adapters, file.storyProgress, file.adapterOptions);
   try { storage?.setItem(addonsStorageKey(gameKey), body); } catch { /* 저장 못 해도 동작 */ }
   if (!folder || !isWritableFolder(folder)) return false;
   try { return await folder.writeText(addonsFile(dataRoot), body); } catch { return false; }

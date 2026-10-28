@@ -24,6 +24,11 @@ export interface MapEvent {
   id: number; name: string; note?: string; x: number; y: number; pages: EventPage[];
   /** TemplateEvent로 페이지를 템플릿 것으로 바꾼 이벤트의 원래 페이지(`TE固有イベント呼び出し`가 실행한다). */
   originalPages?: EventPage[];
+  /**
+   * 맵 데이터에 없고 게임이 실행 중에 만든 이벤트(live.json spawn, 뷰어가 원본을 복사해 만든 것).
+   * from: 원본 이벤트 번호(template면 TemplateEvent 템플릿 맵의 것), null = 원본을 모름(페이지 없음)
+   */
+  spawned?: { from: number | null; template: boolean };
 }
 export interface MapEncounter { troopId: number; weight: number; regionSet: number[] }
 export interface MapData {

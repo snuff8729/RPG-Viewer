@@ -31,6 +31,8 @@
  * 초당 30개까지만 남기고, 게임이 보여 주는 내용은 바꾸지 않습니다.
  * 게임 전용 확장(RPGViewerBridge_<id>.js, 이 플러그인 바로 뒤)은
  * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
+ * 화면 그림은 맵과 전투 화면에서만 기록합니다(메뉴 화면은 RPG Viewer에서 따로 켠 경우만).
+ * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -43,7 +45,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.15.0",
+    VERSION: "1.16.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -133,6 +135,7 @@
   var extraUpdate = false;
   // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
   var capturePictures = false;
+  var captureMenuScenes = false; // 1.16.0: control.json captureMenuScenes — extensions may capture menu scenes
   var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
   var lastPicsSet = null;     // set signature of that snapshot (1.10.1 screen records: visible images, coarse places)
   var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
@@ -525,6 +528,44 @@
     return out;
   }
 
+  // 1.16.0 events made while the game runs (EventReSpawn's Game_PrefabEvent, other spawn plugins): where their data
+  // comes from, so the viewer can draw them. null = an event of the map data. Otherwise { from, tpl } (tpl: a
+  // TemplateEvent template map event) or { name } when the source is not found. EventReSpawn keeps
+  // _originalEventId / _isTemplate; anything else is found by identity of event() in $dataMap.events or
+  // $dataTemplateEvents. An event whose id is in the map data stays ordinary (TemplateEvent swaps event() of those)
+  // unless event() is another event of the map data. Cached per event while event() stays the same object.
+  var SPAWN_NAME_MAX = 60;
+  function indexByIdentity(list, obj) {
+    if (!list || typeof list.length !== "number") return -1;
+    for (var i = 1; i < list.length; i++) if (list[i] === obj) return i;
+    return -1;
+  }
+  function spawnOf(ev, id) {
+    var dm = G.$dataMap, list = dm && dm.events;
+    if (!list || typeof list.length !== "number" || typeof id !== "number") return null;
+    var obj = typeof ev.event === "function" ? ev.event() : null;
+    var c = ev._rpgvSpawn;
+    if (c && c.obj === obj && c.list === list) return c.res;
+    var res = spawnFind(ev, id, list, obj);
+    try { ev._rpgvSpawn = { obj: obj, list: list, res: res }; } catch (e) { /* frozen object: no cache */ }
+    return res;
+  }
+  function spawnFind(ev, id, list, obj) {
+    var own = list[id] || null;
+    if (own && obj === own) return null;
+    var orig = ev._originalEventId;
+    if (typeof orig === "number" && isFinite(orig) && orig > 0 && (!own || orig !== id)) {
+      return { from: orig, tpl: ev._isTemplate === true };
+    }
+    var k = obj ? indexByIdentity(list, obj) : -1;
+    if (own) return k > 0 && k !== id ? { from: k, tpl: false } : null;
+    if (k > 0) return { from: k, tpl: false };
+    k = obj ? indexByIdentity(G.$dataTemplateEvents, obj) : -1;
+    if (k > 0) return { from: k, tpl: true };
+    var name = obj && typeof obj.name === "string" ? obj.name : "";
+    return { name: name.length > SPAWN_NAME_MAX ? name.slice(0, SPAWN_NAME_MAX) : name };
+  }
+
   function buildSnapshot() {
     var map = G.$gameMap, player = G.$gamePlayer, sw = G.$gameSwitches, vars = G.$gameVariables;
     var ss = G.$gameSelfSwitches, party = G.$gameParty, msg = G.$gameMessage;
@@ -542,6 +583,9 @@
       // live position (moving NPCs): the viewer draws markers / routes there
       if (typeof ev.x === "number" && typeof ev.y === "number") { entry.x = ev.x; entry.y = ev.y; }
       if (typeof ev._direction === "number") entry.d = ev._direction;
+      var sp = null;
+      try { sp = spawnOf(ev, entry.eventId); } catch (es) { reportError(es); }
+      if (sp) entry.spawn = sp;
       events.push(entry);
     }
     var variables = {};
@@ -581,6 +625,7 @@
         lastCommand: lastCommand,
         controlT: controlT,
         capturePictures: capturePictures,
+        captureMenuScenes: captureMenuScenes,
         captureNotices: captureNotices,
         notices: noticeHooked.slice(),
         extensions: bridge.extensions(),
@@ -923,6 +968,7 @@
     var cap = c.capturePictures === true;
     if (cap !== capturePictures) { lastPicsKey = null; lastPicsSet = null; screenSettle = null; } // turned on again: the next snapshot is written in full
     capturePictures = cap;
+    captureMenuScenes = c.captureMenuScenes === true;
     captureNotices = c.captureNotices === true;
     liveActors = c.liveActors === true;
     noticeExtra = noticePaths(c.noticeHooks);
@@ -1349,7 +1395,8 @@
   // Game adapters (adapters/<id>/bridge.js in the RPG Viewer repo, installed as js/plugins/RPGViewerBridge_<id>.js right
   // after this plugin) register with RPGViewerBridge.registerExtension(ext). Every field but id is optional:
   //   ext.onInstall(api)                   once, right away (api below)
-  //   ext.captureScene(scene) -> true      read this scene's images too although it has no spriteset (menu scenes)
+  //   ext.captureScene(scene) -> true      read this scene's images too although it has no spriteset (menu scenes);
+  //                                        1.16.0: asked only while control.json captureMenuScenes is on
   //   ext.snapshotEntry(sprite, entry, scene) -> entry | null | undefined
   //                                        for each captured image: a changed entry, null = drop it, undefined = keep it
   //                                        (replace animated values with settled ones)
@@ -1389,6 +1436,7 @@
     return ids;
   };
   function extCaptures(sc) {
+    if (!captureMenuScenes) return false;
     for (var i = 0; i < extensions.length; i++) {
       var x = extensions[i];
       if (typeof x.captureScene !== "function") continue;
@@ -1754,7 +1802,11 @@
     var settling = screenSettle !== null && t - screenWatch.lastT >= SCREEN_SETTLE_GAP_MS;
     var polling = t - screenWatch.pollT >= SCREEN_POLL_MS;
     if (!dirty && !watching && !settling && !polling) return;
-    var sc = G.SceneManager && G.SceneManager._scene;
+    var sm = G.SceneManager, sc = sm && sm._scene;
+    // 1.16.0: not while a scene change is pending or the new scene has not started (leaving the map for the menu,
+    // the map coming back): the half-built screen is no "gone" picture. lastPicsSet survives the scene change, so
+    // the map that comes back with the same pictures writes nothing.
+    if (sc && (sm._nextScene || sm._exiting || sm._sceneStarted === false)) { screenDirty = true; return; }
     var snap = sc && (sc._spriteset || extCaptures(sc)) ? screenNow() : null;
     screenDirty = false;
     if (!snap) { screenSettle = null; return; }

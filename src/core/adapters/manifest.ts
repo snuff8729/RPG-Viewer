@@ -26,6 +26,14 @@ export interface AdapterDefaults {
   spriteRoles?: SpriteRoleRule[];
 }
 
+/** 어댑터 설정이 켤 수 있는 control.json 값. captureMenuScenes: 메뉴 화면 그림도 기록(기록 플러그인 1.16.0+) */
+export const ADAPTER_CONTROL_FLAGS = ["captureMenuScenes"] as const;
+export type AdapterControlFlag = typeof ADAPTER_CONTROL_FLAGS[number];
+const isControlFlag = (v: unknown): v is AdapterControlFlag => (ADAPTER_CONTROL_FLAGS as readonly unknown[]).includes(v);
+
+/** 어댑터 카드에서 따로 켜는 설정(기본 꺼짐). control: 켜면 control.json에 true로 싣는 값 */
+export interface AdapterOption { id: string; label: string; description?: string; control?: AdapterControlFlag }
+
 export interface AdapterManifest {
   id: string;
   label: string;
@@ -34,6 +42,41 @@ export interface AdapterManifest {
   /** 게임 쪽 확장 파일 이름(어댑터 폴더 안) */
   bridgeScript?: string;
   defaults?: AdapterDefaults;
+  /** 어댑터 카드의 설정(켜고 끄기, 기본 꺼짐) */
+  options?: AdapterOption[];
+}
+
+const OPTION_ID_RE = /^[A-Za-z][A-Za-z0-9]{0,39}$/;
+
+/** options: [{ id, label, description?, control? }] — id(영문·숫자)·이름이 없거나 같은 id는 버린다(최대 10개) */
+function optionsOf(v: unknown): AdapterOption[] {
+  const out: AdapterOption[] = [];
+  for (const o of Array.isArray(v) ? v : []) {
+    if (out.length >= 10) break;
+    if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+    const r = o as Record<string, unknown>;
+    if (typeof r.id !== "string" || !OPTION_ID_RE.test(r.id) || out.some(x => x.id === r.id)) continue;
+    if (typeof r.label !== "string" || r.label.trim() === "") continue;
+    const opt: AdapterOption = { id: r.id, label: r.label.trim() };
+    if (typeof r.description === "string" && r.description.trim() !== "") opt.description = r.description.trim();
+    if (isControlFlag(r.control)) opt.control = r.control;
+    out.push(opt);
+  }
+  return out;
+}
+
+/** 켜진 어댑터들(list)의 켜진 설정이 control.json에 싣는 값. on(어댑터 id, 설정 id) = 그 설정이 켜짐 */
+export function adapterControlFlags(
+  list: readonly AdapterManifest[], on: (adapterId: string, optionId: string) => boolean,
+): Partial<Record<AdapterControlFlag, true>> {
+  const out: Partial<Record<AdapterControlFlag, true>> = {};
+  try {
+    const all: readonly AdapterManifest[] = Array.isArray(list) ? list : [];
+    for (const m of all) {
+      for (const o of m?.options ?? []) if (o.control && on(m.id, o.id)) out[o.control] = true;
+    }
+  } catch { /* 모은 데까지 */ }
+  return out;
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -108,6 +151,8 @@ export function parseManifest(v: unknown): AdapterManifest | null {
       if (sr.length > 0) defaults.spriteRoles = sr;
       if (Object.keys(defaults).length > 0) out.defaults = defaults;
     }
+    const options = optionsOf(o.options);
+    if (options.length > 0) out.options = options;
     return out;
   } catch {
     return null;

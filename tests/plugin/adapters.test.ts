@@ -14,11 +14,11 @@ afterEach(() => {
   delete g.RPGViewerBridgeExtensions;
 });
 
-function newGame(capture = true): Harness {
+function newGame(capture = true, menu = true): Harness {
   const harness = createHarness({ engine: "MZ" });
   harness.g.DataManager.setupNewGame();
   harness.fs.dirs.add("/game/www/rpg-viewer");
-  harness.fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: harness.clock.t, capturePictures: capture }));
+  harness.fs.writeFileSync(CONTROL_PATH, JSON.stringify({ v: 1, t: harness.clock.t, capturePictures: capture, captureMenuScenes: menu }));
   harness.clock.t += 1000;
   harness.bridge._tick();
   return harness;
@@ -100,7 +100,7 @@ describe("extension API (bridge 1.13.0)", () => {
     expect(h.bridge.registerExtension(ext)).toBe(true);
     expect(h.bridge.registerExtension(ext)).toBe(false);
     expect(h.bridge.registerExtension({})).toBe(false);
-    expect(calls).toEqual(["install:1.15.0"]);
+    expect(calls).toEqual(["install:1.16.0"]);
     expect(h.bridge.extensions()).toEqual(["test-ext"]);
     h.bridge._snapshotNow();
     expect(h.readLive().assist.extensions).toEqual(["test-ext"]);
@@ -213,6 +213,56 @@ describe("character-picture-manager adapter", () => {
     reiri.children[0]._unfocus = true;
     reiri._shake = 6; reiri.x = 6;
     for (let i = 0; i < 20; i++) { h.clock.t += 100; scene.update(); reiri.x = 6; h.frame(); }
+    expect(screens(h)).toHaveLength(1);
+  });
+
+  it("menu scenes are not recorded unless the viewer turned on captureMenuScenes (1.16.0)", () => {
+    h = newGame(true, false);
+    const SB = defineSceneBase(h);
+    loadCpmExtension();
+    const reiri = makeStand(h, 1, "레이리", { X: 0, Y: 0 }, [{ name: "ベース", file: "Base" }]);
+    const scene = mountMenu(h, SB, [reiri]);
+    h.completeLoads();
+    scene.update(); h.frame();
+    settle(h, 300, scene);
+    expect(screens(h)).toEqual([]);
+    expect(h.readLive().assist.captureMenuScenes).toBe(false);
+  });
+
+  it("opening and closing the menu writes no record: no menu shot, no gone shot, the same map again is no change", () => {
+    h = newGame(true, false);
+    const SB = defineSceneBase(h);
+    loadCpmExtension();
+    const sm = h.g.SceneManager;
+    const ss = h.mountSpriteset(1);
+    const cut = new h.g.Sprite(); cut.bitmap = h.g.ImageManager.loadPicture("stand_A");
+    ss.spriteset.addChild(cut);
+    h.completeLoads();
+    h.frame();
+    settle(h);
+    expect(screens(h)).toHaveLength(1);
+    // menu requested: the map is fading out, its picture already gone
+    sm._nextScene = {};
+    cut.visible = false;
+    h.g.RPGViewerBridge._tick();
+    settle(h, 1500);
+    // the menu (stands shown) is open
+    sm._nextScene = null;
+    const reiri = makeStand(h, 1, "레이리", { X: 0, Y: 0 }, [{ name: "ベース", file: "Base" }]);
+    const menu = mountMenu(h, SB, [reiri]);
+    h.completeLoads();
+    menu.update(); h.frame();
+    settle(h, 1500, menu);
+    // back on a new map scene, still loading, then started with the same picture
+    const back = h.mountSpriteset(1);
+    sm._sceneStarted = false;
+    settle(h, 300);
+    sm._sceneStarted = true;
+    const again = new h.g.Sprite(); again.bitmap = h.g.ImageManager.loadPicture("stand_A");
+    back.spriteset.addChild(again);
+    h.completeLoads();
+    h.frame();
+    settle(h, 1500);
     expect(screens(h)).toHaveLength(1);
   });
 
