@@ -29,6 +29,7 @@ export function HereMapArea({ here, focus, onPick, compact = false }: {
           focus={focus}
           onPick={onPick}
           compact={compact}
+          story={here.story}
           avoidEnemies={here.avoidEnemies}
           onAvoidEnemiesChange={here.setAvoidEnemies}
         />

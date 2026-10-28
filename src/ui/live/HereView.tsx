@@ -8,6 +8,7 @@ import { ChecklistCard } from "./ChecklistCard";
 import { EncounterCard } from "./EncounterCard";
 import { HereMapArea } from "./HereMapArea";
 import { HereNotConnected } from "./HereNotConnected";
+import { NextStoryCard } from "./NextStoryCard";
 import { eventStyle, sectionStyle, type SectionStyle } from "./sectionStyle";
 import { useHereMap } from "./useHereMap";
 
@@ -97,6 +98,7 @@ export function HereView() {
         <span className="text-sm text-muted-foreground">내 위치 ({live.x}, {live.y})</span>
         <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>할 것 {checklist.remaining}개 남음</Badge>
       </div>
+      <NextStoryCard />
       <HereMapArea here={here} focus={focus} onPick={onPick} />
       <EncounterCard mapId={checklist.mapId} />
       {checklist.events.length === 0 && <p className="text-sm text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}

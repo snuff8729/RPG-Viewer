@@ -8,6 +8,8 @@ import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blockersFor, currentEvents, mapNumbers, pagesKey, targetOf, type LiveEventEntry } from "./mapEvents";
 import { useMapChecklist } from "./useMapChecklist";
 import { useMapTiles } from "./useMapTiles";
+import { useNextStory } from "./useNextStory";
+import { storyMark } from "@/core/story/format";
 
 /**
  * 지금 있는 맵 그림과 체크리스트(이 맵·플레이 화면 공용): 맵 타일, 지금 이벤트 그림, 지금 위치의 체크리스트 이벤트,
@@ -63,9 +65,28 @@ export function useHereMap() {
     ? (route ? `${route.text}${found?.throughAvoid ? " · 적을 지나가야 해요" : ""}` : null)
     : undefined;
 
+  // 다음 스토리: 이 맵에 갈 곳이 있으면 별, 아니면 그쪽 출구(이쪽으로)와 그곳까지 가는 길
+  const { story: nextStory } = useNextStory();
+  const mark = mapId != null ? storyMark(nextStory?.steps[0], mapId) : null;
+  const markKey = mark ? `${mark.kind}:${mark.eventId}:${mark.x},${mark.y}` : "";
+  const storyRoute = useMemo(() => {
+    if (!tiles || !mark) return null;
+    const cur = current.find((e) => e.id === mark.eventId);
+    const pg = cur?.page ?? mapData?.events.find((e) => e?.id === mark.eventId)?.pages[0];
+    const target = {
+      x: cur?.x ?? mark.x, y: cur?.y ?? mark.y,
+      priorityType: pg?.priorityType ?? 1, trigger: pg?.trigger ?? 0, through: pg?.through ?? false,
+    };
+    return routeTo(tiles.map, tiles.tileset, { x: px, y: py }, standTiles(target, tiles.map, tiles.tileset), blockersFor(current, mark.eventId));
+    // mark는 markKey로 비교한다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiles, markKey, current, mapData, px, py]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const story = useMemo(() => (mark ? { ...mark, route: storyRoute } : null), [markKey, storyRoute]);
+
   return {
     live, checklist, tilesState, tiles, current, listed, numbers, selected, select, route, routeText,
-    avoidEnemies, setAvoidEnemies,
+    avoidEnemies, setAvoidEnemies, story,
   };
 }
 

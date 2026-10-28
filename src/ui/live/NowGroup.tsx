@@ -1,5 +1,7 @@
 import { useMemo } from "react";
-import { List } from "lucide-react";
+import { List, Star } from "lucide-react";
+import { stepAction } from "@/core/story/format";
+import { useNextStory } from "./useNextStory";
 import { Badge } from "@/components/ui/badge";
 import {
   SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -20,9 +22,12 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
   const { live, connection } = useLive();
   const checklist = useMapChecklist();
   const items = useMemo(() => nowItems(checklist), [checklist]);
+  const { story } = useNextStory();
 
   if (connection !== "connected" || !live || !data) return null;
   const mapName = data.mapInfos[live.mapId]?.name || `#${live.mapId}`;
+  const best = story?.steps[0];
+  const nextLine = best ? stepAction(best) : "찾지 못했어요";
 
   return (
     <SidebarGroup>
@@ -35,6 +40,10 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
       </div>
       <SidebarGroupContent>
         <p className="truncate px-2 pb-1 text-sm">{mapName} ({live.x}, {live.y})</p>
+        <p className="truncate px-2 pb-1 text-xs" title={nextLine}>
+          <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
+          <span className="text-muted-foreground">다음 스토리: </span>{nextLine}
+        </p>
         {items.length === 0 && <p className="px-2 pb-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>}
         <SidebarMenu>
           {items.map((e) => {

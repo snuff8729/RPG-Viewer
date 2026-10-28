@@ -7,6 +7,7 @@ import { Item, ItemContent, ItemGroup, ItemMedia } from "@/components/ui/item";
 import { cn } from "@/lib/utils";
 import { HereMapArea } from "./HereMapArea";
 import { HereNotConnected } from "./HereNotConnected";
+import { NextStoryCard } from "./NextStoryCard";
 import { eventStyle } from "./sectionStyle";
 import { actionableItems } from "./sidebarItems";
 import { useHereMap } from "./useHereMap";
@@ -37,6 +38,9 @@ export function PlayMap() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2">
+      <div className="max-h-[40%] shrink-0 overflow-y-auto">
+        <NextStoryCard compact />
+      </div>
       <div className="min-h-32 flex-1">
         <HereMapArea here={here} focus={focus} onPick={onPick} compact />
       </div>
