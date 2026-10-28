@@ -212,7 +212,11 @@ function battleSignature(start: RecordOf<"battle">, end: RecordOf<"battle"> | nu
   const parts: string[] = [];
   for (const r of inner) {
     if (r.type === "choices" || r.type === "choice") return null;
-    if (r.type === "battlelog" || r.type === "message" || r.type === "scroll") parts.push(`${r.type}:${typeof r.text === "string" ? r.text : ""}`);
+    if (r.type === "battlelog" || r.type === "message" || r.type === "scroll") {
+      // 1.8.1 사용 줄: 같은 글이어도 쓴 쪽·기술이 다르면 다른 전투
+      const who = r.type === "battlelog" && r.kind === "action" ? `${String(r.by ?? "")}>${String(r.item ?? "")}>` : "";
+      parts.push(`${r.type}:${who}${typeof r.text === "string" ? r.text : ""}`);
+    }
   }
   return `${num(start.troopId)}|${String(end.result ?? "")}|${JSON.stringify(parts)}`;
 }

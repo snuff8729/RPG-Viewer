@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { troopName } from "@/core/live/reader";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
+import { BattleActionLine } from "./BattleActionLine";
+import { battleActionOf, battleLogText } from "@/core/live/battleLine";
 import { explainRecord, reasonLabel } from "@/core/live/mismatch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -98,7 +100,10 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><PluginRecordLine r={r} data={ctx.data} /></Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;
-    case "battlelog": return <div className="px-2 text-xs leading-snug text-muted-foreground">{formatText(typeof r.text === "string" ? r.text : "", ctx.data)}</div>;
+    case "battlelog": {
+      const action = battleActionOf(r, ctx.data);
+      return <div className="px-2 text-xs leading-snug text-muted-foreground">{action ? <BattleActionLine action={action} /> : battleLogText(r.text, ctx.data)}</div>;
+    }
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
     case "load": return <Line ctx={ctx}>💾 불러오기 (슬롯 {r.slot})</Line>;
     case "branchStart":

@@ -14,6 +14,8 @@ import { sameShot, type ScreenShot } from "@/core/addons/screenPictures";
 import { ScreenPictures } from "../addons/ScreenPictures";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
+import { BattleActionLine } from "./BattleActionLine";
+import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
@@ -87,7 +89,7 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
             {g.map(l => (
               <div key={l.key}>
                 {l.screen && <Screen shot={l.screen} />}
-                <p className="whitespace-pre-wrap break-words">{l.text}</p>
+                {l.action ? <BattleActionLine action={l.action} /> : <p className="whitespace-pre-wrap break-words">{l.text}</p>}
               </div>
             ))}
           </div>
@@ -159,9 +161,14 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "battle":
       return <BattleBlock item={item} />;
     case "battlelog":
-      return <>{item.screen && <Screen shot={item.screen} />}<p className="text-sm text-muted-foreground">{item.text}</p></>;
+      return <>{item.screen && <Screen shot={item.screen} />}{item.action ? <BattleActionLine action={item.action} /> : <p className="text-sm text-muted-foreground">{item.text}</p>}</>;
   }
 }, (a, b) => sameItem(a.item, b.item));
+
+function sameAction(a: BattleAction | undefined, b: BattleAction | undefined): boolean {
+  if (!a || !b) return a === b;
+  return battleActionLabel(a) === battleActionLabel(b) && a.enemy === b.enemy && a.targets.join("|") === b.targets.join("|");
+}
 
 function sameLines(a: string[], b: string[]): boolean {
   return a.length === b.length && a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
@@ -198,7 +205,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     }
     case "battlelog": {
       const p = b as typeof a;
-      return a.text === p.text && sameShot(a.screen, p.screen);
+      return a.text === p.text && sameShot(a.screen, p.screen) && sameAction(a.action, p.action);
     }
   }
 }
