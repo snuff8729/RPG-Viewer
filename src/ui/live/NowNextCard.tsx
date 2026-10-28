@@ -23,11 +23,12 @@ export function NowNextCard() {
   const [open, setOpen] = useState(false);
   const choice = live?.choice;
   const choiceKey = choice ? `${choice.src ? locationKey(choice.src) : ""}#${choice.cmd}` : null;
-  // 새 선택지가 떠오르면 자동으로 펼친다
+  // 새(직전과 다른) 선택지가 떠오르면 자동으로 펼친다. 마지막으로 본 선택지를 기억하므로
+  // 재연결 등으로 잠깐 null이 됐다 같은 선택지로 돌아와도 사용자가 접은 카드를 다시 열지 않는다.
   const [seenChoice, setSeenChoice] = useState<string | null>(null);
-  if (choiceKey !== seenChoice) {
+  if (choiceKey !== null && choiceKey !== seenChoice) {
     setSeenChoice(choiceKey);
-    if (choiceKey !== null) setOpen(true);
+    setOpen(true);
   }
   const running = live?.running ?? null;
   const runningCmd = live?.runningCmd;
