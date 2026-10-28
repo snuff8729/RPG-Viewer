@@ -3,7 +3,8 @@ import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
 import { locationKey } from "../index/locations";
 import {
-  coarseShotKey, DEFAULT_SCREEN, nextShot, visibleScene, type PictureContext, type ScreenScene, type ScreenShot,
+  coarseShotKey, ctxAt, DEFAULT_SCREEN, knownScreenAt, nextShot, screenAt, visibleScene, withScreen,
+  type PictureContext, type ScreenScene, type ScreenShot,
 } from "../addons/screenPictures";
 import { applyPictureOp, composedScene, pictureOp, stackPictures, type PictureVars, type StackPicture } from "./pictureStack";
 import { cutinRuns, withOldErases, type CutinStep } from "./cutins";
@@ -244,11 +245,12 @@ export function readerItems(
     return shot;
   };
   /** 다시 쌓은 화면 그림에서 새로 보일 그림(shotAt과 같은 비교) */
-  const composedShot = (): ScreenShot | null => {
+  const composedShot = (seq: number): ScreenShot | null => {
     pending = null;
     if (composedFor === stack) return null;
     composedFor = stack;
-    const scene = composedScene(stackPictures(stack), pctx);
+    // 1.18.2: 그때 게임의 실제 화면 크기로 나눈다
+    const scene = withScreen(composedScene(stackPictures(stack), ctxAt(pctx, seq)), knownScreenAt(pctx, seq));
     const { shot, key } = nextShot(shown, scene);
     shown = key;
     shownCoarse = coarseShotKey(nextShot(null, scene).shot);
@@ -256,13 +258,13 @@ export function readerItems(
     return shot;
   };
   /** 대사의 그림: 실제 화면 그림(scenes)이 있으면 그것, 없으면 다시 쌓은 것 */
-  const messageShot = (seq: number): ScreenShot | null => (scenes?.has(seq) ? shotAt(seq, true) : composedShot());
+  const messageShot = (seq: number): ScreenShot | null => (scenes?.has(seq) ? shotAt(seq, true) : composedShot(seq));
   /** 대사 없이 바뀐 그림 명령 묶음을 화면 항목으로(화면 그림 따라 그리기 기록이 없을 때만) */
   const flushPending = (out: ReaderItem[]) => {
     const p = pending;
     if (!p) return;
     if (scenes) { pending = null; return; }
-    const shot = composedShot();
+    const shot = composedShot(p.last);
     if (shot) {
       const item: ReaderItem = { kind: "screen", key: `r${p.first}`, seq: p.last, screen: shot };
       out.push(item);
@@ -271,7 +273,7 @@ export function readerItems(
   };
   /** 그림 명령 기록 하나를 쌓는다. 글자 그림(이름 없는 표시)은 항목으로 돌려준다. */
   const pictureRecord = (rec: RecordOf<"picture">, out: ReaderItem[]): ReaderItem | null => {
-    const op = pictureOp(rec, data, pctx.screen, vars);
+    const op = pictureOp(rec, data, screenAt(pctx, rec.seq), vars);
     const t = typeof rec.t === "number" ? rec.t : 0;
     if (op && pending && t - pending.t > PICTURE_RUN_GAP_MS) flushPending(out);
     const next = applyPictureOp(stack, op);
