@@ -33,6 +33,37 @@ export function imageAlphaStats(img: ImageBitmap): AlphaStats | null {
   return st;
 }
 
+const flatByImage = new WeakMap<ImageBitmap, boolean>();
+
+/**
+ * 한 가지 색으로만 칠한 그림인가(화면을 검게·하얗게 덮는 전환용 그림): 8×8로 줄여 읽은 색·투명도 차이가 거의 없다(이미지별 캐시).
+ * 읽을 수 없으면 false.
+ */
+export function isFlatImage(img: ImageBitmap): boolean {
+  const hit = flatByImage.get(img);
+  if (hit !== undefined) return hit;
+  let flat = false;
+  try {
+    const c = document.createElement("canvas");
+    c.width = 8; c.height = 8;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, 8, 8);
+      const px = ctx.getImageData(0, 0, 8, 8).data;
+      const lo = [255, 255, 255, 255], hi = [0, 0, 0, 0];
+      for (let i = 0; i < px.length; i += 4) {
+        for (let k = 0; k < 4; k++) {
+          lo[k] = Math.min(lo[k], px[i + k]);
+          hi[k] = Math.max(hi[k], px[i + k]);
+        }
+      }
+      flat = hi.every((v, k) => v - lo[k] <= 12);
+    }
+  } catch { /* 모름 */ }
+  flatByImage.set(img, flat);
+  return flat;
+}
+
 /** 그림 저장소(AssetStore): 암호화된 그림(.png_·.rpgmvp)도 내용으로 풀어 이미지 Blob으로 돌려준다 */
 export interface PictureSource { load(kind: "pictures", name: string): Promise<Blob | null> }
 

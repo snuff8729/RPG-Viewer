@@ -119,9 +119,10 @@ describe("readerItems with rebuilt pictures (add-on off)", () => {
     const out = run([pic(1, 0, 2, "Reiri_Base"), pic(2, 1, 3, "Reiri_Arm"), choice]);
     expect(out.map(i => i.kind)).toEqual(["screen", "choice"]);
     expect(out[0]).toMatchObject({ key: "r1", seq: 2 });
-    // a CG shown, held for a while, then erased before the next line
+    // a CG shown, held for a while, then erased before the next line: a cut-in (replaces the rebuilt screen item)
     const cg = run([pic(1, 0, 2, "Reiri_Base", {}, 0), pic(2, 0, 2, "", { op: "erase" }, PICTURE_RUN_GAP_MS + 500), msg(3, PICTURE_RUN_GAP_MS + 600)]);
-    expect(cg.map(i => i.kind)).toEqual(["screen", "message"]);
+    expect(cg.map(i => i.kind)).toEqual(["cutin", "message"]);
+    expect(cg[0].kind === "cutin" && cg[0].frames.map(f => f.pictures.map(p => p.name).join("+"))).toEqual(["Reiri_Base"]);
     expect(cg[1].kind === "message" && cg[1].screen).toBeFalsy();
   });
 });
