@@ -17,7 +17,7 @@ function Branch({ label, body, bp, renderBody }: { label: string; body: ScriptNo
   const empty = body.length === 0;
   const [open, setOpen] = useState(!empty);
   const forced = useForcedOpen(bp);
-  useEffect(() => { if (forced) setOpen(true); }, [forced]);
+  useEffect(() => { if (forced > 0) setOpen(true); }, [forced]);
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="px-3 py-2">
       <CollapsibleTrigger className="group flex items-center gap-1 text-sm font-medium">

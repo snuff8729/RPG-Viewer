@@ -3,6 +3,7 @@ import type { Ref, ScriptNode } from "@/core/types";
 import { useGame } from "@/app/GameProvider";
 import { Button } from "@/components/ui/button";
 import { openPage } from "@/ui/navigation";
+import { firstClickableRef } from "@/ui/RefBadge";
 import { BlockNode } from "./BlockNode";
 import { MessageNode, ScrollNode } from "./MessageNode";
 import { OtherNode } from "./OtherNode";
@@ -48,12 +49,12 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
     case "picture": return <PictureNode node={node} />;
     case "other": return <OtherNode node={node} />;
     case "stateChange": {
-      const clickable = node.refs.length > 0 && !!onRefClick;
+      const target = onRefClick ? firstClickableRef(node.refs) : undefined;
       return (
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
           <span>⚙ {node.description}</span>
-          {clickable && (
-            <Button variant="ghost" size="icon-xs" aria-label="참조 보기" onClick={() => onRefClick!(node.refs[0])}>
+          {target && (
+            <Button variant="ghost" size="icon-xs" aria-label="참조 보기" onClick={() => onRefClick!(target)}>
               <ExternalLink />
             </Button>
           )}

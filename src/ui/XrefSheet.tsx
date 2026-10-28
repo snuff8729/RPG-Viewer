@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useGame } from "@/app/GameProvider";
 import { locationKey } from "@/core/index/locations";
 import { armorName, itemName, switchName, variableName, weaponName } from "@/core/text/names";
@@ -35,8 +36,11 @@ function Section({ title, pages, onPick }: { title: string; pages: PageEntry[]; 
 
 export function XrefSheet({ refTarget, onClose }: { refTarget: Ref | null; onClose: () => void }) {
   const { data, index } = useGame();
-  const xref = refTarget && index ? index.xref(refTarget) : null;
-  const title = refTarget && data ? refTitle(data, refTarget) : "";
+  const last = useRef<Ref | null>(null);
+  if (refTarget) last.current = refTarget;
+  const shown = last.current;
+  const xref = shown && index ? index.xref(shown) : null;
+  const title = shown && data ? refTitle(data, shown) : "";
   const pick = (p: PageEntry) => { onClose(); openPage(p.location); };
   return (
     <Sheet open={!!refTarget} onOpenChange={(o) => { if (!o) onClose(); }}>
