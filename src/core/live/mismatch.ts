@@ -101,10 +101,11 @@ export function mismatchOf(r: LogRecord, data: GameData, choiceOpts?: unknown): 
     case "message": {
       if (at(cmd)?.code !== 101) return out("codeMismatch");
       if (String(r.face ?? "") !== String(p[0] ?? "") || Number(r.faceIndex ?? 0) !== Number(p[1] ?? 0)) return out("faceMismatch");
-      // 401 없는 101(빈 메시지·바로 102)은 기록 본문도 비어 있어야 같은 구조
+      // 401 없는 101(빈 메시지·바로 102)인데 기록 본문이 있으면 구조가 다름.
+      // 401이 있으면(빈 줄 포함) 첫 줄 비교: 같으면 일치, 다르면 본문 변경(번역이 줄을 비운 경우 포함).
       const has401 = at(cmd + 1)?.code === 401;
-      if (has401 !== (recorded !== "")) return out("codeMismatch");
-      return has401 && firstLine(recorded) !== firstLine(expected) ? out("textChanged") : null;
+      if (!has401 && recorded !== "") return out("codeMismatch");
+      return firstLine(recorded) !== firstLine(expected) ? out("textChanged") : null;
     }
     case "scroll":
       if (at(cmd)?.code !== 105) return out("codeMismatch");

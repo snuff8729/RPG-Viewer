@@ -56,6 +56,37 @@ describe("explainRecord", () => {
   });
 });
 
+describe("explainRecord: blank 401 lines", () => {
+  // Map002 EV1 page0 맨 앞에 101 + 401(본문) 삽입
+  const withMessage = (lines: string[] | null): GameData => {
+    const maps = new Map(data.maps);
+    const map = structuredClone(maps.get(2)!);
+    const cmds = [{ code: 101, indent: 0, parameters: ["", 0, 0, 2, ""] },
+      ...(lines ?? []).map(t => ({ code: 401, indent: 0, parameters: [t] }))];
+    map.events[1]!.pages[0].list.splice(0, 0, ...cmds);
+    maps.set(2, map);
+    return { ...data, maps };
+  };
+  const msg = (text: string): LogRecord => ({
+    v: 1, t: 0, run: 1, branch: 1, seq: 1, type: "message",
+    src: { source: "map", mapId: 2, eventId: 1, page: 0 }, cmd: 0, face: "", faceIndex: 0, speaker: "", text,
+  }) as unknown as LogRecord;
+
+  it("blank single 401 + blank record → match", () => {
+    expect(explainRecord(msg(""), withMessage([""]))).toBeNull();
+  });
+  it("non-blank data + blank record → textChanged", () => {
+    expect(explainRecord(msg(""), withMessage(["안녕"]))).toMatchObject({ reason: "textChanged", recorded: "", expected: "안녕" });
+  });
+  it("blank data line + non-blank record → textChanged", () => {
+    expect(explainRecord(msg("Hello"), withMessage([""]))).toMatchObject({ reason: "textChanged" });
+  });
+  it("no 401 + non-blank record → codeMismatch; no 401 + blank record → match", () => {
+    expect(explainRecord(msg("Hello"), withMessage(null))).toMatchObject({ reason: "codeMismatch" });
+    expect(explainRecord(msg(""), withMessage(null))).toBeNull();
+  });
+});
+
 describe("reasonLabel", () => {
   it("Korean labels", () => {
     expect(reasonLabel("noSource")).toBe("출처를 알 수 없음");
