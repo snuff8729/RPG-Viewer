@@ -5,6 +5,7 @@ import { mapEncounters, regionCells } from "@/core/live/enemies";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blocked } from "@/core/map/passage";
 import type { Route } from "@/core/map/route";
+import type { StoryMark } from "@/core/story/format";
 import { drawOpsForTile, shadowOps, tileAt, type DrawOp } from "@/core/map/tiles";
 import type { EventImage } from "@/core/types";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,20 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888";
 }
 
+/** 다음 스토리 표시: 갈 곳(별) 또는 그쪽 출구(이쪽으로)와 그곳까지 가는 길 */
+export type StoryOverlay = StoryMark & { route: Route | null };
+
+function star(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    if (i === 0) ctx.moveTo(cx + rr * Math.cos(a), cy + rr * Math.sin(a));
+    else ctx.lineTo(cx + rr * Math.cos(a), cy + rr * Math.sin(a));
+  }
+  ctx.closePath();
+}
+
 function arrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, dir: 2 | 4 | 6 | 8, len: number) {
   const [ux, uy] = dir === 2 ? [0, 1] : dir === 4 ? [-1, 0] : dir === 6 ? [1, 0] : [0, -1];
   const tipX = cx + ux * len, tipY = cy + uy * len;
@@ -205,6 +220,7 @@ interface OverlayInput {
   player: { x: number; y: number }; route: Route | null; selected: number | null;
   /** 고른 이벤트(표시가 안 그려지는 것이어도 길은 그린다) */
   selectedEv: ChecklistEvent | undefined;
+  story: StoryOverlay | null;
 }
 
 /** 위 캔버스: 벽 그늘, 번호 표시, 내 위치, 고른 이벤트까지의 길. zoom = 화면 px/칸. */
@@ -241,6 +257,21 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
   const c = (v: number) => (v + 0.5) * cell;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+
+  // 다음 스토리까지의 길(점선). 고른 이벤트 길이 있으면 그쪽만
+  const story = o.story;
+  if (story?.route && story.route.steps.length > 1 && !(o.selectedEv && o.route)) {
+    ctx.beginPath();
+    story.route.steps.forEach((s, i) => (i === 0 ? ctx.moveTo(c(s.x), c(s.y)) : ctx.lineTo(c(s.x), c(s.y))));
+    ctx.setLineDash([6 * px, 5 * px]);
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 6 * px;
+    ctx.stroke();
+    ctx.strokeStyle = cssVar("--section-story");
+    ctx.lineWidth = 3 * px;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // 고른 이벤트까지의 길
   const sel = o.selectedEv;
@@ -305,6 +336,34 @@ function renderOverlay(canvas: HTMLCanvasElement, zoom: number, o: OverlayInput)
     ctx.globalAlpha = 1;
   }
 
+  // 다음 스토리 표시: 이 맵의 갈 곳에 별, 아니면 그쪽 출구에 고리와 이쪽으로
+  if (story) {
+    const col = cssVar("--section-story");
+    const sx = c(story.x), sy = c(story.y);
+    if (story.kind === "star") {
+      star(ctx, sx, story.y * cell - Math.max(cell * 0.1, 4 * px), Math.max(cell * 0.45, 12 * px));
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2 * px;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(cell * 0.6, 14 * px), 0, Math.PI * 2);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 3 * px;
+      ctx.stroke();
+      const label = "이쪽으로";
+      ctx.font = `700 ${12 * px}px sans-serif`;
+      const w = ctx.measureText(label).width + 10 * px, h = 18 * px;
+      const ly = Math.max(0, sy - Math.max(cell * 0.6, 14 * px) - h - 2 * px);
+      ctx.fillStyle = col;
+      ctx.fillRect(sx - w / 2, ly, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, sx, ly + h / 2 + 0.5 * px);
+    }
+  }
+
   // 내 위치
   const pr = Math.max(cell * 0.42, 11 * px);
   ctx.beginPath();
@@ -332,7 +391,7 @@ function useThemeTick(): number {
 
 /** 실제 맵 그림(타일셋·이벤트 그림) 위에 번호·내 위치·길을 겹쳐 그린다. 표시를 누르면 onPick(eventId). */
 export function MapCanvas({
-  tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false, avoidEnemies, onAvoidEnemiesChange,
+  tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false, avoidEnemies, onAvoidEnemiesChange, story = null,
 }: {
   tiles: LoadedTiles;
   /** 지금 활성 페이지가 있는 이벤트(그림·길막음용, 지금 위치) */
@@ -354,6 +413,8 @@ export function MapCanvas({
   /** 적 피해서 길 찾기(없으면 스위치를 안 보인다) */
   avoidEnemies?: boolean;
   onAvoidEnemiesChange?: (v: boolean) => void;
+  /** 다음 스토리 표시(없으면 안 그린다) */
+  story?: StoryOverlay | null;
 }) {
   const { assets, data } = useGame();
   const switchId = useId();
@@ -573,8 +634,9 @@ export function MapCanvas({
       regions: showRegions ? regionPath : null,
       player: { x: px, y: py }, route, selected,
       selectedEv: selected != null ? listed.find((e) => e.eventId === selected) : undefined,
+      story,
     });
-  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick, showRegions, regionPath]);
+  }, [tiles, drawZoom, showWalls, walls, markers, listed, stableNumbers, mobile, charsReady, px, py, route, selected, themeTick, showRegions, regionPath, story]);
 
   const zoomBy = (f: number) => {
     const el = scrollRef.current;

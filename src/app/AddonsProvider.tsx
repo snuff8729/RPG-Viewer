@@ -3,8 +3,9 @@ import { useGame } from "./GameProvider";
 import { loadAddonFile, saveAddonFile } from "./addons";
 import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
-import type { AddonFile } from "@/core/addons/settings";
+import { cleanStoryProgress, type AddonFile } from "@/core/addons/settings";
 import { cleanNoticeHooks } from "@/core/addons/notices";
+import { keyText, parseKeyText, type StoryKey } from "@/core/story/progress";
 import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
 import { BUNDLED_ADAPTERS } from "./adapterBundle";
@@ -31,6 +32,10 @@ export interface AddonsValue {
   noticeHooks: string[];
   /** 직접 추가한 함수 경로를 바꾼다(쓸 수 없는 경로는 버린다). 클릭 핸들러 안에서 부를 것. */
   setNoticeHooks(paths: string[]): void;
+  /** 직접 고른 이야기 진행 기준(없으면 자동) */
+  storyProgress: StoryKey | null;
+  /** 이야기 진행 기준을 정한다(null = 자동). 선택 핸들러 안에서 부를 것. */
+  setStoryProgress(key: StoryKey | null): void;
   /** 켜진 애드온이 control.json에 싣는 값 */
   controlFlags: Record<string, unknown>;
   /** 설정이 게임 폴더(rpg-viewer/addons.json)에 저장되는가(아니면 이 브라우저에만) */
@@ -53,7 +58,8 @@ const NO_SPRITE_ROLES: SpriteRoles = {};
 const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
   state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {},
-  spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
+  spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {},
+  storyProgress: null, setStoryProgress: () => {}, controlFlags: {}, savedInFolder: false,
   adapters: [], enabledAdapters: [], isAdapterOn: () => false, setAdapterOn: () => {}, defaultRole: null,
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
@@ -96,6 +102,8 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     if (d.pictureRoles.length === 0 && d.spriteRoles.length === 0) return null;
     return (p: ScreenPicture) => defaultRoleOf(p, d);
   }, [enabledAdapters]);
+  const storyText = current?.file.storyProgress ?? null;
+  const storyProgress = useMemo(() => parseKeyText(storyText), [storyText]);
 
   /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
@@ -159,6 +167,15 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setStoryProgress = useCallback((key: StoryKey | null) => {
+    update((prev) => {
+      const next: AddonFile = { ...prev };
+      const text = key ? cleanStoryProgress(keyText(key)) : null;
+      if (text) next.storyProgress = text; else delete next.storyProgress;
+      return next;
+    });
+  }, [update]);
+
   const value = useMemo<AddonsValue>(() => ({
     state,
     isOn: (id) => state[id] === true,
@@ -169,6 +186,8 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     setSpriteRole,
     noticeHooks,
     setNoticeHooks,
+    storyProgress,
+    setStoryProgress,
     controlFlags: addonControlFlags(state, { noticeHooks }),
     savedInFolder: current?.inFolder ?? false,
     adapters,
@@ -176,8 +195,8 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     isAdapterOn: (id) => enabledAdapters.some((a) => a.manifest.id === id),
     setAdapterOn,
     defaultRole,
-  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, current?.inFolder,
-    adapters, enabledAdapters, setAdapterOn, defaultRole]);
+  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, storyProgress, setStoryProgress,
+    current?.inFolder, adapters, enabledAdapters, setAdapterOn, defaultRole]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

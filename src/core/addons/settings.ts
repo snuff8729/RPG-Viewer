@@ -1,6 +1,7 @@
 import { ADDONS, type AddonState } from "./registry";
 import { isPictureRole, type PictureRoles, type SpriteRoles } from "./screenPictures";
 import { cleanNoticeHooks } from "./notices";
+import { keyText, parseKeyText } from "../story/progress";
 
 /**
  * 게임별 애드온 설정 전체: 켜짐 상태와 화면 그림 구분(그림 번호 → 직접 고른 구분),
@@ -12,16 +13,20 @@ export interface AddonFile {
   spriteRoles?: SpriteRoles;
   /** 게임 전용 어댑터(adapters/<id>) 켜짐 상태: id → 켜짐. 없으면 모두 꺼짐. */
   adapters?: Record<string, boolean>;
+  /** 이야기 진행 기준(직접 고른 것, `v:12` 또는 `s:3,4,5`). 없으면 자동 */
+  storyProgress?: string;
 }
 
 /**
  * 게임 폴더의 rpg-viewer/addons.json 본문(계약 v1):
  * { v: 1, enabled: { [id]: boolean }, pictureRoles?: { [그림 번호]: 구분 }, noticeHooks?: string[] }.
- * pictureRoles·noticeHooks·spriteRoles({ [이름 열쇠]: 구분 }, 1.10.0)는 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
+ * pictureRoles·noticeHooks·spriteRoles({ [이름 열쇠]: 구분 }, 1.10.0)·storyProgress(이야기 진행 기준 `v:12`·`s:3,4`)는
+ * 있을 때만 쓴다(noticeHooks는 쓸 수 있는 경로만).
  */
 export function addonsJson(
   state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null, spriteRoles?: SpriteRoles | null,
   adapters?: Record<string, boolean> | null,
+  storyProgress?: string | null,
 ): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
@@ -34,7 +39,15 @@ export function addonsJson(
   if (Object.keys(sprites).length > 0) body.spriteRoles = sprites;
   const ad = cleanAdapters(adapters);
   if (Object.keys(ad).length > 0) body.adapters = ad;
+  const story = cleanStoryProgress(storyProgress);
+  if (story) body.storyProgress = story;
   return JSON.stringify(body, null, 2) + "\n";
+}
+
+/** 이야기 진행 기준 글(`v:12`·`s:3,4`)을 고쳐 쓴다. 못 읽으면 null */
+export function cleanStoryProgress(v: unknown): string | null {
+  const k = parseKeyText(v);
+  return k ? keyText(k) : null;
 }
 
 const ADAPTER_ID_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -96,6 +109,8 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
     if (Object.keys(sprites).length > 0) file.spriteRoles = sprites;
     const ad = cleanAdapters((raw as { adapters?: unknown }).adapters);
     if (Object.keys(ad).length > 0) file.adapters = ad;
+    const story = cleanStoryProgress((raw as { storyProgress?: unknown }).storyProgress);
+    if (story) file.storyProgress = story;
     return file;
   } catch {
     return null;
