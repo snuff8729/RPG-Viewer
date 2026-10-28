@@ -21,13 +21,16 @@ export interface LiveContextValue {
   doUninstall(): Promise<InstallResult>;
   /** waiting = 설치됐지만 기록·상태 없음 */
   connection: Connection;
-  /** live.t와 마지막 기록 t 중 최신 */
+  /** lastLive.t와 마지막 기록 t 중 최신 */
   lastSeenT: number | null;
   records: LogRecord[];
   badLines: number;
   model: HistoryModel;
   coverage: Coverage;
+  /** 연결됨(5초 이내)일 때만 현재 상태, 아니면 null → 판정은 모두 "?"가 된다. 하트비트(t만 바뀜)로는 참조가 바뀌지 않는다. */
   live: LiveSnapshot | null;
+  /** 연결 여부와 무관한 마지막 live.json(연결 Badge·라벨용). */
+  lastLive: LiveSnapshot | null;
   missing: MissingItem[];
   /** noisyVariables(records) — foldTimeline opts.noisy로 넘긴다. */
   noisy: Set<number>;
@@ -62,7 +65,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [install, setInstall] = useState<InstallStatus | null>(null);
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [badLines, setBadLines] = useState(0);
-  const [live, setLive] = useState<LiveSnapshot | null>(null);
+  const [lastLive, setLastLive] = useState<LiveSnapshot | null>(null);
   const [liveState, setLiveState] = useState<LiveSnapshot | null>(null);
   const [fresh, setFresh] = useState(false);
 
@@ -73,7 +76,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setInstall(null);
     setRecords([]);
     setBadLines(0);
-    setLive(null);
+    setLastLive(null);
     setLiveState(null);
     setFresh(false);
   }
@@ -135,7 +138,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             liveModified = lv.modified;
             const snap = lv.snapshot;
             lastLiveT = snap.t;
-            setLive(snap);
+            setLastLive(snap);
             const key = stateKey(snap);
             if (key !== lastKey) { lastKey = key; setLiveState(snap); }
           }
@@ -168,25 +171,27 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => (data ? computeCoverage(records, data) : { seen: new Set(), picks: new Map(), uncertainSeqs: new Set() }),
     [records, data],
   );
+  // 연결이 끊기면 null → 조건 판정 "?" (fresh가 바뀔 때만 다시 계산)
+  const live = fresh ? liveState : null;
   const missing = useMemo(
-    () => (data && index ? computeMissing(index, data, coverage, liveState) : []),
-    [index, data, coverage, liveState],
+    () => (data && index ? computeMissing(index, data, coverage, fresh ? liveState : null) : []),
+    [index, data, coverage, liveState, fresh],
   );
 
   const lastRecordT = records.length > 0 ? records[records.length - 1].t : null;
-  const lastSeenT = live && lastRecordT !== null ? Math.max(live.t, lastRecordT) : (live?.t ?? lastRecordT);
+  const lastSeenT = lastLive && lastRecordT !== null ? Math.max(lastLive.t, lastRecordT) : (lastLive?.t ?? lastRecordT);
 
   let connection: Connection;
   if (!supported || !install || install.state !== "installed") connection = "noPlugin";
-  else if (!live && records.length === 0) connection = "waiting";
+  else if (!lastLive && records.length === 0) connection = "waiting";
   else if (fresh) connection = "connected";
   else connection = "stale";
 
   const value = useMemo<LiveContextValue>(() => ({
     supported, install, refreshInstall, doInstall, doUninstall,
-    connection, lastSeenT, records, badLines, model, coverage, live, missing,
+    connection, lastSeenT, records, badLines, model, coverage, live, lastLive, missing,
     noisy, uncertainSeqs: coverage.uncertainSeqs, latestBranch: model.latestBranch, bundledVersion,
-  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, records, badLines, model, coverage, live, missing, noisy]);
+  }), [supported, install, refreshInstall, doInstall, doUninstall, connection, lastSeenT, records, badLines, model, coverage, live, lastLive, missing, noisy]);
 
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

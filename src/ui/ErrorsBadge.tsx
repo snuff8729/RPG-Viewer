@@ -2,10 +2,15 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useGame } from "@/app/GameProvider";
+import { useLive } from "@/app/LiveProvider";
 
 export function ErrorsBadge() {
   const { data } = useGame();
-  const errors = data?.errors ?? [];
+  const { badLines } = useLive();
+  const errors = [
+    ...(data?.errors ?? []),
+    ...(badLines > 0 ? [{ file: "rpg-viewer/log.jsonl", message: `깨진 줄 ${badLines}개` }] : []),
+  ];
   if (errors.length === 0) return null;
   return (
     <Dialog>

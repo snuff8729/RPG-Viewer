@@ -12,7 +12,7 @@ function agoText(lastSeenT: number | null, now: number): string {
 
 /** 상단 연결 상태 Badge. 클릭하면 설치 Dialog. */
 export function ConnectionBadge() {
-  const { connection, live, model, lastSeenT } = useLive();
+  const { connection, lastLive, model, lastSeenT, supported, install } = useLive();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -26,8 +26,13 @@ export function ConnectionBadge() {
 
   let text: string;
   let variant: "secondary" | "outline" = "outline";
-  if (connection === "connected") {
-    const branch = live?.branch ?? model.latestBranch;
+  let muted = false;
+  if (supported && install === null) {
+    // 설치 상태를 읽는 중: "플러그인 미설치"가 깜빡이지 않게
+    text = "확인 중…";
+    muted = true;
+  } else if (connection === "connected") {
+    const branch = lastLive?.branch ?? model.latestBranch;
     text = branch !== null && branch !== undefined ? `● 연결됨 · ${branchLabel(model, branch)}` : "● 연결됨";
     variant = "secondary";
   } else if (connection === "stale") {
@@ -41,7 +46,7 @@ export function ConnectionBadge() {
   return (
     <>
       <button type="button" className="rounded-full" onClick={() => setOpen(true)}>
-        <Badge variant={variant}>{text}</Badge>
+        <Badge variant={variant} className={muted ? "text-muted-foreground" : undefined}>{text}</Badge>
       </button>
       <InstallDialog open={open} onOpenChange={setOpen} />
     </>
