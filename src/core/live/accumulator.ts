@@ -84,8 +84,9 @@ export function createAccumulator(data: GameData): LiveAccumulator {
   }
 
   function feedNoisy(r: LogRecord) {
-    for (const { id, t } of variableChanges(r)) {
+    for (const { id, t, throttled } of variableChanges(r)) {
       if (noisySet.has(id)) continue;
+      if (throttled) { noisySet.add(id); times.delete(id); continue; }
       let list = times.get(id);
       if (!list) { list = []; times.set(id, list); }
       const pos = insertSorted(list, t);

@@ -1,7 +1,11 @@
 import type { GameData, Location, PageEntry } from "../types";
 
 export interface RecordBase { v: 1; seq: number; t: number; run: number; branch: number }
-export interface StateChange { kind: "switch" | "variable" | "selfSwitch"; id: number | string; value: number | boolean }
+export interface StateChange {
+  kind: "switch" | "variable" | "selfSwitch"; id: number | string; value: number | boolean;
+  /** 플러그인이 잦은 변수로 보고 기록을 줄이는 중에 남긴 변경(변수만). 있으면 그 변수는 잦은 변수다. */
+  throttled?: true;
+}
 export type LogRecord = RecordBase & (
   | { type: "branchStart"; reason: "newGame" | "load" | "unknownSave"; parentBranch: number | null; fromSeq: number | null }
   | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string }

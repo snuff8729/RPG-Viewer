@@ -61,6 +61,14 @@ function bigLog(copies: number, seed = 1): LogRecord[] {
         type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 7 + (j % 2), value: j }],
       });
     }
+    // 플러그인이 조절한(throttled) 드문 변수 변경: 횟수와 관계없이 잦은 변수
+    if (k % 4 === 1) {
+      seq++;
+      out.push({
+        v: 1, seq, t: 2_000_000 + k * 40_000, run: 1 + 2 * k, branch: 1 + 3 * k,
+        type: "state", src: null, cmd: null, changes: [{ kind: "variable", id: 20 + k, value: k, throttled: true }],
+      });
+    }
     if (k % 3 === 0) out.push(null as unknown as LogRecord, { v: 1, t: 0 } as unknown as LogRecord);
   }
   return out;
@@ -85,6 +93,18 @@ describe("createAccumulator", () => {
       ['촌장: "고맙네!"', "스위치 숲 개방 → ON", "🚪 숲 입구 이동"], ['(내레이션): "밤이 깊었다."'],
     ]);
     expect(acc.noisy().has(5)).toBe(true);
+  });
+
+  it("a throttled change makes a variable noisy incrementally, same as batch", () => {
+    const st = (seq: number, t: number, changes: unknown[]) =>
+      ({ v: 1, seq, t, run: 1, branch: 1, type: "state", src: null, cmd: null, changes }) as unknown as LogRecord;
+    const acc = createAccumulator(data);
+    acc.append([st(1, 0, [{ kind: "variable", id: 9, value: 1 }])]);
+    expect(acc.noisy().has(9)).toBe(false);
+    expectSameAsBatch(acc);
+    acc.append([st(2, 30_000, [{ kind: "variable", id: 9, value: 2, throttled: true }, { kind: "switch", id: 9, value: true, throttled: true }])]);
+    expect(acc.noisy().has(9)).toBe(true);
+    expectSameAsBatch(acc);
   });
 
   it("one record at a time equals batch after every step", () => {

@@ -92,32 +92,36 @@ export function branchPath(records: LogRecord[], model: HistoryModel, branchId: 
   return bySeq(records).filter(r => r.run === self.run && limits.has(r.branch) && r.seq <= limits.get(r.branch)!);
 }
 
-/** state 기록의 변수 변경(id, 시각). noisyVariables와 증분 누적기가 공유한다. */
-export function variableChanges(r: LogRecord): { id: number; t: number }[] {
+/**
+ * state 기록의 변수 변경(id, 시각, 플러그인 조절 여부). noisyVariables와 증분 누적기가 공유한다.
+ * throttled가 참인 변경이 하나라도 있으면 그 변수는 횟수와 관계없이 잦은 변수다.
+ */
+export function variableChanges(r: LogRecord): { id: number; t: number; throttled: boolean }[] {
   if (r.type !== "state" || !Array.isArray(r.changes)) return [];
-  const out: { id: number; t: number }[] = [];
+  const out: { id: number; t: number; throttled: boolean }[] = [];
   for (const c of r.changes) {
     if (!c || c.kind !== "variable") continue;
     const id = Number(c.id);
-    if (Number.isFinite(id)) out.push({ id, t: num(r.t) });
+    if (Number.isFinite(id)) out.push({ id, t: num(r.t), throttled: c.throttled === true });
   }
   return out;
 }
 
-/** 어떤 60초 창 안에서 10회 넘게 바뀐 변수 id. */
+/** 어떤 60초 창 안에서 10회 넘게 바뀌었거나, 플러그인이 조절한(throttled) 변경이 있는 변수 id. */
 export function noisyVariables(records: LogRecord[]): Set<number> {
   const times = new Map<number, number[]>();
+  const noisy = new Set<number>();
   for (const r of Array.isArray(records) ? records : []) {
     if (!isValid(r)) continue;
-    for (const { id, t } of variableChanges(r)) {
+    for (const { id, t, throttled } of variableChanges(r)) {
+      if (throttled) noisy.add(id);
       const list = times.get(id) ?? [];
       list.push(t);
       times.set(id, list);
     }
   }
-  const noisy = new Set<number>();
   for (const [id, list] of times) {
-    if (list.length <= NOISY_MAX_CHANGES) continue;
+    if (noisy.has(id) || list.length <= NOISY_MAX_CHANGES) continue;
     list.sort((a, b) => a - b);
     for (let i = 0, j = 0; j < list.length; j++) {
       while (list[j] - list[i] >= NOISY_WINDOW_MS) i++;

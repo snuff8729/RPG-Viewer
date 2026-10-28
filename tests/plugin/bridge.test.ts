@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { noisyVariables } from "../../src/core/live/history";
 import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
 
 let h: Harness;
@@ -253,6 +254,42 @@ describe("RPGViewerBridge", () => {
       expect(ch.length).toBeLessThanOrEqual(30 + 14 + 3);
       expect(ch[ch.length - 1].value).toBeGreaterThan(v - 700); // within the last ~10s
       expect(log.filter((r) => r.type === "state").flatMap((r) => r.changes).filter((c: any) => c.kind === "switch")).toHaveLength(7500);
+    });
+
+    it("marks every change emitted in throttled mode (incl. released pending) as throttled", () => {
+      h = newGame();
+      for (let i = 1; i <= 40; i++) { h.g.$gameVariables.setValue(1, i); h.bridge._tick(); h.clock.t += 16; }
+      h.clock.t += 1000;
+      h.g.$gameVariables.setValue(1, 100); // pending
+      h.clock.t += 10_000;
+      h.bridge._tick(); // released
+      h.clock.t += 10_000;
+      h.g.$gameVariables.setValue(1, 200); // still frequent, admitted directly after 10s
+      h.bridge._tick();
+      const ch = varChanges(h.readLog(), 1);
+      expect(ch.slice(0, 30).every((c: any) => c.throttled === undefined)).toBe(true);
+      const later = ch.slice(30);
+      expect(later.length).toBeGreaterThanOrEqual(2);
+      expect(later.every((c: any) => c.throttled === true)).toBe(true);
+      expect(later.some((c: any) => c.value === 100)).toBe(true);
+    });
+
+    it("realistic cadence (change every 16ms, tick every 250ms, 3 min) -> viewer treats it as noisy", () => {
+      h = newGame();
+      let v = 0;
+      for (let f = 0; f < 11_250; f++) { // 3 minutes at 16ms
+        h.g.$gameVariables.setValue(1, ++v);
+        h.g.$gameSwitches.setValue(2, f % 2 === 0);
+        h.clock.t += 16;
+        if (f % 16 === 15) h.bridge._tick(); // ~250ms
+      }
+      h.bridge._tick();
+      const log = h.readLog();
+      const noisy = noisyVariables(log);
+      expect(noisy.has(1)).toBe(true);
+      const sw = log.filter((r) => r.type === "state").flatMap((r) => r.changes).filter((c: any) => c.kind === "switch");
+      expect(sw.length).toBeGreaterThan(0);
+      expect(sw.every((c: any) => c.throttled === undefined)).toBe(true);
     });
 
     const throttle = () => {

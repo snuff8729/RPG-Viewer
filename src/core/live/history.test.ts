@@ -35,6 +35,13 @@ describe("history model", () => {
     expect(branchPath(recs, m, 99)).toEqual([]);
   });
   it("noisy variables", () => expect(noisyVariables(fixtureRecords())).toEqual(new Set([5])));
+  it("a variable with any throttled change is noisy even with few changes", () => {
+    const st = (seq: number, changes: unknown[]) =>
+      ({ ...base, seq, t: seq * 20_000, type: "state", src: null, cmd: null, changes }) as unknown as LogRecord;
+    const recs = [start, st(2, [{ kind: "variable", id: 3, value: 1 }, { kind: "variable", id: 4, value: 1, throttled: true }]),
+      st(3, [{ kind: "variable", id: 3, value: 2 }, { kind: "switch", id: 5, value: true, throttled: true }])] as LogRecord[];
+    expect(noisyVariables(recs)).toEqual(new Set([4]));
+  });
   it("ignores run/branch 0, unknown parents and out-of-order records without throwing", () => {
     const recs = [
       { ...base, seq: 3, t: 3, branch: 2, type: "branchStart", reason: "load", parentBranch: 77, fromSeq: 1 },

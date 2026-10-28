@@ -172,7 +172,9 @@
     if (has(varPending, id)) { delete varPending[id]; varPendingCount--; }
   }
 
-  // Returns true when this variable change should be recorded now.
+  // Returns ADMIT_HOLD (keep pending), ADMIT_PLAIN (record now) or ADMIT_THROTTLED
+  // (record now, marked throttled: the variable is in throttled mode).
+  var ADMIT_HOLD = 0, ADMIT_PLAIN = 1, ADMIT_THROTTLED = 2;
   function admitVariable(id, value, src, cmd) {
     var t = now();
     var key = String(id);
@@ -184,10 +186,10 @@
     if (!frequent || t - last >= FREQ_EMIT_MS) {
       varLastEmit[key] = t;
       clearPending(key);
-      return true;
+      return frequent ? ADMIT_THROTTLED : ADMIT_PLAIN;
     }
     setPending(key, { id: id, value: value, src: src, cmd: cmd });
-    return false;
+    return ADMIT_HOLD;
   }
 
   // Record pending latest values whose 10s has elapsed (all of them when force is set).
@@ -200,7 +202,7 @@
       var p = varPending[key];
       clearPending(key);
       varLastEmit[key] = t;
-      addChange("variable", p.id, p.value, p.src, p.cmd);
+      addChange("variable", p.id, p.value, p.src, p.cmd, true);
     }
   }
 
@@ -208,11 +210,17 @@
     if (run === null) return;
     var src = currentCtx ? currentCtx.src : null;
     var cmd = currentCtx ? currentCtx.cmd : null;
-    if (kind === "variable" && !admitVariable(id, value, src, cmd)) return;
-    addChange(kind, id, value, src, cmd);
+    var throttled = false;
+    if (kind === "variable") {
+      var admit = admitVariable(id, value, src, cmd);
+      if (admit === ADMIT_HOLD) return;
+      throttled = admit === ADMIT_THROTTLED;
+    }
+    addChange(kind, id, value, src, cmd, throttled);
   }
 
-  function addChange(kind, id, value, src, cmd) {
+  // throttled: the change was recorded while the variable was throttled (the viewer then hides it).
+  function addChange(kind, id, value, src, cmd, throttled) {
     if (run === null) return;
     var gkey = JSON.stringify(src) + "#" + cmd;
     var g = Object.prototype.hasOwnProperty.call(groupByKey, gkey) ? groupByKey[gkey] : null;
@@ -222,12 +230,16 @@
       pendingGroups.push(g);
     }
     var ckey = kind + ":" + id;
+    var c;
     if (Object.prototype.hasOwnProperty.call(g.at, ckey)) {
-      g.changes[g.at[ckey]].value = value;
+      c = g.changes[g.at[ckey]];
+      c.value = value;
     } else {
       g.at[ckey] = g.changes.length;
-      g.changes.push({ kind: kind, id: id, value: value });
+      c = { kind: kind, id: id, value: value };
+      g.changes.push(c);
     }
+    if (throttled) c.throttled = true;
   }
 
   function startBranch(reason, newRun, parentBranch, fromSeq) {
