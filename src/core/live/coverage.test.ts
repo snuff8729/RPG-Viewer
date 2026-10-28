@@ -173,3 +173,50 @@ describe("performance", () => {
     expect(ms).toBeLessThan(300);
   });
 });
+
+describe("touched pages and plugin commands", () => {
+  const P = (list: { code: number; indent: number; parameters: unknown[] }[]) => ({ conditions: {}, trigger: 0, list });
+  const pluginData = (): GameData => {
+    const maps = new Map(data.maps);
+    const map = structuredClone(maps.get(2)!);
+    const tpl = P([{ code: 356, indent: 0, parameters: ["TE固有イベント呼び出し"] }, { code: 0, indent: 0, parameters: [] }]);
+    const origin = P([{ code: 356, indent: 0, parameters: ["TMng Search 종이 상자."] }, { code: 0, indent: 0, parameters: [] }]);
+    map.events[9] = { id: 9, name: "조사", x: 0, y: 0, pages: [P([]), tpl], originalPages: [P([]), origin] } as never;
+    maps.set(2, map);
+    return { ...data, maps };
+  };
+  const at = (seq: number, extra: Record<string, unknown>) =>
+    ({ v: 1, seq, t: 0, run: 1, branch: 1, ...extra }) as unknown as LogRecord;
+  const page = { source: "map", mapId: 2, eventId: 9, page: 1 } as const;
+  const origin = { ...page, origin: 1 } as const;
+
+  it("touched: page keys from any record with a src; origin runs map back to the template page", () => {
+    const c = computeCoverage([
+      at(1, { type: "plugin", src: origin, cmd: 0, code: 356, text: "TMng Search 종이 상자." }),
+      at(2, { type: "state", src: { source: "common", commonEventId: 1 }, cmd: 0, changes: [] }),
+      at(3, { type: "transfer", mapId: 1, x: 0, y: 0 }),
+      at(4, { type: "picture", src: null, cmd: 0, pictureId: 1, name: "x" }),
+    ], pluginData());
+    expect([...c.touched].sort()).toEqual(["common:1", "map:2:9:1"]);
+    expect([...c.pluginRan]).toEqual(["map:2:9:1:o1#0"]);
+    expect(c.uncertainSeqs.size).toBe(0);
+  });
+
+  it("fixture dialogue touches its pages", () => {
+    const c = computeCoverage(fixtureRecords(), data);
+    expect(c.touched.size).toBeGreaterThan(0);
+    for (const k of c.seen) expect(c.touched.has(k.split("#")[0])).toBe(true);
+  });
+
+  it("a plugin record on another command is uncertain and not run, but still touches the page", () => {
+    const c = computeCoverage([
+      at(1, { type: "plugin", src: page, cmd: 0, code: 356, text: "TE" }),
+      at(2, { type: "plugin", src: page, cmd: 1, code: 356, text: "x" }),     // 0(끝)
+      at(3, { type: "plugin", src: page, cmd: 0, code: 357, text: "x" }),     // 코드가 다름
+      at(4, { type: "plugin", src: null, cmd: 0, code: 356, text: "x" }),
+    ], pluginData());
+    expect([...c.pluginRan]).toEqual(["map:2:9:1#0"]);
+    expect([...c.uncertainSeqs]).toEqual([2, 3, 4]);
+    expect([...c.touched]).toEqual(["map:2:9:1"]);
+  });
+});

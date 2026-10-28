@@ -79,6 +79,8 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
     case "choice":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
     case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>🖼 {r.name}</Line>;
+    case "plugin":
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><span className="break-words text-muted-foreground">플러그인: {r.text}</span></Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;

@@ -89,6 +89,7 @@ export function mismatchOf(r: LogRecord, data: GameData, choiceOpts?: unknown): 
     case "message": case "scroll": recorded = typeof r.text === "string" ? r.text : ""; break;
     case "choices": recorded = optionsText(r.options); break;
     case "choice": recorded = optionsText(choiceOpts); break;
+    case "plugin": recorded = typeof r.text === "string" ? r.text : ""; break;
     default: return null;
   }
   const cmd = (r as { cmd?: unknown }).cmd;
@@ -120,6 +121,12 @@ export function mismatchOf(r: LogRecord, data: GameData, choiceOpts?: unknown): 
     case "choice":
       if (at(cmd)?.code !== 102) return out("codeMismatch");
       return choiceOpts === undefined || sameCount(choiceOpts, p[0]) ? null : out("optionCount");
+    case "plugin": {
+      // 플러그인 명령은 코드(356/357)만 확인한다. 기록 code가 있으면 그것과도 맞아야 한다.
+      const code = at(cmd)?.code;
+      if (code !== 356 && code !== 357) return out("codeMismatch");
+      return typeof r.code === "number" && r.code !== code ? out("codeMismatch") : null;
+    }
     default:
       return null;
   }

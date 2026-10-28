@@ -92,7 +92,8 @@ export type ScriptNode =
   | { kind: "call"; cmd: number; label: string; location: Location; nodes: ScriptNode[] }
   | { kind: "transfer"; mapId: number | null; x?: number; y?: number }
   | { kind: "stateChange"; target: "switch" | "variable" | "selfSwitch" | "item" | "weapon" | "armor" | "gold" | "party"; description: string; refs: Ref[] }
-  | { kind: "other"; commands: EventCommand[] };
+  /** cmds[i]: commands[i]의 원본 목록 인덱스 */
+  | { kind: "other"; commands: EventCommand[]; cmds: number[] };
 
 // ---- 색인 ----
 export type Location =

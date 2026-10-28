@@ -156,8 +156,9 @@ export function interpret(list: EventCommand[], data: GameData, ctx?: CallCtx | 
           if (sc) { push(sc); continue; }
         }
       }
-      if (!other) { other = { kind: "other", commands: [] }; out.push(other); }
+      if (!other) { other = { kind: "other", commands: [], cmds: [] }; out.push(other); }
       other.commands.push(c);
+      other.cmds.push(here);
     }
     return out;
   }

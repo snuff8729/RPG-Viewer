@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { howTo } from "../deps/howTo";
 import { buildIndex } from "../index/buildIndex";
 import type { EventCommand, EventPage, GameData, Location, MapData, MapEvent, PageConditions } from "../types";
-import { seenKey } from "./coverage";
+import { locationKey } from "../index/locations";
+import { computeCoverage, seenKey } from "./coverage";
 import { mapChecklist } from "./mapChecklist";
 import type { Coverage, LiveSnapshot } from "./types";
 
@@ -55,8 +56,10 @@ const data: GameData = {
 };
 const index = buildIndex(data);
 const at = (eventId: number, pg: number): Location => ({ source: "map", mapId: 1, eventId, page: pg });
-const coverage = (seen: Location[]): Coverage => ({
+/** touched: 실행된 페이지(기본: 본 페이지 + 플러그인 조사 지점 9·14 — 이미 해 봄) */
+const coverage = (seen: Location[], touched: Location[] = [...seen, at(9, 0), at(14, 0)]): Coverage => ({
   seen: new Set(seen.map(l => seenKey(l, 0))), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set(),
+  touched: new Set(touched.map(locationKey)), pluginRan: new Set(),
 });
 const cov = coverage([at(2, 0), at(2, 1), at(3, 0), at(4, 0)]);
 const live = (over: Partial<LiveSnapshot> = {}): LiveSnapshot => ({
@@ -100,6 +103,32 @@ describe("mapChecklist", () => {
     expect(m.events.find(e => e.eventId === 14)!.pluginHint).toBe(`${"가".repeat(60)}…`);
     expect(m.events.find(e => e.eventId === 4)!.pluginHint).toBeUndefined();
     expect(m.events.find(e => e.eventId === 12)).toBeUndefined();
+  });
+
+  it("untried: a plugin examine spot never run is in now until a record touches its page", () => {
+    const fresh = coverage([at(2, 0), at(2, 1), at(3, 0), at(4, 0)], [at(2, 0), at(2, 1), at(3, 0), at(4, 0)]);
+    const m = mapChecklist(data, index, fresh, live())!;
+    const spot = m.events.find(e => e.eventId === 9)!;
+    expect([spot.section, spot.untried, spot.pluginHint]).toEqual(["now", true, "TMng Search 종이 상자."]);
+    expect(m.events.find(e => e.eventId === 14)).toMatchObject({ section: "now", untried: true });
+    // 플러그인 명령이 없는 페이지(스위치만·그림만)는 기록 여부와 상관없이 그대로
+    expect(m.events.find(e => e.eventId === 5)).toMatchObject({ section: "talk" });
+    expect(m.events.find(e => e.eventId === 5)!.untried).toBeUndefined();
+    expect(m.events.filter(e => e.section === "now").map(e => e.eventId)).toEqual([1, 9, 14]);
+    expect(m.remaining).toBe(6);
+    // 해 본 뒤(플러그인 기록이 그 페이지를 가리킴) → talk
+    const rec = { v: 1, seq: 1, t: 0, run: 1, branch: 1, type: "plugin", src: at(9, 0), cmd: 0, code: 356, text: "TMng Search 종이 상자." } as const;
+    const ran = computeCoverage([rec], data);
+    expect(ran.touched.has("map:1:9:0")).toBe(true);
+    const after = mapChecklist(data, index, { ...fresh, touched: ran.touched }, live())!;
+    const spot2 = after.events.find(e => e.eventId === 9)!;
+    expect([spot2.section, spot2.untried]).toEqual(["talk", undefined]);
+    expect(after.remaining).toBe(5);
+  });
+
+  it("untried is not decided without a touched set (older coverage)", () => {
+    const old = { ...coverage([at(2, 0)]), touched: undefined } as unknown as Coverage;
+    expect(mapChecklist(data, index, old, live())!.events.find(e => e.eventId === 9)!.section).toBe("talk");
   });
 
   it("interactable events keep their locked pages", () => {

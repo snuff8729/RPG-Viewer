@@ -1,5 +1,5 @@
 import type { GameData } from "../types";
-import { aftermathStep, computeCoverage, coverRecord, newAftermath, seenKey, type AftermathState } from "./coverage";
+import { aftermathStep, computeCoverage, coverRecord, emptyCoverage, newAftermath, seenKey, type AftermathState } from "./coverage";
 import {
   applyHistoryRecord, buildHistory, buildHistoryState, historyModelOf, isValidRecord, newHistoryState, NOISY_MAX_CHANGES, NOISY_WINDOW_MS,
   variableChanges, type HistoryState,
@@ -78,9 +78,9 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       if (keep.length > 0) open.set(branch, keep); else open.delete(branch);
     }
     const st = newAftermath();
-    const sizes = cov.seen.size + cov.uncertainSeqs.size + cov.changedSeqs.size;
+    const sizes = coverageSize(cov);
     const info = coverRecord(cov, r, data, lastOptions, () => st.out);
-    if (info || cov.seen.size + cov.uncertainSeqs.size + cov.changedSeqs.size !== sizes) covDirty = true;
+    if (info || coverageSize(cov) !== sizes) covDirty = true;
     if (info) {
       try {
         const p: OpenPick = { info, key: seenKey((r as RecordOf<"choice">).src!, (r as RecordOf<"choice">).cmd), st };
@@ -205,7 +205,10 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       if (!covCopy || covDirty) {
         const picks = new Map<string, PickInfo[]>();
         for (const [k, l] of cov.picks) picks.set(k, l.map(p => ({ ...p, aftermath: p.aftermath.slice() })));
-        covCopy = { seen: new Set(cov.seen), picks, uncertainSeqs: new Set(cov.uncertainSeqs), changedSeqs: new Set(cov.changedSeqs) };
+        covCopy = {
+          seen: new Set(cov.seen), picks, uncertainSeqs: new Set(cov.uncertainSeqs), changedSeqs: new Set(cov.changedSeqs),
+          touched: new Set(cov.touched), pluginRan: new Set(cov.pluginRan),
+        };
         covDirty = false;
       }
       return covCopy;
@@ -218,9 +221,9 @@ export function createAccumulator(data: GameData): LiveAccumulator {
   };
 }
 
-function emptyCoverage(): Coverage {
-  return { seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() };
-}
+/** 진행도 집합 크기 합(기록 하나가 진행도를 바꿨는지 보는 데 쓴다). */
+const coverageSize = (c: Coverage): number =>
+  c.seen.size + c.uncertainSeqs.size + c.changedSeqs.size + c.touched.size + c.pluginRan.size;
 
 /** 정렬된 목록에 t를 넣고 위치를 돌려준다(대개 끝에 붙는다). */
 function insertSorted(list: number[], t: number): number {

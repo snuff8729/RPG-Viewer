@@ -8,6 +8,8 @@ export type ReaderItem =
   | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number }
   | { kind: "scroll"; key: string; seq: number; lines: string[] }
   | { kind: "picture"; key: string; seq: number; name: string }
+  /** 이벤트가 실행한 플러그인 명령(원문 그대로) */
+  | { kind: "plugin"; key: string; seq: number; text: string }
   | { kind: "choice"; key: string; seq: number; label: string }
   | { kind: "battle"; key: string; seq: number };
 
@@ -37,6 +39,7 @@ function fromRecord(r: LogRecord, data: GameData, choiceText: Map<number, string
     case "message": return messageItem(r, data);
     case "scroll": return { kind: "scroll", key: `r${r.seq}`, seq: r.seq, lines: lines(r.text, data) };
     case "picture": return { kind: "picture", key: `r${r.seq}`, seq: r.seq, name: safe(r.name) };
+    case "plugin": return { kind: "plugin", key: `r${r.seq}`, seq: r.seq, text: safe(r.text) };
     case "choice": {
       // historyText.pickedFallbackText와 같은 규칙: 취소(-2)는 `취소`, 그 밖은 `{n}번째 선택지`
       const label = choiceText?.get(r.seq) ?? (r.picked === -2 ? "취소" : `${r.picked + 1}번째 선택지`);
@@ -54,7 +57,7 @@ function fromRecord(r: LogRecord, data: GameData, choiceText: Map<number, string
 }
 
 /**
- * foldTimeline 결과를 읽기 항목으로 바꾼다(대사·그림·고른 선택·장면 구분만). 예외를 던지지 않는다.
+ * foldTimeline 결과를 읽기 항목으로 바꾼다(대사·그림·고른 선택·플러그인 명령·장면 구분만). 예외를 던지지 않는다.
  * model은 갈래 시작 문구(`— {n}회차 갈래 {m} 시작 —`)에 쓴다.
  */
 export function readerItems(items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel): ReaderItem[] {

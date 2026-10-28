@@ -120,7 +120,7 @@ describe("computeMissing", () => {
     expect(m[1].allMet).toBe(false);
   });
   it("never throws on odd input", () => {
-    const empty = { seen: new Set<string>(), picks: new Map(), uncertainSeqs: new Set<number>(), changedSeqs: new Set<number>() };
+    const empty = { seen: new Set<string>(), picks: new Map(), uncertainSeqs: new Set<number>(), changedSeqs: new Set<number>(), touched: new Set<string>(), pluginRan: new Set<string>() };
     const odd = { ...index, pages: [null as never, { ...index.pages[0], nodes: null as never, conditions: null as never }] };
     expect(() => computeMissing(odd, data, empty, fixtureLive())).not.toThrow();
   });

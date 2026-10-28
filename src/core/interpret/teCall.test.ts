@@ -88,9 +88,9 @@ const index = buildIndex(data);
 const at = (eventId: number, pg: number): Location => ({ source: "map", mapId: 1, eventId, page: pg });
 const origin = (eventId: number, pg: number, o: number): Location => ({ source: "map", mapId: 1, eventId, page: pg, origin: o });
 const entryOf = (loc: Location) => index.pages.find(p => locationKey(p.location) === locationKey(loc))!;
-const emptyCov = (): Coverage => ({ seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set() });
+const emptyCov = (): Coverage => ({ seen: new Set(), picks: new Map(), uncertainSeqs: new Set(), changedSeqs: new Set(), touched: new Set(), pluginRan: new Set() });
 const live = (over: Partial<LiveSnapshot> = {}): LiveSnapshot => ({
-  v: 1, t: 0, pluginVersion: "1.2.0", run: 1, branch: 1, seq: 0, mapId: 1, x: 0, y: 0, running: null,
+  v: 1, t: 0, pluginVersion: "1.3.0", run: 1, branch: 1, seq: 0, mapId: 1, x: 0, y: 0, running: null,
   events: [], switches: [], variables: {}, selfSwitches: [], items: {}, weapons: {}, armors: {},
   gold: 0, party: [], choice: null, inBattle: false, ...over,
 });
@@ -204,7 +204,7 @@ describe("interpret / index", () => {
     expect(loop.nodes.map(n => n.kind)).toEqual(["other", "message"]);   // 자기 자신을 다시 부르는 곳은 펼치지 않는다
   });
   it("leaves plugin commands alone without a map context", () => {
-    expect(interpret([ORIGIN], data)).toEqual([{ kind: "other", commands: [ORIGIN] }]);
+    expect(interpret([ORIGIN], data)).toEqual([{ kind: "other", commands: [ORIGIN], cmds: [0] }]);
   });
   it("finds nodes by cmd within the right list", () => {
     const entry = entryOf(at(1, 0));

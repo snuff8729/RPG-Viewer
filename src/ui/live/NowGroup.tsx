@@ -45,6 +45,7 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
                 <st.Icon className={st.text} aria-label={st.label} />
                 <span className="truncate">{e.title}</span>
                 <span className="ml-auto flex shrink-0 gap-1">
+                  {e.section === "now" && e.untried && <Badge variant="secondary" className="text-xs">아직 안 해 봄</Badge>}
                   {e.section === "now" && e.unseen > 0 && <Badge variant="secondary" className="text-xs">새 대화</Badge>}
                   {e.section === "now" && e.unpicked > 0 && <Badge variant="secondary" className="text-xs">선택지 {e.unpicked}</Badge>}
                   {e.section === "item" && <Badge variant="secondary" className="text-xs">아이템</Badge>}
