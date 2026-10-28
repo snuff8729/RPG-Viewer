@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { openPage } from "../navigation";
 import { highlightNode } from "../highlight";
 import { ChoiceNowCard } from "./ChoiceNowCard";
+import { NowNextCard } from "./NowNextCard";
 import { TimelineItem, type TimelineCtx } from "./TimelineItem";
 import { choiceTexts } from "./historyText";
 
@@ -67,6 +68,7 @@ export function HistoryView() {
     const installed = install?.state === "installed" && connection !== "noPlugin";
     return (
       <div className="space-y-4">
+        <NowNextCard />
         <ChoiceNowCard />
         <p className="text-sm text-muted-foreground">
           {installed ? "게임을 실행해 새 게임을 시작하거나 세이브를 불러오세요" : "플러그인을 설치하면 플레이 기록이 여기에 쌓여요"}
@@ -94,6 +96,7 @@ export function HistoryView() {
           ))}
         </SelectContent>
       </Select>
+      <NowNextCard />
       <ChoiceNowCard />
       <div className="space-y-1">
         {visible.length < items.length && (
