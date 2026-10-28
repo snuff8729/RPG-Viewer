@@ -5,6 +5,8 @@ import { branchLabel, branchPath, foldTimeline, representative } from "@/core/li
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -20,6 +22,7 @@ import {
   type InitialView, type ReadRange, type ReadStats,
 } from "./readerWindow";
 import { ReaderItemView } from "./ReaderItemView";
+import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 
 const PAGE = 300;
@@ -124,6 +127,10 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   /** 맨 아래 + 다 읽음 + 구간이 끝까지 — 새 항목이 오면 따라간다 */
   const follow = useRef(false);
   const positioned = useRef(false);
+  // 자동으로 맨 아래로: 켜면 새 항목이 올 때마다 위치·창 포커스·양과 상관없이 끝으로 간다
+  const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
+  const autoRef = useRef(autoFollow);
+  useLayoutEffect(() => { autoRef.current = autoFollow; }, [autoFollow]);
   const prevLen = useRef(0);
   const armedRef = useRef(false);
   useLayoutEffect(() => { armedRef.current = armed; }, [armed]);
@@ -261,7 +268,11 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     // follow.current는 아래 레이아웃 효과가 "직전 커밋"의 상태(맨 아래 + 새 대사 0 + 구간이 끝까지)로 맞춰 둔 값이다.
     // 이 효과가 먼저 선언돼 먼저 실행되므로, 여기서 읽는 값은 새 항목이 들어오기 전의 따라가기 여부다.
     // (순서를 바꾸면 새 항목 때문에 unread > 0이 되어 따라가기가 항상 꺼진다.)
-    if (total <= prev || !follow.current) return;
+    if (total <= prev) return;
+    // 자동으로 맨 아래로(켬): 구간을 끝으로 옮기고 맨 아래로. 읽음 표시는 건드리지 않는다
+    // (화면에 안 보인 채 지나간 항목은 안 읽음으로 남아 수가 보인다).
+    if (autoRef.current) { applyRange(tailRange(total, PAGE), { kind: "bottom" }); return; }
+    if (!follow.current) return;
     // 뷰어 창에 포커스가 없으면(게임 창에서 넘기는 중) 따라가지 않는다 — 새 항목은 안 읽음으로 남고 수만 는다.
     if (!hasFocus()) { follow.current = false; return; }
     // 새 항목 높이가 한 화면을 넘으면(몰아 들어옴) 맨 아래 대신 첫 새 항목으로 가고 따라가기를 멈춘다.
@@ -287,7 +298,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
       after.current = { kind: "bottom" };
       setView(v => (v ? { ...v, range: trimmed } : v));
     }
-  }, [cur, total, items, range, firstUnreadIdx, keyFrom, scrollToKey, scrollToBottom, onScroll, disarm]);
+  }, [cur, total, items, range, firstUnreadIdx, keyFrom, scrollToKey, scrollToBottom, onScroll, disarm, applyRange]);
   // 반드시 위 효과 뒤에 둔다(위 주석 참고)
   useLayoutEffect(() => {
     follow.current = atBottom && unread === 0 && atEnd;
@@ -298,7 +309,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (follow.current) el.scrollTop = el.scrollHeight;
+      if (follow.current || autoRef.current) el.scrollTop = el.scrollHeight;
       onScroll();
     });
     ro.observe(el);
@@ -321,6 +332,14 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     }
     applyRange(tailRange(total, PAGE), { kind: "bottom" });
   }, [arm, total, items, markRead, applyRange]);
+
+  /** 자동으로 맨 아래로 켜고 끄기. 켜는 순간 바로 맨 아래로 간다(읽음 처리는 하지 않음). */
+  const onAutoFollow = (on: boolean) => {
+    setAutoFollow(on);
+    autoRef.current = on;
+    saveAutoFollow(on);
+    if (on) applyRange(tailRange(total, PAGE), { kind: "bottom" });
+  };
 
   /** 다음 안 읽은 항목을 위로 올리고 그 앞까지 읽음 처리 */
   const next = useCallback(() => {
@@ -432,6 +451,10 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
         <Button size="sm" onClick={next} disabled={total === 0}>↓ 다음 (Space)</Button>
         <Button variant="outline" size="sm" onClick={goBottom} disabled={atBottom && atEnd && unread === 0}>맨 아래로</Button>
         {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
+        <div className="flex items-center gap-2">
+          <Switch id="reader-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
+          <Label htmlFor="reader-auto-follow">자동으로 맨 아래로</Label>
+        </div>
       </div>
     </div>
   );
