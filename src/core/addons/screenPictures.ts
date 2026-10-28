@@ -206,7 +206,12 @@ export type SizeOf = (name: string) => PicSize | null | undefined;
 
 /** 그림 구분에 쓰는 것: 화면 크기, 직접 고른 구분, 화면 장식으로 본 그림(hudKeys), 그림 크기 */
 export interface PictureContext {
+  /** 화면 크기(실제 크기를 모를 때 쓰는 것 — live.json 또는 게임 설정에서 짐작한 크기) */
   screen: ScreenSize;
+  /** 1.18.2+: 기록에서 안 실제 화면 크기(screenSizeMarks). 기록마다 그 seq 이하의 마지막 것을 쓴다(knownScreenAt). */
+  sizes?: ScreenSizeMark[] | null;
+  /** 1.18.2+: live.json이 알려 준 지금 실제 화면 크기(기록에 크기가 없는 앞부분에 쓴다) */
+  liveScreen?: ScreenSize | null;
   roles?: PictureRoles | null;
   /** 플러그인이 띄운 그림(1.10.0)의 이름 열쇠별 구분 */
   spriteRoles?: SpriteRoles | null;
@@ -579,7 +584,11 @@ export function rolesOf(pics: ScreenPicture[], ctx: PictureContext): Map<ScreenP
 }
 
 /** 대사 하나의 보이는 화면: 이벤트 그림과 스탠딩(각각 그리는 순서) */
-export interface ScreenScene { cg: ScreenPicture[]; stand: ScreenPicture[] }
+export interface ScreenScene {
+  cg: ScreenPicture[]; stand: ScreenPicture[];
+  /** 이 화면을 나눈 게임의 실제 화면 크기(1.18.2 기록·live.json에서 안 것). 없으면 모름(게임 설정에서 짐작한 크기를 쓴다). */
+  screen?: ScreenSize;
+}
 
 /**
  * 그림 묶음 → 보이는 화면. 화면 장식·숨김과 투명도 0은 빼고, 위에(뒤 번호로) 화면의 95% 이상을 덮는
@@ -620,20 +629,108 @@ export function sceneOf(pics: ScreenPicture[] | null | undefined, ctx: PictureCo
 /** 대사별 화면 그림 묶음 → 대사별 보이는 화면(같은 묶음은 한 번만 계산한다) */
 export function scenesBySeq(pictures: Map<number, ScreenPicture[]>, ctx: PictureContext): Map<number, ScreenScene> {
   const out = new Map<number, ScreenScene>();
-  const cache = new Map<ScreenPicture[], ScreenScene>();
+  const cache = new Map<ScreenPicture[], { known: ScreenSize | null; scene: ScreenScene }[]>();
   for (const [seq, pics] of pictures) {
-    let s = cache.get(pics);
-    if (!s) { s = sceneOf(pics, ctx); cache.set(pics, s); }
-    out.set(seq, s);
+    // 1.18.2: 그 대사 때 게임의 실제 화면 크기로 나눈다(같은 묶음·같은 크기는 한 번만)
+    const known = knownScreenAt(ctx, seq);
+    const list = cache.get(pics) ?? [];
+    let hit = list.find(x => sameSize(x.known, known));
+    if (!hit) {
+      hit = { known, scene: withScreen(sceneOf(pics, known ? { ...ctx, screen: known } : ctx), known) };
+      list.push(hit);
+      cache.set(pics, list);
+    }
+    out.set(seq, hit.scene);
   }
   return out;
+}
+
+// ---------------------------------------------------------------- 실제 화면 크기(1.18.2)
+
+/** 기록에서 안 게임의 실제 화면 크기: 이 seq부터(다음 표시 전까지) */
+export interface ScreenSizeMark { seq: number; size: ScreenSize }
+
+const realDim = (v: unknown): number | null =>
+  (typeof v === "number" && Number.isFinite(v) && v >= 16 && v <= 16384 ? Math.round(v) : null);
+
+const sameSize = (a: ScreenSize | null | undefined, b: ScreenSize | null | undefined): boolean =>
+  (!a || !b ? !a && !b : a.width === b.width && a.height === b.height);
+
+/**
+ * 기록(1.18.2+)의 sw·sh(게임의 실제 화면 크기 — 바뀔 때만 적힌다)를 seq 순 표시로 모은다. 없으면(구버전) 빈 목록.
+ * 예외를 던지지 않는다.
+ */
+export function screenSizeMarks(records: LogRecord[]): ScreenSizeMark[] {
+  const out: ScreenSizeMark[] = [];
+  try {
+    for (const r of Array.isArray(records) ? records : []) {
+      if (!r || typeof r !== "object" || typeof r.seq !== "number") continue;
+      const o = r as unknown as Record<string, unknown>;
+      const w = realDim(o.sw), h = realDim(o.sh);
+      if (w === null || h === null) continue;
+      out.push({ seq: r.seq, size: { width: w, height: h } });
+    }
+    out.sort((a, b) => a.seq - b.seq);
+  } catch { /* 모은 데까지 */ }
+  return out;
+}
+
+/** live.json의 screen(1.18.2+ { w, h }) → 화면 크기. 없거나 이상하면 null. */
+export function liveScreenSize(live: unknown): ScreenSize | null {
+  try {
+    const s = live && typeof live === "object" ? (live as Record<string, unknown>).screen : null;
+    if (!s || typeof s !== "object") return null;
+    const w = realDim((s as Record<string, unknown>).w), h = realDim((s as Record<string, unknown>).h);
+    return w !== null && h !== null ? { width: w, height: h } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** seq 때 게임의 실제 화면 크기: 그 seq 이하의 마지막 기록 표시 → live.json의 크기 → 모름(null) */
+export function knownScreenAt(ctx: PictureContext | null | undefined, seq: number | null | undefined): ScreenSize | null {
+  try {
+    const marks = ctx?.sizes;
+    if (marks && marks.length > 0 && typeof seq === "number" && Number.isFinite(seq)) {
+      let lo = 0, hi = marks.length - 1, found = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (marks[mid].seq <= seq) { found = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (found >= 0) return marks[found].size;
+    }
+    return ctx?.liveScreen ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** seq 때 그림 구분에 쓸 화면 크기: 실제 크기(knownScreenAt)를 모르면 ctx.screen(짐작한 크기) */
+export function screenAt(ctx: PictureContext | null | undefined, seq: number | null | undefined): ScreenSize {
+  return knownScreenAt(ctx, seq) ?? ctx?.screen ?? DEFAULT_SCREEN;
+}
+
+/** seq 때의 그림 구분 문맥(화면 크기만 그때 것으로). 같으면 같은 객체. */
+export function ctxAt(ctx: PictureContext, seq: number | null | undefined): PictureContext {
+  const size = screenAt(ctx, seq);
+  return sameSize(size, ctx?.screen) ? ctx : { ...ctx, screen: size };
+}
+
+/** 마지막으로 안 실제 화면 크기(기록 표시 → live.json), 모르면 null */
+export function latestKnownScreen(ctx: Pick<PictureContext, "sizes" | "liveScreen">): ScreenSize | null {
+  const marks = ctx.sizes;
+  return marks && marks.length > 0 ? marks[marks.length - 1].size : ctx.liveScreen ?? null;
 }
 
 /**
  * 읽기에 보일 그림: cg = 화면 크기 그대로(위에 보이는 스탠딩 포함), stand = 스탠딩 겹만 잘라서.
  * cg 종류의 cg = pictures 중 이벤트 그림인 것(나머지는 스탠딩). 없으면 모름.
  */
-export interface ScreenShot { kind: "cg" | "stand"; pictures: ScreenPicture[]; cg?: ScreenPicture[] }
+export interface ScreenShot {
+  kind: "cg" | "stand"; pictures: ScreenPicture[]; cg?: ScreenPicture[];
+  /** 그때 게임의 실제 화면 크기(ScreenScene.screen). 없으면 게임 설정에서 짐작한 크기. */
+  screen?: ScreenSize;
+}
 
 /**
  * 앞에 보인 것(key)과 비교해 이 대사에 새로 보일 그림을 정한다.
@@ -647,7 +744,7 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
     if (scene.cg.length > 0) {
       const pictures = [...scene.cg, ...scene.stand].sort((a, b) => a.id - b.id);
       const key = "cg:" + JSON.stringify(pictures);
-      return { shot: key === prevKey ? null : { kind: "cg", pictures, cg: [...scene.cg] }, key };
+      return { shot: key === prevKey ? null : withScreen<ScreenShot>({ kind: "cg", pictures, cg: [...scene.cg] }, scene.screen), key };
     }
     if (scene.stand.length > 0) {
       // 묶음(스탠딩·컷인·배우별)마다 따로: 앞에 보인 것과 겹이 달라진 묶음만 다시 보인다
@@ -658,13 +755,19 @@ export function nextShot(prevKey: string | null, scene: ScreenScene | null | und
       const changed = groups.filter((_, i) => !before.has(keys[i]));
       if (changed.length === 0) return { shot: null, key };
       const pictures = changed.length === groups.length ? scene.stand : changed.flatMap(g => g.pictures);
-      return { shot: { kind: "stand", pictures }, key };
+      return { shot: withScreen<ScreenShot>({ kind: "stand", pictures }, scene.screen), key };
     }
   } catch { /* 없음으로 */ }
   return { shot: null, key: "" };
 }
 
 const STAND_KEY = "stand:";
+
+/** 실제 화면 크기를 알면 붙인다 */
+export function withScreen<T extends { screen?: ScreenSize }>(x: T, screen: ScreenSize | null | undefined): T {
+  if (screen) x.screen = screen;
+  return x;
+}
 
 /** 스탠딩만 보인 열쇠(nextShot)에서 그때 보인 묶음들의 열쇠. 다른 열쇠면 빈 집합. */
 function shownGroupKeys(prevKey: string | null): Set<string> {
@@ -762,7 +865,7 @@ const VISIBLE_OPACITY = 25.5, COARSE_PX = 64;
 export function visibleScene(scene: ScreenScene | null | undefined): ScreenScene | null {
   if (!scene) return null;
   const vis = (p: ScreenPicture) => p.opacity > VISIBLE_OPACITY;
-  return { cg: scene.cg.filter(vis), stand: scene.stand.filter(vis) };
+  return withScreen<ScreenScene>({ cg: scene.cg.filter(vis), stand: scene.stand.filter(vis) }, scene.screen);
 }
 
 /**

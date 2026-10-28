@@ -582,6 +582,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     $dataCommonEvents: [null], $dataTroops: [null],
     $dataActors: [null], $dataItems: [null], $dataWeapons: [null], $dataArmors: [null], $dataSkills: [null], $dataStates: [null],
     $dataSystem: null,
+    // 1.18.2 화면 크기: 테스트가 { width, height }를 넣을 때만(없으면 기록에 sw·sh를 쓰지 않는다)
+    Graphics: undefined,
   });
   // Title screen: like Scene_Boot, objects are created by the engine before any game starts.
   DataManager.createGameObjects();

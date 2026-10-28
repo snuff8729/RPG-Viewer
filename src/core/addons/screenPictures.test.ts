@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogRecord } from "../live/types";
 import {
-  alphaStatsOf, DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf,
+  alphaStatsOf, DEFAULT_SCREEN, groupById, hudKeyOf, hudKeys, knownScreenAt, liveScreenSize, nextShot, parsePic, parsePics, picturesBySeq, pngSize, roleOf, samePictures, sceneOf, scenesBySeq, screenAt, screenSizeMarks,
   screenSizeOf, seenPictures, snapshotCounts, standGroupLabel, standGroups, type PictureContext, type PictureRoles, type ScreenPicture,
 } from "./screenPictures";
 
@@ -305,5 +305,58 @@ describe("settings helpers", () => {
     expect(pngSize(head)).toEqual({ w: 1024, h: 768 });
     expect(pngSize(new Uint8Array(24))).toBeNull();
     expect(pngSize(null)).toBeNull();
+  });
+});
+
+describe("the game's real screen size (bridge 1.18.2)", () => {
+  // 816×624 picture at the top left: the whole screen of a default-size game, only part of a 1280×720 one
+  const FULL816 = [60, "eve_01", 0, 0, 0, 100, 100, 255, 0, 0, 0, 816, 624];
+  const guess = { width: 816, height: 624 };
+  const real = { width: 1280, height: 720 };
+  const screen = (seq: number, pics: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ ...base, seq, type: "screen", scene: "map", pics, ...extra }) as unknown as LogRecord;
+
+  it("collects sw / sh marks and finds the size at or before a record", () => {
+    const recs = [msg(1, { pics: [FULL816] }), screen(2, [FULL816], { sw: 1280, sh: 720 }), msg(3, { picsSame: true }),
+      screen(4, [], { sw: 1920, sh: 1080 }), screen(5, [], { sw: "x", sh: 9 })];
+    const marks = screenSizeMarks(recs);
+    expect(marks).toEqual([{ seq: 2, size: real }, { seq: 4, size: { width: 1920, height: 1080 } }]);
+    const ctx: PictureContext = { screen: guess, sizes: marks };
+    expect(knownScreenAt(ctx, 1)).toBeNull();
+    expect(screenAt(ctx, 1)).toEqual(guess);
+    expect(screenAt(ctx, 3)).toEqual(real);
+    expect(screenAt(ctx, 9)).toEqual({ width: 1920, height: 1080 });
+    // records before the first mark: live.json's size, then the guess
+    expect(screenAt({ ...ctx, liveScreen: real }, 1)).toEqual(real);
+    expect(screenSizeMarks(null as unknown as LogRecord[])).toEqual([]);
+  });
+
+  it("reads live.json's screen", () => {
+    expect(liveScreenSize({ screen: { w: 1280, h: 720 } })).toEqual(real);
+    expect(liveScreenSize({ screen: { w: 0, h: 720 } })).toBeNull();
+    expect(liveScreenSize({})).toBeNull();
+    expect(liveScreenSize(null)).toBeNull();
+  });
+
+  it("classifies each record's pictures by the size at that record and carries it into the shot", () => {
+    const recs = [msg(1, { pics: [FULL816] }), msg(2, { pics: [FULL816], sw: 1280, sh: 720 })];
+    const pics = picturesBySeq(recs);
+    const scenes = scenesBySeq(pics, { screen: guess, sizes: screenSizeMarks(recs) });
+    // seq 1 (older bridge, no size known): the guess — it covers the whole screen
+    expect(scenes.get(1)!.cg.map(p => p.name)).toEqual(["eve_01"]);
+    expect(scenes.get(1)!.screen).toBeUndefined();
+    // seq 2: the real 1280×720 screen — a standing image, and the shot keeps the size for the panel aspect
+    expect(scenes.get(2)!.stand.map(p => p.name)).toEqual(["eve_01"]);
+    expect(scenes.get(2)!.screen).toEqual(real);
+    expect(nextShot(null, scenes.get(2)).shot).toMatchObject({ kind: "stand", screen: real });
+  });
+
+  it("falls back to live.json's size, then the guess, for logs without sizes", () => {
+    const recs = [msg(1, { pics: [FULL816] })];
+    const live = scenesBySeq(picturesBySeq(recs), { screen: real, liveScreen: real, sizes: screenSizeMarks(recs) });
+    expect(live.get(1)!.stand).toHaveLength(1);
+    expect(live.get(1)!.screen).toEqual(real);
+    const old = scenesBySeq(picturesBySeq(recs), { screen: guess });
+    expect(old.get(1)).toEqual({ cg: [expect.objectContaining({ name: "eve_01" })], stand: [] });
   });
 });
