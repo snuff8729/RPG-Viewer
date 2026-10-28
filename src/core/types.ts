@@ -87,6 +87,8 @@ export interface GameData {
   noticePlugins?: string[];
   /** plugins.js에서 켜진 플러그인 이름(게임 전용 어댑터 찾기용). 없으면 없음. */
   enabledPlugins?: string[];
+  /** plugins.js MenuCommonEvent가 메뉴 화면에서 실행하는 커먼 이벤트 id(예전 기록의 메뉴 그림 판정용). 없으면 없음. */
+  menuCommonEvents?: number[];
 }
 
 // ---- 해석 결과 ----

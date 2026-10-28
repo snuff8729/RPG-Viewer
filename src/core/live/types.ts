@@ -1,6 +1,10 @@
 import type { GameData, Location, PageEntry } from "../types";
 
-export interface RecordBase { v: 1; seq: number; t: number; run: number; branch: number }
+export interface RecordBase {
+  v: 1; seq: number; t: number; run: number; branch: number;
+  /** 1.17.0+: 맵·전투가 아닌 화면(메뉴 등)에서 쓴 기록이면 "menu". screen 기록은 1.10.0+ 맵·전투·메뉴 */
+  scene?: "battle" | "map" | "menu";
+}
 export interface StateChange {
   kind: "switch" | "variable" | "selfSwitch"; id: number | string; value: number | boolean;
   /** 플러그인이 잦은 변수로 보고 기록을 줄이는 중에 남긴 변경(변수만). 있으면 그 변수는 잦은 변수다. */

@@ -1,5 +1,6 @@
 import { parsePluginsJs } from "../live/installer";
 import type { LogRecord } from "../live/types";
+import { withoutMenuRecords, type MenuCommonEvents } from "../live/menuScenes";
 import type { SystemData } from "../types";
 
 /**
@@ -99,16 +100,12 @@ export function parsePics(v: unknown): ScreenPicture[] | null {
 }
 
 /**
- * 메뉴 화면 그림 기록(screen, scene "menu")을 뺀 기록. keepMenu면 그대로(같은 배열).
- * 기록 플러그인 1.16.0 전에는 게임 전용 확장이 메뉴를 열 때마다 메뉴의 스탠딩을 기록했다 — 어댑터의
- * `메뉴 화면 그림도 기록`을 켰을 때만 보인다. 예외를 던지지 않는다.
+ * 메뉴 화면 그림을 뺀 기록(menu 화면 기록, MenuCommonEvent 커먼 이벤트의 그림 — core/live/menuScenes).
+ * keepMenu(어댑터의 `메뉴 화면 그림도 기록`)면 그대로(같은 배열). 예외를 던지지 않는다.
  */
-export function withoutMenuScreens(path: LogRecord[], keepMenu: boolean): LogRecord[] {
-  if (keepMenu || !Array.isArray(path)) return Array.isArray(path) ? path : [];
-  if (!path.some(isMenuScreen)) return path;
-  return path.filter(r => !isMenuScreen(r));
+export function withoutMenuScreens(path: LogRecord[], keepMenu: boolean, menu?: MenuCommonEvents | null): LogRecord[] {
+  return withoutMenuRecords(path, keepMenu, menu);
 }
-const isMenuScreen = (r: LogRecord | null | undefined): boolean => !!r && r.type === "screen" && r.scene === "menu";
 
 /**
  * 경로 기록(seq 순)을 따라가며 대사마다 그때 화면 그림 묶음을 만든다: message seq → 그림 묶음.

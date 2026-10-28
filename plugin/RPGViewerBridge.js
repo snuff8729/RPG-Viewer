@@ -45,7 +45,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.16.0",
+    VERSION: "1.17.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -270,7 +270,10 @@
 
   // ---------------------------------------------------------------- records
   function makeRecord(type, t) {
-    return { v: 1, seq: meta.nextSeq++, t: t, run: run || 0, branch: branch || 0, type: type };
+    var rec = { v: 1, seq: meta.nextSeq++, t: t, run: run || 0, branch: branch || 0, type: type };
+    // 1.17.0: written on a menu (or any other non-map, non-battle) scene — e.g. MenuCommonEvent's common events
+    if (inMenuScene()) rec.scene = "menu";
+    return rec;
   }
 
   function pushLine(rec) {
@@ -468,7 +471,7 @@
     run = newRun;
     branch = meta.nextBranch++;
     lastChoices = null;
-    lastPicsKey = null; lastPicsSet = null; screenSettle = null;
+    lastPicsKey = null; lastPicsSet = null; screenSettle = null; mapPicsKey = null; mapPicsSet = null;
     battleLog = null;
     deferredNewGame = false;
     emit("branchStart", { reason: reason, parentBranch: parentBranch, fromSeq: fromSeq });
@@ -484,7 +487,7 @@
     run = r;
     branch = b;
     lastChoices = null;
-    lastPicsKey = null; lastPicsSet = null; screenSettle = null;
+    lastPicsKey = null; lastPicsSet = null; screenSettle = null; mapPicsKey = null; mapPicsSet = null;
     battleLog = null;
     deferredNewGame = false;
   }
@@ -1046,6 +1049,30 @@
   function inBattleNow() {
     var p = G.$gameParty;
     return !!(p && p.inBattle && p.inBattle());
+  }
+
+  // 1.17.0: the current scene is neither the map nor a battle (Scene_MenuBase descendants, save / load, game over…).
+  // A scene with a spriteset counts as the map.
+  function inMenuScene() {
+    try {
+      var sc = G.SceneManager && G.SceneManager._scene;
+      if (!sc || sc._spriteset) return false;
+      if ((G.Scene_Map && sc instanceof G.Scene_Map) || (G.Scene_Battle && sc instanceof G.Scene_Battle)) return false;
+      if (G.Scene_Boot && sc instanceof G.Scene_Boot) return false;
+      if (G.Scene_Title && sc instanceof G.Scene_Title) return false;
+      return !inBattleNow();
+    } catch (e) { return false; }
+  }
+  // 1.17.0: the map's last snapshot is kept aside while a menu is open (menu common events may show / erase pictures
+  // on the shared Game_Screen) and comes back when the menu closes, so the map compares against its own pictures.
+  var picsInMenu = false, mapPicsKey = null, mapPicsSet = null;
+  function syncPicsScene() {
+    var menu = inMenuScene();
+    if (menu === picsInMenu) return menu;
+    picsInMenu = menu;
+    if (menu) { mapPicsKey = lastPicsKey; mapPicsSet = lastPicsSet; }
+    else { lastPicsKey = mapPicsKey; lastPicsSet = mapPicsSet; screenSettle = null; }
+    return menu;
   }
 
   function choicePending() {
@@ -1732,6 +1759,8 @@
   // way (enemy / actor battler sprites carry no picture id and are never recorded).
   function picsFields() {
     if (!capturePictures) return null;
+    // 1.17.0: on a menu scene no snapshot (unless the viewer asked for menu scenes)
+    if (syncPicsScene() && !captureMenuScenes) return null;
     var pics = picturesNow();
     if (pics === null) return null;
     var key = JSON.stringify(pics);
@@ -1847,6 +1876,7 @@
     // the map coming back): the half-built screen is no "gone" picture. lastPicsSet survives the scene change, so
     // the map that comes back with the same pictures writes nothing.
     if (sc && (sm._nextScene || sm._exiting || sm._sceneStarted === false)) { screenDirty = true; return; }
+    syncPicsScene();
     var snap = sc && (sc._spriteset || extCaptures(sc)) ? screenNow() : null;
     screenDirty = false;
     if (!snap) { screenSettle = null; return; }

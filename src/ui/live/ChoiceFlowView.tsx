@@ -6,7 +6,8 @@ import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
 import { readerItems } from "@/core/live/reader";
 import { useAddons } from "@/app/AddonsProvider";
 import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
-import { DEFAULT_SCREEN } from "@/core/addons/screenPictures";
+import { DEFAULT_SCREEN, withoutMenuScreens } from "@/core/addons/screenPictures";
+import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { useNoticesShown } from "./noticeDisplay";
 import type { HistoryModel } from "@/core/live/types";
 import { Badge } from "@/components/ui/badge";
@@ -90,18 +91,19 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const { overrides } = usePluginOverrides();
   const [battlesShown] = useBattlesShown();
   const [noticesShown] = useNoticesShown();
-  const { hiddenImages } = useAddons();
+  const { hiddenImages, menuPicturesShown } = useAddons();
 
   const flow = useMemo(() => {
     if (!data) return [];
-    const path = branchPath(records, model, branch);
+    // 메뉴 화면 그림은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
+    const path = withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuCommonEventsOf(data.menuCommonEvents, data.commonEvents));
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
     const choiceText = choiceTexts(path, data);
     // 읽기에서 숨긴 그림은 다시 쌓은 화면에서도 뺀다
     const ctx = { screen: data.screenSize ?? DEFAULT_SCREEN, hidden: hiddenImageMatcher(hiddenImages) };
     const reader = readerItems(folded, data, choiceText, model, overrides, null, { battles: battlesShown, notices: noticesShown, compose: { ctx } });
     return choiceFlow({ items: folded, reader, data, model, coverage, branch, choiceText });
-  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenImages]);
+  }, [data, records, model, branch, noisy, uncertainSeqs, changedSeqs, coverage, overrides, battlesShown, noticesShown, hiddenImages, menuPicturesShown]);
 
   if (!data) return null;
 
