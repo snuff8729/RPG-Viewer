@@ -6,7 +6,16 @@ export interface PageConditions {
   selfSwitchValid: boolean; selfSwitchCh: string;
   itemValid: boolean; itemId: number; actorValid: boolean; actorId: number;
 }
-export interface EventPage { conditions: PageConditions; trigger: number; list: EventCommand[] }
+/** 이벤트 페이지 그래픽. tileId > 0이면 타일, 아니면 캐릭터 시트의 한 칸. */
+export interface EventImage { tileId: number; characterName: string; characterIndex: number; direction: number; pattern: number }
+export interface EventPage {
+  conditions: PageConditions; trigger: number; list: EventCommand[];
+  image?: EventImage;
+  /** 0: 캐릭터 아래, 1: 캐릭터와 같음, 2: 캐릭터 위. */
+  priorityType?: number;
+  through?: boolean;
+  directionFix?: boolean;
+}
 export interface MapEvent { id: number; name: string; note?: string; x: number; y: number; pages: EventPage[] }
 export interface MapData { displayName: string; width: number; height: number; events: (MapEvent | null)[] }
 export interface MapInfo { id: number; name: string; parentId: number; order: number }
