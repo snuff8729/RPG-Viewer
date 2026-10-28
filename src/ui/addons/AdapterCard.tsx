@@ -52,7 +52,7 @@ function useAdapterInstall(adapter: BundledAdapter) {
 
 /** 이 게임에 맞는 게임 전용 어댑터 하나(게임 설정 Sheet) */
 export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
-  const { isAdapterOn, setAdapterOn } = useAddons();
+  const { isAdapterOn, setAdapterOn, isAdapterOptionOn, setAdapterOption } = useAddons();
   const { connection, live } = useLive();
   const { status, run, canInstall } = useAdapterInstall(adapter);
   const [result, setResult] = useState<InstallResult | null>(null);
@@ -90,6 +90,18 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
       </CardHeader>
       {on && (
         <CardContent className="flex flex-col gap-3 text-sm">
+          {(adapter.manifest.options ?? []).map((o) => {
+            const oid = `${htmlId}-${o.id}`;
+            return (
+              <div key={o.id} className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={oid}>{o.label}</Label>
+                  {o.description && <p className="text-muted-foreground">{o.description}</p>}
+                </div>
+                <Switch id={oid} checked={isAdapterOptionOn(id, o.id)} onCheckedChange={(v) => setAdapterOption(id, o.id, v)} />
+              </div>
+            );
+          })}
           {hasScript && !canInstall && (
             <Alert>
               <AlertDescription>게임 쪽 확장은 폴더 열기로 연 게임에서만 설치할 수 있어요.</AlertDescription>

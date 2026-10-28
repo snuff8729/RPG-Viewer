@@ -8,13 +8,14 @@
  * RPG Viewer가 설치하는 게임 전용 확장입니다(RPGViewerBridge 1.13.0 이상 필요).
  * CharacterPictureManager가 그리는 캐릭터 스탠딩에 배우 번호·이름·겹 이름을 붙이고,
  * 나타나기·사라지기·흐려짐(unfocus)·흔들림 같은 움직임 대신 자리 잡은 모습으로 기록합니다.
- * 스탠딩이 바뀌면 바로 화면을 다시 읽게 합니다. 메뉴 화면의 스탠딩도 기록합니다.
+ * 스탠딩이 바뀌면 바로 화면을 다시 읽게 합니다. 메뉴 화면의 스탠딩은 RPG Viewer에서
+ * "메뉴 화면 그림도 기록"을 켠 경우만 기록합니다(기록 플러그인 1.16.0 이상).
  * 게임 화면과 진행에는 영향을 주지 않습니다. 플러그인 명령이나 파라미터는 없습니다.
  */
 (function () {
   "use strict";
   var G = Function("return this")();
-  var VERSION = "1.0.0";
+  var VERSION = "1.0.1";
 
   // CharacterPictureManager (Triacontane) keeps its classes private. Duck typing instead:
   //   scene._standSpriteContainer (Sprite) holds one Sprite_StandPicture per actor, scene._standSprites: Map actorId -> it.
@@ -91,6 +92,7 @@
         };
       });
     },
+    // menu scenes with stands; the bridge (1.16.0+) asks only while the viewer's "메뉴 화면 그림도 기록" is on
     captureScene: function (scene) {
       var m = scene && scene._standSprites;
       return !!(scene && scene._standSpriteContainer && m && m.size > 0);

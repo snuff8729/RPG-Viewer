@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
-import { picturesBySeq, scenesBySeq } from "@/core/addons/screenPictures";
+import { picturesBySeq, scenesBySeq, withoutMenuScreens } from "@/core/addons/screenPictures";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchPath, foldTimeline, representative } from "@/core/live/history";
@@ -104,7 +104,12 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
   const live = withLive ? liveNow : null;
 
-  const path = useMemo(() => (branch === null ? [] : branchPath(records, model, branch)), [records, model, branch]);
+  // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
+  const { menuPicturesShown } = useAddons();
+  const path = useMemo(
+    () => (branch === null ? [] : withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown)),
+    [records, model, branch, menuPicturesShown],
+  );
   const { overrides } = usePluginOverrides();
   const [showAllPlugins] = usePluginShowAll();
   const [battlesShown] = useBattlesShown();

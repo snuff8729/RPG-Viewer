@@ -1008,7 +1008,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.15.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.16.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1016,7 +1016,7 @@ describe("RPGViewerBridge", () => {
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
         speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
-        lastCommand: null, controlT: null, capturePictures: false, captureNotices: false, notices: [], extensions: [],
+        lastCommand: null, controlT: null, capturePictures: false, captureMenuScenes: false, captureNotices: false, notices: [], extensions: [],
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null },
       },
     });
@@ -1057,6 +1057,41 @@ describe("RPGViewerBridge", () => {
     h.clock.t += 1000;
     h.bridge._tick();
     expect(h.readLive().events).toEqual([{ eventId: 1, page: 0, x: 7, y: 6, d: 4 }]);
+  });
+
+  it("marks events spawned at runtime with their source (1.16.0): EventReSpawn fields, identity lookup, template", () => {
+    h = newGame();
+    const g = h.g;
+    const ev1 = h.addMapEvent(1, [[cmd(0)]]);
+    const ev2 = h.addMapEvent(2, [[cmd(0)]]);
+    const tplEvent = { id: 3, name: "TplEnemy", pages: [{ list: [cmd(0)] }] };
+    g.$dataTemplateEvents = [null, null, null, tplEvent];
+    g.$dataMap = { events: [null, ev1._data, ev2._data] };
+    // TemplateEvent swaps event() of a map event: still an event of the map data
+    ev2._data = tplEvent;
+    // EventReSpawn Game_PrefabEvent: event() is $dataMap.events[originalEventId]
+    const prefab = h.addMapEvent(6, [[cmd(0)]]);
+    Object.assign(prefab, { _originalEventId: 1, _isTemplate: false, _data: g.$dataMap.events[1], x: 4, y: 5 });
+    const prefabTpl = h.addMapEvent(7, [[cmd(0)]]);
+    Object.assign(prefabTpl, { _originalEventId: 3, _isTemplate: true, _data: tplEvent });
+    // another spawn plugin: no fields, event() is the data object of event 1 / a template event / unknown
+    const copy = h.addMapEvent(8, [[cmd(0)]]);
+    copy._data = g.$dataMap.events[1];
+    const copyTpl = h.addMapEvent(9, [[cmd(0)]]);
+    copyTpl._data = tplEvent;
+    const unknown = h.addMapEvent(10, [[cmd(0)]]);
+    unknown._data = { id: 1, name: "Mystery", pages: [{ list: [cmd(0)] }] };
+    h.bridge._snapshotNow();
+    const byId = new Map(h.readLive().events.map((e: any) => [e.eventId, e]));
+    expect(byId.get(1)).toEqual({ eventId: 1, page: 0 });
+    expect(byId.get(2)).toEqual({ eventId: 2, page: 0 });
+    expect(byId.get(6)).toEqual({ eventId: 6, page: 0, x: 4, y: 5, spawn: { from: 1, tpl: false } });
+    expect(byId.get(7)).toMatchObject({ spawn: { from: 3, tpl: true } });
+    expect(byId.get(8)).toMatchObject({ spawn: { from: 1, tpl: false } });
+    expect(byId.get(9)).toMatchObject({ spawn: { from: 3, tpl: true } });
+    expect(byId.get(10)).toMatchObject({ spawn: { name: "Mystery" } });
+    delete g.$dataMap;
+    delete g.$dataTemplateEvents;
   });
 
   it("does not write live.json on the title screen and a title transfer starts no run", () => {
@@ -1760,13 +1795,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.15\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.16\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.15.0");
+    expect(h.bridge.VERSION).toBe("1.16.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

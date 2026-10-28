@@ -31,6 +31,8 @@
  * 초당 30개까지만 남기고, 게임이 보여 주는 내용은 바꾸지 않습니다.
  * 게임 전용 확장(RPGViewerBridge_<id>.js, 이 플러그인 바로 뒤)은
  * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
+ * 화면 그림은 맵과 전투 화면에서만 기록합니다(메뉴 화면은 RPG Viewer에서 따로 켠 경우만).
+ * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -43,7 +45,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.15.0",
+    VERSION: "1.16.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -133,6 +135,7 @@
   var extraUpdate = false;
   // screen picture capture (1.6.0, control.json "capturePictures"; off by default)
   var capturePictures = false;
+  var captureMenuScenes = false; // 1.16.0: control.json captureMenuScenes — extensions may capture menu scenes
   var lastPicsKey = null;     // JSON of the last picture snapshot written in this branch (null = none yet)
   var lastPicsSet = null;     // set signature of that snapshot (1.10.1 screen records: visible images, coarse places)
   var PICS_MAX = 60, PIC_NAME_MAX = 200, PICS_SCAN_MAX = 1000;
@@ -525,6 +528,44 @@
     return out;
   }
 
+  // 1.16.0 events made while the game runs (EventReSpawn's Game_PrefabEvent, other spawn plugins): where their data
+  // comes from, so the viewer can draw them. null = an event of the map data. Otherwise { from, tpl } (tpl: a
+  // TemplateEvent template map event) or { name } when the source is not found. EventReSpawn keeps
+  // _originalEventId / _isTemplate; anything else is found by identity of event() in $dataMap.events or
+  // $dataTemplateEvents. An event whose id is in the map data stays ordinary (TemplateEvent swaps event() of those)
+  // unless event() is another event of the map data. Cached per event while event() stays the same object.
+  var SPAWN_NAME_MAX = 60;
+  function indexByIdentity(list, obj) {
+    if (!list || typeof list.length !== "number") return -1;
+    for (var i = 1; i < list.length; i++) if (list[i] === obj) return i;
+    return -1;
+  }
+  function spawnOf(ev, id) {
+    var dm = G.$dataMap, list = dm && dm.events;
+    if (!list || typeof list.length !== "number" || typeof id !== "number") return null;
+    var obj = typeof ev.event === "function" ? ev.event() : null;
+    var c = ev._rpgvSpawn;
+    if (c && c.obj === obj && c.list === list) return c.res;
+    var res = spawnFind(ev, id, list, obj);
+    try { ev._rpgvSpawn = { obj: obj, list: list, res: res }; } catch (e) { /* frozen object: no cache */ }
+    return res;
+  }
+  function spawnFind(ev, id, list, obj) {
+    var own = list[id] || null;
+    if (own && obj === own) return null;
+    var orig = ev._originalEventId;
+    if (typeof orig === "number" && isFinite(orig) && orig > 0 && (!own || orig !== id)) {
+      return { from: orig, tpl: ev._isTemplate === true };
+    }
+    var k = obj ? indexByIdentity(list, obj) : -1;
+    if (own) return k > 0 && k !== id ? { from: k, tpl: false } : null;
+    if (k > 0) return { from: k, tpl: false };
+    k = obj ? indexByIdentity(G.$dataTemplateEvents, obj) : -1;
+    if (k > 0) return { from: k, tpl: true };
+    var name = obj && typeof obj.name === "string" ? obj.name : "";
+    return { name: name.length > SPAWN_NAME_MAX ? name.slice(0, SPAWN_NAME_MAX) : name };
+  }
+
   function buildSnapshot() {
     var map = G.$gameMap, player = G.$gamePlayer, sw = G.$gameSwitches, vars = G.$gameVariables;
     var ss = G.$gameSelfSwitches, party = G.$gameParty, msg = G.$gameMessage;
@@ -542,6 +583,9 @@
       // live position (moving NPCs): the viewer draws markers / routes there
       if (typeof ev.x === "number" && typeof ev.y === "number") { entry.x = ev.x; entry.y = ev.y; }
       if (typeof ev._direction === "number") entry.d = ev._direction;
+      var sp = null;
+      try { sp = spawnOf(ev, entry.eventId); } catch (es) { reportError(es); }
+      if (sp) entry.spawn = sp;
       events.push(entry);
     }
     var variables = {};
@@ -581,6 +625,7 @@
         lastCommand: lastCommand,
         controlT: controlT,
         capturePictures: capturePictures,
+        captureMenuScenes: captureMenuScenes,
         captureNotices: captureNotices,
         notices: noticeHooked.slice(),
         extensions: bridge.extensions(),
@@ -923,6 +968,7 @@
     var cap = c.capturePictures === true;
     if (cap !== capturePictures) { lastPicsKey = null; lastPicsSet = null; screenSettle = null; } // turned on again: the next snapshot is written in full
     capturePictures = cap;
+    captureMenuScenes = c.captureMenuScenes === true;
     captureNotices = c.captureNotices === true;
     liveActors = c.liveActors === true;
     noticeExtra = noticePaths(c.noticeHooks);
@@ -1349,7 +1395,8 @@
   // Game adapters (adapters/<id>/bridge.js in the RPG Viewer repo, installed as js/plugins/RPGViewerBridge_<id>.js right
   // after this plugin) register with RPGViewerBridge.registerExtension(ext). Every field but id is optional:
   //   ext.onInstall(api)                   once, right away (api below)
-  //   ext.captureScene(scene) -> true      read this scene's images too although it has no spriteset (menu scenes)
+  //   ext.captureScene(scene) -> true      read this scene's images too although it has no spriteset (menu scenes);
+  //                                        1.16.0: asked only while control.json captureMenuScenes is on
   //   ext.snapshotEntry(sprite, entry, scene) -> entry | null | undefined
   //                                        for each captured image: a changed entry, null = drop it, undefined = keep it
   //                                        (replace animated values with settled ones)
@@ -1389,6 +1436,7 @@
     return ids;
   };
   function extCaptures(sc) {
+    if (!captureMenuScenes) return false;
     for (var i = 0; i < extensions.length; i++) {
       var x = extensions[i];
       if (typeof x.captureScene !== "function") continue;
@@ -1439,8 +1487,15 @@
   // 1.10.0: the same walk collects every other sprite showing an img/pictures bitmap (plugins drawing cut-ins with
   // plain Sprites), its world transform and alpha accumulated down the tree. Bounded: depth 8, PICS_TREE_MAX nodes;
   // a tilemap and sprites showing other img folders (characters, battlers, system...) are not entered.
+  // 1.16.0: plugins add cut-in containers last to Spriteset_Map, behind the tilemap, every character, light / fog
+  // layers...: the picture container is read first, then the spriteset's children from the top-most (last) down,
+  // then the rest of the scene. Tilemaps, Sprite_Character / Balloon / Animation / Destination and Weather are never
+  // entered, and only nodes that show an img/pictures bitmap or have children count toward PICS_TREE_MAX (a bare
+  // leaf is skipped for free; PICS_STEP_MAX bounds the whole loop). Plain sprites keep their drawing order.
   // Returns { pictures: [Sprite_Picture], sprites: [{ s, name, m, alpha }], pending: picture bitmaps still loading }.
-  var SPRITE_ID_BASE = 1000, lastScanVisited = 0;
+  var SPRITE_ID_BASE = 1000, lastScanVisited = 0, PICS_STEP_MAX = 30000;
+  var SCAN_SKIP = ["Tilemap", "ShaderTilemap", "Sprite_Character", "Sprite_Balloon", "Sprite_Animation", "Sprite_AnimationMV",
+    "Weather", "Sprite_Destination"];
   var IDENTITY = [1, 0, 0, 1, 0, 0];
   function numOr(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
   function localMatrix(n) {
@@ -1483,43 +1538,76 @@
   }
   function scanScene(sc) {
     if (!sc || (!sc._spriteset && !extCaptures(sc))) return null;
-    var SP = G.Sprite_Picture, TM = G.Tilemap;
+    var SP = G.Sprite_Picture;
     var res = { pictures: [], sprites: [], pending: 0 };
-    var visited = 0;
-    var container = (sc._spriteset && sc._spriteset._pictureContainer) || null;
-    var walk = function (node, depth, m, alpha, skip) {
+    var visited = 0, steps = 0;
+    var skipKinds = [];
+    for (var k = 0; k < SCAN_SKIP.length; k++) if (typeof G[SCAN_SKIP[k]] === "function") skipKinds.push(G[SCAN_SKIP[k]]);
+    var skipped = function (c) {
+      for (var j = 0; j < skipKinds.length; j++) if (c instanceof skipKinds[j]) return true;
+      return false;
+    };
+    var spriteset = sc._spriteset || null;
+    var container = (spriteset && spriteset._pictureContainer) || null;
+    // children of node (seen at depth) into out; skip / skip2 are walked on their own
+    var walk = function (node, depth, m, alpha, skip, skip2, out) {
       var ch = node && node.children;
       if (!ch || typeof ch.length !== "number" || depth > 8) return;
-      for (var i = 0; i < ch.length && visited < PICS_TREE_MAX; i++) {
-        var c = ch[i];
+      for (var i = 0; i < ch.length; i++) visit(ch[i], depth, m, alpha, skip, skip2, out);
+    };
+    var visit = function (c, depth, m, alpha, skip, skip2, out) {
+      if (!c || typeof c !== "object" || c === skip || c === skip2) return;
+      if (++steps > PICS_STEP_MAX || visited >= PICS_TREE_MAX) return;
+      if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
         visited++;
-        if (!c || typeof c !== "object" || c === skip) continue;
-        if (typeof c._pictureId === "number" && (typeof SP !== "function" || c instanceof SP)) {
-          res.pictures.push(c);
-          continue;
-        }
-        if (typeof TM === "function" && c instanceof TM) continue;
-        var cm = mulMatrix(m, localMatrix(c));
-        var ca = alpha * ownAlpha(c);
-        var url = bitmapUrl(c.bitmap);
-        if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
-          var name = pictureNameOfUrl(url);
-          if (name === null) continue; // another img folder: what it carries is effects / icons
-          var b = c.bitmap;
-          if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
-            var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
-            if (ready) res.sprites.push({ s: c, name: name, m: cm, alpha: ca });
-            else res.pending++;
-          }
-        }
-        walk(c, depth + 1, cm, ca, skip);
+        res.pictures.push(c);
+        return;
       }
+      if (skipped(c)) return;
+      var url = bitmapUrl(c.bitmap);
+      var name = null;
+      if (url !== null && url !== "") { // "" = a bitmap drawn in memory (window contents, plugin canvases)
+        name = pictureNameOfUrl(url);
+        if (name === null) return; // another img folder: what it carries is effects / icons
+      }
+      var ch = c.children;
+      var kids = !!ch && typeof ch.length === "number" && ch.length > 0;
+      if (name === null && !kids) return; // a bare leaf: nothing to read
+      visited++;
+      var cm = mulMatrix(m, localMatrix(c));
+      var ca = alpha * ownAlpha(c);
+      if (name !== null) {
+        var b = c.bitmap;
+        if (!(typeof b.isError === "function" && b.isError()) && ca > 0) {
+          var ready = !(typeof b.isReady === "function" && !b.isReady()) && numOr(b.width, 0) > 0 && numOr(b.height, 0) > 0;
+          if (ready) out.push({ s: c, name: name, m: cm, alpha: ca });
+          else res.pending++;
+        }
+      }
+      if (kids) walk(c, depth + 1, cm, ca, skip, skip2, out);
     };
     if (container) {
       var w = worldOf(container, sc);
-      walk(container, 0, w.m, w.alpha, null);
+      walk(container, 0, w.m, w.alpha, null, null, res.sprites);
     }
-    walk(sc, 0, IDENTITY, 1, container);
+    // the spriteset (when it is on the scene) from its top-most child down, kept in drawing order
+    var setBuckets = null;
+    if (spriteset && spriteset.parent === sc && spriteset.children && typeof spriteset.children.length === "number") {
+      var sw = worldOf(spriteset, sc);
+      var sch = spriteset.children;
+      setBuckets = [];
+      if (++steps <= PICS_STEP_MAX && visited < PICS_TREE_MAX) visited++;
+      for (var si = sch.length - 1; si >= 0; si--) {
+        var bucket = [];
+        visit(sch[si], 1, sw.m, sw.alpha, container, null, bucket);
+        setBuckets[si] = bucket;
+      }
+    }
+    var rest = [];
+    walk(sc, 0, IDENTITY, 1, container, setBuckets ? spriteset : null, rest);
+    // drawing order: the spriteset is the scene's bottom layer, then the rest (windows, other layers)
+    if (setBuckets) for (var bi = 0; bi < setBuckets.length; bi++) if (setBuckets[bi]) for (var bj = 0; bj < setBuckets[bi].length; bj++) res.sprites.push(setBuckets[bi][bj]);
+    for (var ri = 0; ri < rest.length; ri++) res.sprites.push(rest[ri]);
     lastScanVisited = visited;
     return res;
   }
@@ -1754,7 +1842,11 @@
     var settling = screenSettle !== null && t - screenWatch.lastT >= SCREEN_SETTLE_GAP_MS;
     var polling = t - screenWatch.pollT >= SCREEN_POLL_MS;
     if (!dirty && !watching && !settling && !polling) return;
-    var sc = G.SceneManager && G.SceneManager._scene;
+    var sm = G.SceneManager, sc = sm && sm._scene;
+    // 1.16.0: not while a scene change is pending or the new scene has not started (leaving the map for the menu,
+    // the map coming back): the half-built screen is no "gone" picture. lastPicsSet survives the scene change, so
+    // the map that comes back with the same pictures writes nothing.
+    if (sc && (sm._nextScene || sm._exiting || sm._sceneStarted === false)) { screenDirty = true; return; }
     var snap = sc && (sc._spriteset || extCaptures(sc)) ? screenNow() : null;
     screenDirty = false;
     if (!snap) { screenSettle = null; return; }

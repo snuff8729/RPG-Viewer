@@ -1,5 +1,6 @@
 import { describeBranchCondition } from "../conditions/describe";
 import { parseTeCall, resolveTeCall, type CallCtx } from "../interpret/teCall";
+import { baseData } from "../live/spawned";
 import type { CompareOp, ConditionTest, EventCommand, GameData, Location, PageConditions, TroopPageConditions } from "../types";
 
 // ---- 공개 타입 ----
@@ -413,8 +414,9 @@ const EMPTY: DepGraph = makeGraph(new Map(), new Map(), new Map(), new Map());
 const cache = new WeakMap<GameData, DepGraph>();
 
 /** 의존 그래프. GameData마다 한 번 만들어 WeakMap에 둔다. 예외를 던지지 않는다. */
-export function buildDepGraph(data: GameData): DepGraph {
-  if (!data || typeof data !== "object") return EMPTY;
+export function buildDepGraph(given: GameData): DepGraph {
+  if (!given || typeof given !== "object") return EMPTY;
+  const data = baseData(given);
   const hit = cache.get(data);
   if (hit) return hit;
   let g: DepGraph;

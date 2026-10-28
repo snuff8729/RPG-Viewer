@@ -15,6 +15,8 @@ export interface AddonFile {
   adapters?: Record<string, boolean>;
   /** 이야기 진행 기준(직접 고른 것, `v:12` 또는 `s:3,4,5`). 없으면 자동 */
   storyProgress?: string;
+  /** 게임 전용 어댑터 카드의 설정: 어댑터 id → 설정 id → 켜짐. 없으면 모두 꺼짐(기본값). */
+  adapterOptions?: Record<string, Record<string, boolean>>;
 }
 
 /**
@@ -27,6 +29,7 @@ export function addonsJson(
   state: AddonState, pictureRoles?: PictureRoles | null, noticeHooks?: readonly string[] | null, spriteRoles?: SpriteRoles | null,
   adapters?: Record<string, boolean> | null,
   storyProgress?: string | null,
+  adapterOptions?: Record<string, Record<string, boolean>> | null,
 ): string {
   const enabled: Record<string, boolean> = {};
   for (const a of ADDONS) enabled[a.id] = state?.[a.id] === true;
@@ -41,7 +44,28 @@ export function addonsJson(
   if (Object.keys(ad).length > 0) body.adapters = ad;
   const story = cleanStoryProgress(storyProgress);
   if (story) body.storyProgress = story;
+  const opts = cleanAdapterOptions(adapterOptions);
+  if (Object.keys(opts).length > 0) body.adapterOptions = opts;
   return JSON.stringify(body, null, 2) + "\n";
+}
+
+const OPTION_ID_RE = /^[A-Za-z][A-Za-z0-9]{0,39}$/;
+
+/** 어댑터 id → 설정 id → 켜짐(쓸 수 없는 id·참/거짓이 아닌 값·빈 묶음은 버린다, 어댑터 50개·설정 20개까지) */
+export function cleanAdapterOptions(v: unknown): Record<string, Record<string, boolean>> {
+  const out: Record<string, Record<string, boolean>> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [id, opts] of Object.entries(v as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 50) break;
+    if (!ADAPTER_ID_RE.test(id) || !opts || typeof opts !== "object" || Array.isArray(opts)) continue;
+    const one: Record<string, boolean> = {};
+    for (const [k, on] of Object.entries(opts as Record<string, unknown>)) {
+      if (Object.keys(one).length >= 20) break;
+      if (OPTION_ID_RE.test(k) && typeof on === "boolean") one[k] = on;
+    }
+    if (Object.keys(one).length > 0) out[id] = one;
+  }
+  return out;
 }
 
 /** 이야기 진행 기준 글(`v:12`·`s:3,4`)을 고쳐 쓴다. 못 읽으면 null */
@@ -111,6 +135,8 @@ export function parseAddonFile(text: string | null | undefined): AddonFile | nul
     if (Object.keys(ad).length > 0) file.adapters = ad;
     const story = cleanStoryProgress((raw as { storyProgress?: unknown }).storyProgress);
     if (story) file.storyProgress = story;
+    const opts = cleanAdapterOptions((raw as { adapterOptions?: unknown }).adapterOptions);
+    if (Object.keys(opts).length > 0) file.adapterOptions = opts;
     return file;
   } catch {
     return null;

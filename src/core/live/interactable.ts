@@ -4,6 +4,7 @@ import type { Condition, GameData, GameIndex, Location, MapEvent, PageEntry, Scr
 import { pickKey, seenKey } from "./coverage";
 import { evaluate } from "./evaluate";
 import type { Coverage, LiveSnapshot } from "./types";
+import { baseData } from "./spawned";
 
 export interface Interactable {
   eventId: number; page: number; title: string; location: Location;
@@ -23,8 +24,9 @@ const condCache = new WeakMap<object, WeakMap<object, Condition[]>>();
 const countCache = new WeakMap<object, WeakMap<object, NewCounts>>();
 
 function pageConditions(pg: { conditions: any; trigger: any }, data: GameData): Condition[] {
-  let byPage = isObj(data) ? condCache.get(data) : undefined;
-  if (!byPage && isObj(data)) { byPage = new WeakMap(); condCache.set(data, byPage); }
+  const base = baseData(data);
+  let byPage = isObj(base) ? condCache.get(base) : undefined;
+  if (!byPage && isObj(base)) { byPage = new WeakMap(); condCache.set(base, byPage); }
   const hit = byPage?.get(pg);
   if (hit) return hit;
   const conds = describePageConditions(pg.conditions, pg.trigger, data);

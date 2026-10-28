@@ -3,6 +3,7 @@ import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { livePositions, withLivePositions } from "@/core/live/positions";
 import { enemyTiles } from "@/core/live/enemies";
+import { withSpawnedEvents } from "@/core/live/spawned";
 import { routeAvoiding, routeTo, standTiles } from "@/core/map/route";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { blockersFor, currentEvents, mapNumbers, pagesKey, targetOf, type LiveEventEntry } from "./mapEvents";
@@ -22,7 +23,9 @@ export function useHereMap() {
   const mapId = checklist?.mapId ?? null;
   const tilesState = useMapTiles(mapId);
   const tiles = tilesState.status === "ready" ? tilesState.tiles : null;
-  const mapData = mapId != null ? data?.maps.get(mapId) : undefined;
+  // 게임이 실행 중에 만든 이벤트(EventReSpawn 등)도 원본을 복사해 넣는다(구성이 같으면 같은 객체)
+  const withSpawned = data && live && live.mapId === mapId ? withSpawnedEvents(data, live) : data;
+  const mapData = mapId != null ? withSpawned?.maps.get(mapId) : undefined;
   // 활성 페이지·이벤트 위치가 바뀔 때만 이벤트 그림·길막음을 다시 계산한다
   const livePages = live && live.mapId === mapId ? live.events : null;
   const pk = livePages ? pagesKey(livePages) : "";

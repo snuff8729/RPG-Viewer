@@ -17,6 +17,7 @@ import { classifyPluginRecord, pluginRecOfCommand, type PluginOverrides } from "
 import { remainingLines, type RemainingLine } from "./remainingLines";
 import { repeatInfo, type RepeatInfo } from "./repeat";
 import type { Coverage, LiveSnapshot } from "./types";
+import { UNKNOWN_SPAWN_TITLE, withSpawnedEvents } from "./spawned";
 
 /**
  * 지금 할 수 있는 것으로 나눈다(잠긴 페이지가 있어도 지금 할 수 있으면 그쪽 구역).
@@ -359,16 +360,29 @@ function checkEvent(
   return item;
 }
 
+/** 원본을 모르는 생성 이벤트: 맵 표시만(다 봄 구역, 번호 없음) */
+function unknownSpawn(ev: MapEvent): ChecklistEvent {
+  const name = typeof ev.name === "string" ? ev.name : "";
+  return {
+    eventId: ev.id, name, title: UNKNOWN_SPAWN_TITLE, x: num(ev.x), y: num(ev.y), section: "done", activePage: -1, location: null,
+    auto: false, unseen: 0, unpicked: 0, remainingLines: [], laterLines: [], later: 0, repeat: [], locked: [],
+    interactable: false, gains: [], story: false, moves: false,
+    describe: `게임이 실행 중에 만든 이벤트예요 — 원본을 찾지 못했어요${name ? ` · ${name}` : ""}`,
+  };
+}
+
 /**
  * 지금 있는 맵(live.mapId)의 체크리스트: 안 본 내용·얻을 것·반복하면 달라지는 것·조사할 수 있는 것·잠긴 것·다 본 것.
  * 활성 페이지는 live.events가 있으면 그것을, 없으면 activePageIndex로 계산한다.
+ * 게임이 실행 중에 만든 이벤트(live.events spawn)는 원본을 복사해 넣는다(withSpawnedEvents, 번호는 맵 데이터 이벤트 뒤).
  * live 없음·맵 없음 → null. 예외를 던지지 않는다.
  */
 export function mapChecklist(
-  data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage?: MapPassage | null, overrides: PluginOverrides | null = null,
+  given: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot, passage?: MapPassage | null, overrides: PluginOverrides | null = null,
 ): MapChecklist | null {
   try {
-    if (!isObj(live) || !isObj(data) || !(data.maps instanceof Map) || !isObj(coverage)) return null;
+    if (!isObj(live) || !isObj(given) || !(given.maps instanceof Map) || !isObj(coverage)) return null;
+    const data = withSpawnedEvents(given, live);
     const mapId = num(live.mapId);
     const map = data.maps.get(mapId);
     if (!isObj(map)) return null;
@@ -386,9 +400,14 @@ export function mapChecklist(
     let n = 0;
     const sorted = arr<MapEvent | null>(map.events)
       .filter((ev): ev is MapEvent => isObj(ev) && typeof ev.id === "number" && Array.isArray(ev.pages))
-      .sort((a, b) => a.id - b.id);
+      // 실행 중에 생긴 이벤트(withSpawnedEvents)는 맵 데이터 이벤트 뒤에 번호를 받는다
+      .sort((a, b) => Number(!!a.spawned) - Number(!!b.spawned) || a.id - b.id);
     for (const ev of sorted) {
       try {
+        if (ev.spawned && ev.spawned.from === null) {
+          events.push(unknownSpawn(ev));
+          continue;
+        }
         const bg = backgroundOf(ev, mapId, data, reach);
         // 번호는 맵 데이터만으로(타일·지금 상태와 무관): 걸어서 실행하는 페이지가 있는 이벤트. 이야기·자동 진행이면 번호를 안 보일 뿐(빈 번호)
         const number = ev.pages.some(directPage) ? ++n : undefined;

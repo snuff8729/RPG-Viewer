@@ -1,6 +1,7 @@
 // 맵 이벤트를 데이터만으로 살핀다: 장소 이동(출구), 이 맵으로 들어오는 곳, 다른 이벤트가 부르는지. 예외를 던지지 않는다.
 import { flattenCalls, parseTeCall, type CallCtx } from "../interpret/teCall";
 import type { EventCommand, GameData, MapEvent } from "../types";
+import { baseData } from "./spawned";
 
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
@@ -36,7 +37,9 @@ function* allLists(data: GameData): Generator<unknown> {
   }
 }
 
-function gameScan(data: GameData): GameScan {
+function gameScan(given: GameData): GameScan {
+  // 생성 이벤트를 넣은 데이터(withSpawnedEvents)도 원래 데이터로 한 번만 훑는다
+  const data = baseData(given);
   const hit = scanCache.get(data);
   if (hit) return hit;
   const scan: GameScan = { ceCalls: new Map(), entries: new Map() };

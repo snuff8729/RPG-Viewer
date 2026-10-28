@@ -6,6 +6,7 @@ import type { ConditionTest, EventCommand, GameData, MapEvent, PageConditions } 
 import { evaluate } from "./evaluate";
 import { activePageIndex } from "./interactable";
 import type { LiveSnapshot } from "./types";
+import { baseData } from "./spawned";
 
 export interface RepeatInfo {
   kind: "nextPage" | "counter" | "random" | "choiceDependent";
@@ -314,8 +315,9 @@ function addTest(r: Reads, t: ConditionTest | undefined) {
 const condReadsCache = new WeakMap<object, WeakMap<object, Reads>>();
 const listReadsCache = new WeakMap<object, WeakMap<object, Reads>>();
 function memo(store: WeakMap<object, WeakMap<object, Reads>>, data: GameData, key: object, make: () => Reads): Reads {
-  let m = store.get(data);
-  if (!m) { m = new WeakMap(); store.set(data, m); }
+  const base = baseData(data);
+  let m = store.get(base);
+  if (!m) { m = new WeakMap(); store.set(base, m); }
   let hit = m.get(key);
   if (!hit) { hit = make(); m.set(key, hit); }
   return hit;
@@ -490,8 +492,9 @@ export function repeatInfo(ev: MapEvent, mapId: number, data: GameData, live: Li
     const pageObj = ev.pages[pg];
     if (!isObj(pageObj)) return [];
     const reads = eventReads(ev, mapId, pg, data);
-    let byKey = cache.get(data);
-    if (!byKey) { byKey = new Map(); cache.set(data, byKey); }
+    const base = baseData(data);
+    let byKey = cache.get(base);
+    if (!byKey) { byKey = new Map(); cache.set(base, byKey); }
     // 모든 페이지 객체 번호: 활성 페이지 판정에 다른 페이지도 쓰인다
     const pagesKey = ev.pages.map(p => (isObj(p) ? pageId(p) : 0)).join(",");
     const key = `${pagesKey}|${mapId},${ev.id},${pg}|${stateKey(live, reads, mapId, ev.id)}`;

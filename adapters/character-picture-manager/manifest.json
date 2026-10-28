@@ -6,5 +6,13 @@
   "bridgeScript": "bridge.js",
   "defaults": {
     "addons": { "screenPictures": true }
-  }
+  },
+  "options": [
+    {
+      "id": "menuPictures",
+      "label": "메뉴 화면 그림도 기록",
+      "description": "메뉴를 열 때 보이는 스탠딩도 기록하고 읽기에 보여줘요. 끄면 맵과 전투 화면만 기록해요.",
+      "control": "captureMenuScenes"
+    }
+  ]
 }
