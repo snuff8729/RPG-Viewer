@@ -233,6 +233,46 @@ describe("RPGViewerBridge", () => {
     ]);
   });
 
+  describe("frequent variable throttling", () => {
+    const varChanges = (log: any[], id: number) =>
+      log.filter((r) => r.type === "state").flatMap((r) => r.changes).filter((c: any) => c.kind === "variable" && c.id === id);
+
+    it("limits a per-frame variable to ~30 + one per 10s and keeps the last value", () => {
+      h = newGame();
+      let v = 0;
+      for (let f = 0; f < 7500; f++) { // 2 minutes at 16ms
+        h.g.$gameVariables.setValue(1, ++v);
+        h.g.$gameSwitches.setValue(2, f % 2 === 0);
+        h.clock.t += 16;
+        h.bridge._tick();
+      }
+      h.bridge._tick();
+      const log = h.readLog();
+      const ch = varChanges(log, 1);
+      expect(ch.length).toBeGreaterThanOrEqual(30);
+      expect(ch.length).toBeLessThanOrEqual(30 + 14 + 3);
+      expect(ch[ch.length - 1].value).toBeGreaterThan(v - 700); // within the last ~10s
+      expect(log.filter((r) => r.type === "state").flatMap((r) => r.changes).filter((c: any) => c.kind === "switch")).toHaveLength(7500);
+    });
+
+    it("emits the pending latest value once 10s passed, and releases when slow", () => {
+      h = newGame();
+      for (let i = 1; i <= 40; i++) { h.g.$gameVariables.setValue(1, i); h.bridge._tick(); h.clock.t += 16; }
+      h.clock.t += 1000;
+      h.g.$gameVariables.setValue(1, 100); // throttled (last emit < 10s ago)
+      h.bridge._tick();
+      expect(varChanges(h.readLog(), 1).some((c: any) => c.value === 100)).toBe(false);
+      h.clock.t += 10_000;
+      h.bridge._tick();
+      expect(varChanges(h.readLog(), 1).some((c: any) => c.value === 100)).toBe(true);
+      // slow changes: window count drops to <= 30 -> every change recorded again
+      h.clock.t += 61_000;
+      const before = varChanges(h.readLog(), 1).length;
+      for (let i = 0; i < 5; i++) { h.g.$gameVariables.setValue(1, 200 + i); h.bridge._tick(); h.clock.t += 1000; }
+      expect(varChanges(h.readLog(), 1).length).toBe(before + 5);
+    });
+  });
+
   it("logs only numeric or boolean variable values", () => {
     h = newGame();
     h.g.$gameVariables.setValue(1, "text");
@@ -436,7 +476,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.2", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.3", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -562,13 +602,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.2"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.3"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.2");
+    expect(h.bridge.VERSION).toBe("1.0.3");
   });
 
   it("uses ES2015-compatible syntax only", () => {

@@ -21,7 +21,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.0.2",
+    VERSION: "1.0.3",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -152,10 +152,68 @@
 
   // Parallel events changing variables every frame would otherwise produce a record per frame:
   // within a flush window, one group per src+cmd and only the last value per (kind, id).
+  //
+  // Variables changing more than FREQ_COUNT times within FREQ_WINDOW_MS are throttled to one
+  // record per FREQ_EMIT_MS (the latest value is kept pending and emitted once allowed).
+  var FREQ_WINDOW_MS = 60000, FREQ_COUNT = 30, FREQ_EMIT_MS = 10000;
+  var varTimes = {};    // id -> last FREQ_COUNT+1 change times (bounded)
+  var varLastEmit = {}; // id -> time of the last recorded change
+  var varPending = {};  // id -> { value, src, cmd } not yet recorded
+  var varPendingCount = 0;
+
+  function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+
+  function setPending(id, p) {
+    if (!has(varPending, id)) varPendingCount++;
+    varPending[id] = p;
+  }
+
+  function clearPending(id) {
+    if (has(varPending, id)) { delete varPending[id]; varPendingCount--; }
+  }
+
+  // Returns true when this variable change should be recorded now.
+  function admitVariable(id, value, src, cmd) {
+    var t = now();
+    var key = String(id);
+    var times = has(varTimes, key) ? varTimes[key] : (varTimes[key] = []);
+    times.push(t);
+    if (times.length > FREQ_COUNT + 1) times.shift();
+    var frequent = times.length > FREQ_COUNT && t - times[0] <= FREQ_WINDOW_MS;
+    var last = has(varLastEmit, key) ? varLastEmit[key] : -Infinity;
+    if (!frequent || t - last >= FREQ_EMIT_MS) {
+      varLastEmit[key] = t;
+      clearPending(key);
+      return true;
+    }
+    setPending(key, { value: value, src: src, cmd: cmd });
+    return false;
+  }
+
+  // Record pending latest values whose 10s has elapsed (all of them when force is set).
+  function releasePending(force) {
+    if (!varPendingCount) return;
+    var t = now();
+    for (var key in varPending) {
+      if (!has(varPending, key)) continue;
+      if (!force && t - (has(varLastEmit, key) ? varLastEmit[key] : -Infinity) < FREQ_EMIT_MS) continue;
+      var p = varPending[key];
+      clearPending(key);
+      varLastEmit[key] = t;
+      addChange("variable", Number(key), p.value, p.src, p.cmd);
+    }
+  }
+
   function recordChange(kind, id, value) {
     if (run === null) return;
     var src = currentCtx ? currentCtx.src : null;
     var cmd = currentCtx ? currentCtx.cmd : null;
+    if (kind === "variable" && !admitVariable(id, value, src, cmd)) return;
+    addChange(kind, id, value, src, cmd);
+  }
+
+  function addChange(kind, id, value, src, cmd) {
+    if (run === null) return;
     var gkey = JSON.stringify(src) + "#" + cmd;
     var g = Object.prototype.hasOwnProperty.call(groupByKey, gkey) ? groupByKey[gkey] : null;
     if (!g) {
@@ -173,7 +231,9 @@
   }
 
   function startBranch(reason, newRun, parentBranch, fromSeq) {
+    releasePending(true); // belongs to the branch that is ending
     closeState();
+    varTimes = {}; varLastEmit = {}; varPending = {}; varPendingCount = 0;
     run = newRun;
     branch = meta.nextBranch++;
     lastChoices = null;
@@ -182,6 +242,7 @@
   }
 
   function flush() {
+    releasePending(false);
     closeState();
     if (!buffer.length) return;
     var lines = buffer;
@@ -632,8 +693,12 @@
     try {
       setInterval(tick, 250);
       if (typeof window !== "undefined" && window.addEventListener) {
-        window.addEventListener("beforeunload", bridge._flushNow);
-        window.addEventListener("unload", bridge._flushNow);
+        var onUnload = function () {
+          try { releasePending(true); } catch (e1) { reportError(e1); }
+          bridge._flushNow();
+        };
+        window.addEventListener("beforeunload", onUnload);
+        window.addEventListener("unload", onUnload);
       }
     } catch (e) { /* timers unavailable: hooks still buffer */ }
   }
