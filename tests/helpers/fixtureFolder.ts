@@ -14,7 +14,7 @@ function walk(dir: string, prefix: string, out: Record<string, string | Uint8Arr
   }
 }
 
-export function loadFixtureFolder(name: "sample-mz" | "sample-mv"): MemoryFolder {
+export function loadFixtureFolder(name: "sample-mz" | "sample-mv" | "sample-te"): MemoryFolder {
   const files: Record<string, string | Uint8Array> = {};
   walk(join(FIXTURES, name), "", files);
   return new MemoryFolder(files);

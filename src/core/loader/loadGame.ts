@@ -2,6 +2,8 @@ import type { GameFolder } from "@/core/fs/folder";
 import type {
   Actor, CommonEvent, GameData, LoadError, MapData, MapInfo, NamedEntry, SystemData, Troop,
 } from "@/core/types";
+import { livePaths } from "@/core/live/installer";
+import { expandTemplateEvents, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
   | { ok: true; data: GameData }
@@ -79,8 +81,9 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
     .map((info) => info.id);
   const loaded: (MapData | undefined)[] = new Array(mapIds.length);
   const mapErrors: LoadError[] = [];
-  async function loadMap(id: number): Promise<MapData | undefined> {
-    const file = `${root!.data}/Map${String(id).padStart(3, "0")}.json`;
+  const mapFile = (id: number) => `${root!.data}/Map${String(id).padStart(3, "0")}.json`;
+  async function loadMap(id: number, mapErrors: LoadError[]): Promise<MapData | undefined> {
+    const file = mapFile(id);
     let v: unknown;
     try {
       const text = await folder.readText(file);
@@ -102,13 +105,31 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const worker = async () => {
     while (next < mapIds.length) {
       const i = next++;
-      loaded[i] = await loadMap(mapIds[i]).catch(() => undefined);
+      loaded[i] = await loadMap(mapIds[i], mapErrors).catch(() => undefined);
     }
   };
   await Promise.all(Array.from({ length: Math.min(MAP_CONCURRENCY, mapIds.length) }, worker));
   const maps = new Map<number, MapData>();
   mapIds.forEach((id, i) => { const m = loaded[i]; if (m) maps.set(id, m); });
   errors.push(...mapErrors.sort((a, b) => (a.mapId ?? 0) - (b.mapId ?? 0)));
+
+  // TemplateEvent 플러그인: <TE:값> 이벤트의 페이지를 템플릿 맵 이벤트의 페이지로 바꾼다.
+  let templateMapId: number | undefined;
+  try {
+    let pluginsText: string | null = null;
+    try { pluginsText = await folder.readText(livePaths(root.data).pluginsJs); } catch { pluginsText = null; }
+    const tplId = templateMapIdFromPlugins(pluginsText);
+    if (tplId !== null) {
+      // MapInfos에 있으면 이미 읽은 것을 쓰고(실패했으면 건너뜀), 없으면 파일을 조용히 읽어 본다.
+      const tplMap = mapIds.includes(tplId) ? maps.get(tplId) : await loadMap(tplId, []).catch(() => undefined);
+      if (tplMap) {
+        errors.push(...expandTemplateEvents(maps, tplMap, tplId, mapFile));
+        templateMapId = tplId;
+      }
+    }
+  } catch {
+    /* 템플릿을 풀지 못하면 그대로 둔다 */
+  }
 
   return {
     ok: true,
@@ -117,6 +138,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       dataRoot: root.data,
       imgRoot: root.img,
       system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, errors,
+      ...(templateMapId !== undefined ? { templateMapId } : {}),
     },
   };
 }

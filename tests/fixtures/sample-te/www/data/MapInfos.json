@@ -1,0 +1,15 @@
+[
+ null,
+ {
+  "id": 1,
+  "name": "마을",
+  "parentId": 0,
+  "order": 1
+ },
+ {
+  "id": 2,
+  "name": "템플릿",
+  "parentId": 0,
+  "order": 2
+ }
+]

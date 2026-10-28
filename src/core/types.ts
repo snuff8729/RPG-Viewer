@@ -7,7 +7,7 @@ export interface PageConditions {
   itemValid: boolean; itemId: number; actorValid: boolean; actorId: number;
 }
 export interface EventPage { conditions: PageConditions; trigger: number; list: EventCommand[] }
-export interface MapEvent { id: number; name: string; x: number; y: number; pages: EventPage[] }
+export interface MapEvent { id: number; name: string; note?: string; x: number; y: number; pages: EventPage[] }
 export interface MapData { displayName: string; events: (MapEvent | null)[] }
 export interface MapInfo { id: number; name: string; parentId: number; order: number }
 export interface CommonEvent { id: number; name: string; trigger: number; switchId: number; list: EventCommand[] }
@@ -41,6 +41,8 @@ export interface GameData {
   weapons: (NamedEntry | null)[];
   armors: (NamedEntry | null)[];
   errors: LoadError[];
+  /** TemplateEvent 플러그인의 템플릿 맵 id(템플릿 이벤트를 풀었을 때만). */
+  templateMapId?: number;
 }
 
 // ---- 해석 결과 ----

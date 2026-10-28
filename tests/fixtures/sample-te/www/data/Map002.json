@@ -1,0 +1,257 @@
+{
+ "displayName": "템플릿",
+ "events": [
+  null,
+  {
+   "id": 1,
+   "name": "문지기",
+   "note": "",
+   "x": 1,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        "문지기"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "지나가시오."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "name": "말하는 사람",
+   "note": "",
+   "x": 2,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        "주민"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "안녕하세요!"
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    },
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        "주민"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "또 왔네요."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "name": "상인",
+   "note": "",
+   "x": 3,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        "상인"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "물건 보고 가세요."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "name": "말하는 사람",
+   "note": "",
+   "x": 4,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        "가짜"
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "나는 두 번째."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

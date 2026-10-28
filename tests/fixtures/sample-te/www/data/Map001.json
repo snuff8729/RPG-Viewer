@@ -1,0 +1,160 @@
+{
+ "displayName": "마을",
+ "events": [
+  null,
+  {
+   "id": 1,
+   "name": "주민A",
+   "note": "<TE:말하는 사람>",
+   "x": 1,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "name": "상인 자리",
+   "note": " <TE: 3 > ",
+   "x": 2,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "name": "고장난 것",
+   "note": "<TE:없는것>",
+   "x": 3,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "name": "표지판",
+   "note": "",
+   "x": 4,
+   "y": 1,
+   "pages": [
+    {
+     "conditions": {
+      "switch1Valid": false,
+      "switch1Id": 1,
+      "switch2Valid": false,
+      "switch2Id": 1,
+      "variableValid": false,
+      "variableId": 1,
+      "variableValue": 0,
+      "selfSwitchValid": false,
+      "selfSwitchCh": "A",
+      "itemValid": false,
+      "itemId": 1,
+      "actorValid": false,
+      "actorId": 1
+     },
+     "trigger": 0,
+     "list": [
+      {
+       "code": 101,
+       "indent": 0,
+       "parameters": [
+        "",
+        0,
+        0,
+        2,
+        ""
+       ]
+      },
+      {
+       "code": 401,
+       "indent": 0,
+       "parameters": [
+        "마을에 오신 걸 환영합니다."
+       ]
+      },
+      {
+       "code": 0,
+       "indent": 0,
+       "parameters": []
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
