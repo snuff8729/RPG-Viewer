@@ -69,11 +69,14 @@ describe("readerItems", () => {
     const folded = foldTimeline(branchPath(recs, m, 1), m, {});
     const out = readerItems(folded, data, new Map(), m);
     expect(out.map(i => i.kind)).toEqual(["chapter", "message", "plugin", "chapter", "message", "plugin"]);
-    expect(out[2]).toEqual({ kind: "plugin", key: "r3", seq: 3, text: "TMng Search 종이 상자." });
+    expect(out[2]).toEqual({ kind: "plugin", key: "r3", seq: 3, text: "종이 상자.", raw: "TMng Search 종이 상자.", name: "TMng", tech: false });
     // 두 번째 같은 대화는 반복으로 접히고(플러그인 줄은 그 안에), 다른 위치의 플러그인 줄은 따로
     expect(out[4]).toMatchObject({ kind: "message", seq: 5, repeat: 1 });
-    expect(out[5]).toMatchObject({ kind: "plugin", seq: 7, text: "Other" });
+    expect(out[5]).toMatchObject({ kind: "plugin", seq: 7, text: "Other", tech: true });
     expect(lastSeqOf(out[5])).toBe(7);
+    // 명령별 설정이 이긴다
+    const over = readerItems(folded, data, new Map(), m, { TMng: "hide" });
+    expect(over[2]).toMatchObject({ kind: "plugin", tech: true, text: "TMng Search 종이 상자." });
   });
 
   it("infers speaker from face when empty", () => {

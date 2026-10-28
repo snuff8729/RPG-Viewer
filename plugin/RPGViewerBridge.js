@@ -27,7 +27,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.4.0",
+    VERSION: "1.5.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -955,6 +955,30 @@
     return clipText(parts.join(" ").trim());
   }
 
+  // name / args of a plugin command (1.5.0+): 356 -> first token and the remaining tokens,
+  // 357 -> plugin name, command name and the args object (strings clipped).
+  var PLUGIN_ARGS_MAX = 30;
+  function pluginFields(code, p) {
+    if (code === 356) {
+      var toks = String(p[0] == null ? "" : p[0]).split(/[\s　]+/);
+      var out = [];
+      for (var i = 0; i < toks.length; i++) if (toks[i] !== "") out.push(clipText(toks[i]));
+      return { name: out.length ? out[0] : "", args: out.slice(1, 1 + PLUGIN_ARGS_MAX) };
+    }
+    var args = {}, n = 0, src = p[3];
+    if (src && typeof src === "object") {
+      for (var k in src) {
+        if (!has(src, k) || n >= PLUGIN_ARGS_MAX) continue;
+        var v = src[k];
+        if (typeof v === "string") args[k] = clipText(v);
+        else if (typeof v === "number" || typeof v === "boolean") args[k] = v;
+        else continue;
+        n++;
+      }
+    }
+    return { plugin: String(p[0] == null ? "" : p[0]), name: String(p[1] == null ? "" : p[1]), args: args };
+  }
+
   // interp is owner or one of its (nested) child interpreters
   function inChain(owner, interp) {
     var i = owner, depth = 0;
@@ -989,7 +1013,8 @@
     if (interp._rpgvPar !== true && interp._rpgvPar !== false) interp._rpgvPar = parallelInterp(interp);
     if (interp._rpgvPar) return;
     var src = srcOf(interp);
-    var text = pluginText(code, interp._list[i].parameters || []);
+    var params = interp._list[i].parameters || [];
+    var text = pluginText(code, params);
     var lk = locKey(src);
     var key = (lk === null ? "?" + text : lk) + "#" + i;
     var seen = interp._rpgvPlugins;
@@ -1004,7 +1029,12 @@
     pluginLastT[key] = t;
     pluginTimes.push(t);
     if (pluginTimes.length > PLUGIN_CAP) pluginTimes.shift();
-    emit("plugin", { src: src, cmd: i, code: code, text: text });
+    var rec = { src: src, cmd: i, code: code, text: text };
+    var f = pluginFields(code, params);
+    if (code === 357) rec.plugin = f.plugin;
+    rec.name = f.name;
+    rec.args = f.args;
+    emit("plugin", rec);
   }
 
   // ---------------------------------------------------------------- hooks

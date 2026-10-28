@@ -6,6 +6,15 @@ const base = { v: 1 as const, seq: 1, t: 0, run: 1, branch: 1 };
 const rec = (r: object): HistoryItem => ({ kind: "record", record: { ...base, ...r } as never, uncertain: false, changed: false });
 
 describe("historyFilter", () => {
+  it("hides plugin records the predicate rejects (always-visible otherwise)", () => {
+    const text = rec({ type: "plugin", code: 356, text: "TMng Search 종이 상자." });
+    const tech = rec({ type: "plugin", code: 356, text: "SetVar 10 3" });
+    const items = [text, tech, rec({ type: "message" })];
+    expect(filterItems(items, new Set(ALL_KINDS))).toHaveLength(3);
+    const hide = (r: { text: string }) => r.text.startsWith("SetVar");
+    expect(filterItems(items, new Set(ALL_KINDS), hide)).toEqual([text, items[2]]);
+  });
+
   it("maps items to kinds", () => {
     expect(itemKind(rec({ type: "message" }))).toBe("message");
     expect(itemKind(rec({ type: "scroll" }))).toBe("message");

@@ -14,7 +14,8 @@ export type LogRecord = RecordBase & (
   | { type: "choice"; src: Location | null; cmd: number; picked: number }
   | { type: "picture"; src: Location | null; cmd: number; pictureId: number; name: string }
   /** 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357, 플러그인 1.3.0+). text: 356은 명령 글, 357은 플러그인·명령 이름과 문자열 인자 */
-  | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string }
+  /** 1.5.0+: name = 명령 이름(MV 첫 토큰·MZ 명령), args = MV 나머지 토큰 / MZ 인자 객체, plugin = MZ 플러그인 이름 */
+  | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string; plugin?: string; name?: string; args?: string[] | Record<string, unknown> }
   | { type: "transfer"; mapId: number; x: number; y: number }
   | { type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" }
   | { type: "state"; src: Location | null; cmd: number | null; changes: StateChange[] }

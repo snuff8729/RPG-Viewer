@@ -11,6 +11,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { FaceImage } from "../script/FaceImage";
 import { battleText, pickedFallbackText, reasonText, stateChangeText, transferText } from "./historyText";
+import { classifyPluginRecord, pluginKey } from "@/core/live/pluginText";
+import { PluginLine } from "./PluginLine";
+import { usePluginOverrides } from "./pluginDisplay";
 
 export interface TimelineCtx {
   data: GameData;
@@ -70,6 +73,14 @@ function MessageLine({ r, ctx, uncertain, changed }: { r: RecordOf<"message">; c
   );
 }
 
+/** 플러그인 명령 기록(숨길 기술 명령은 HistoryView가 이미 걸러 냈다) */
+function PluginRecordLine({ r, data }: { r: RecordOf<"plugin">; data: GameData }) {
+  const { overrides } = usePluginOverrides();
+  const c = classifyPluginRecord(r, overrides);
+  const raw = typeof r.text === "string" ? r.text : "";
+  return <PluginLine text={c.kind === "text" ? formatText(c.text, data) : raw} raw={raw} name={pluginKey(r)} tech={c.kind === "tech"} />;
+}
+
 function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: TimelineCtx; uncertain: boolean; changed: boolean }) {
   switch (r.type) {
     case "message": return <MessageLine r={r} ctx={ctx} uncertain={uncertain} changed={changed} />;
@@ -80,7 +91,7 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;
     case "picture": return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>🖼 {r.name}</Line>;
     case "plugin":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><span className="break-words text-muted-foreground">플러그인: {r.text}</span></Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><PluginRecordLine r={r} data={ctx.data} /></Line>;
     case "transfer": return <Line ctx={ctx}>{transferText(r, ctx.data)}</Line>;
     case "battle": return <Line ctx={ctx}>{battleText(r, ctx.data)}</Line>;
     case "save": return <Line ctx={ctx}>💾 저장 (슬롯 {r.slot})</Line>;
