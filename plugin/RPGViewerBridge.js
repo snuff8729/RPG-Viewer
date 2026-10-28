@@ -13,6 +13,8 @@
  * 전투 중 F10 이기기, F11 지기. 선택지는 자동으로 고르지 않습니다.
  * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
+ * 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357)의 이름과 문자열 인자도
+ * 기록합니다. 병렬 이벤트·병렬 커먼 이벤트의 것은 기록하지 않습니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -25,7 +27,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.1.0",
+    VERSION: "1.2.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -885,6 +887,80 @@
 
   function srcOf(interp) { return interp._rpgvSrc || null; }
 
+  // ---------------------------------------------------------------- plugin commands
+  // Plugin commands (356 MV / 357 MZ) run by events, recorded so the viewer can tell an examine
+  // spot or plugin-shown text was reached. Parallel interpreters are skipped; the same src+cmd is
+  // recorded once per interpreter run and once per 2 s, and at most 20 records per second overall.
+  var PLUGIN_TEXT_MAX = 500, PLUGIN_REPEAT_MS = 2000, PLUGIN_CAP = 20, PLUGIN_CAP_MS = 1000, PLUGIN_KEYS_MAX = 1000;
+  var pluginLastT = {}, pluginKeyCount = 0; // src+cmd key -> time it was last recorded
+  var pluginTimes = [];                     // times of the last PLUGIN_CAP plugin records
+
+  function clipText(s) { return s.length > PLUGIN_TEXT_MAX ? s.slice(0, PLUGIN_TEXT_MAX) : s; }
+
+  function pluginText(code, p) {
+    if (code === 356) return clipText(String(p[0] == null ? "" : p[0]).trim());
+    var parts = [String(p[0] == null ? "" : p[0]), String(p[1] == null ? "" : p[1])];
+    var args = p[3];
+    if (args && typeof args === "object") {
+      for (var k in args) {
+        if (has(args, k) && typeof args[k] === "string" && args[k] !== "") parts.push(args[k]);
+      }
+    }
+    return clipText(parts.join(" ").trim());
+  }
+
+  // interp is owner or one of its (nested) child interpreters
+  function inChain(owner, interp) {
+    var i = owner, depth = 0;
+    while (i && depth < 32) {
+      if (i === interp) return true;
+      i = i._childInterpreter; depth++;
+    }
+    return false;
+  }
+
+  // Parallel map events (trigger 4) and parallel common events (trigger 2) run in interpreters
+  // owned by their Game_Event / Game_CommonEvent; the map / troop interpreter is never parallel.
+  function parallelInterp(interp) {
+    var map = G.$gameMap;
+    if (!map) return false;
+    var lists = [map._events, map._commonEvents];
+    for (var l = 0; l < lists.length; l++) {
+      var arr = lists[l];
+      if (!arr || typeof arr.length !== "number") continue;
+      for (var i = 0; i < arr.length; i++) {
+        var o = arr[i];
+        if (o && o._interpreter && inChain(o._interpreter, interp)) return true;
+      }
+    }
+    return false;
+  }
+
+  function notePlugin(interp, code) {
+    if (run === null) return;
+    var i = cmdAt(interp, code);
+    if (i < 0) return;
+    if (interp._rpgvPar !== true && interp._rpgvPar !== false) interp._rpgvPar = parallelInterp(interp);
+    if (interp._rpgvPar) return;
+    var src = srcOf(interp);
+    var text = pluginText(code, interp._list[i].parameters || []);
+    var lk = locKey(src);
+    var key = (lk === null ? "?" + text : lk) + "#" + i;
+    var seen = interp._rpgvPlugins;
+    if (!seen || typeof seen !== "object") seen = interp._rpgvPlugins = {};
+    if (seen[key] === true) return;
+    var t = now();
+    if (has(pluginLastT, key) && t - pluginLastT[key] < PLUGIN_REPEAT_MS) return;
+    if (pluginTimes.length >= PLUGIN_CAP && t - pluginTimes[0] < PLUGIN_CAP_MS) return; // over the cap: drop
+    seen[key] = true;
+    if (pluginKeyCount >= PLUGIN_KEYS_MAX) { pluginLastT = {}; pluginKeyCount = 0; }
+    if (!has(pluginLastT, key)) pluginKeyCount++;
+    pluginLastT[key] = t;
+    pluginTimes.push(t);
+    if (pluginTimes.length > PLUGIN_CAP) pluginTimes.shift();
+    emit("plugin", { src: src, cmd: i, code: code, text: text });
+  }
+
   // ---------------------------------------------------------------- hooks
   function hook(owner, ownerName, name, make) {
     if (!owner || typeof owner[name] !== "function") return;
@@ -902,6 +978,8 @@
         var r = orig.apply(this, arguments);
         try {
           this._rpgvSrc = null;
+          this._rpgvPar = null;      // parallel or not: decided at its first plugin command
+          this._rpgvPlugins = null;  // plugin commands recorded during this run
           this._rpgvSrc = resolveSource(list, eventId);
         } catch (e) { reportError(e); }
         return r;
@@ -1014,6 +1092,17 @@
         return orig.apply(this, arguments);
       };
     });
+
+    function hookPlugin(code) {
+      hook(GI, "Game_Interpreter", "command" + code, function (orig) {
+        return function () {
+          try { notePlugin(this, code); } catch (e) { reportError(e); }
+          return orig.apply(this, arguments);
+        };
+      });
+    }
+    hookPlugin(356);
+    hookPlugin(357);
 
     function hookSetValue(ctorName, kind) {
       var C = G[ctorName];
