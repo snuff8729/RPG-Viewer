@@ -55,14 +55,26 @@ describe("LogTail", () => {
     await f.writeText("l", line(1) + "\n");
     const tail = new LogTail(f, "l");
     const spy = vi.spyOn(f, "readRange").mockResolvedValueOnce(null);
-    expect((await tail.poll()).changed).toBe(false);
+    const failed = await tail.poll();
+    expect(failed.changed).toBe(false);
+    expect(failed.more).toBe(false);
+    expect(failed.eof).toBe(false); // 읽기 실패는 끝까지 읽은 게 아니다
     spy.mockRestore();
-    expect((await tail.poll()).records.map((x) => x.seq)).toEqual([1]);
+    const ok = await tail.poll();
+    expect(ok.records.map((x) => x.seq)).toEqual([1]);
+    expect(ok.eof).toBe(true);
+    expect((await tail.poll()).eof).toBe(true); // 바뀐 것 없음 = 끝
+  });
+
+  it("throwing stat is not eof", async () => {
+    const f = new MemoryFolder({});
+    vi.spyOn(f, "stat").mockRejectedValueOnce(new Error("x"));
+    expect((await new LogTail(f, "l").poll()).eof).toBe(false);
   });
 
   it("missing file is no change", async () => {
     const tail = new LogTail(new MemoryFolder({}), "nope");
-    expect(await tail.poll()).toEqual({ records: [], badLines: 0, reset: false, changed: false, more: false });
+    expect(await tail.poll()).toEqual({ records: [], badLines: 0, reset: false, changed: false, more: false, eof: true });
   });
 });
 

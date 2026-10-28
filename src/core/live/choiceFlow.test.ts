@@ -30,7 +30,7 @@ describe("choiceFlow", () => {
     expect(flow(2).some(i => i.kind === "fork")).toBe(true);   // 갈래 2가 갈라진 지점도 경로에 나온다
     const f = flow(2).filter(i => i.kind !== "chapter" && i.kind !== "fork");
     expect(f.map(i => i.kind)).toEqual(["segment", "choice", "segment"]);
-    expect(f[0]).toMatchObject({ messages: 4, pictures: 1 });
+    expect(f[0]).toMatchObject({ messages: 5, pictures: 1 });
     expect(f[1]).toMatchObject({
       kind: "choice",
       question: { speaker: "촌장" },

@@ -1,7 +1,7 @@
 import type { GameData } from "../types";
-import { aftermathStep, coverRecord, newAftermath, seenKey, type AftermathState } from "./coverage";
+import { aftermathStep, computeCoverage, coverRecord, newAftermath, seenKey, type AftermathState } from "./coverage";
 import {
-  applyHistoryRecord, buildHistory, historyModelOf, isValidRecord, newHistoryState, NOISY_MAX_CHANGES, NOISY_WINDOW_MS,
+  applyHistoryRecord, buildHistory, buildHistoryState, historyModelOf, isValidRecord, newHistoryState, NOISY_MAX_CHANGES, NOISY_WINDOW_MS,
   variableChanges, type HistoryState,
 } from "./history";
 import type { Coverage, HistoryModel, LogRecord, PickInfo, RecordOf } from "./types";
@@ -48,6 +48,8 @@ export function createAccumulator(data: GameData): LiveAccumulator {
   // 마지막 coverage() 사본 이후 진행도가 바뀌었는가
   let covDirty = true;
   let covCopy: Coverage | null = null;
+  // 갈래 모델이 어긋나(seq 역순) 진행도를 처음부터 다시 쌓아야 하는가
+  let covReplay = false;
 
   // 잦은 변수: 아직 아닌 변수의 변경 시각(정렬). 잦은 변수가 되면 목록을 버린다(한 번 잦으면 계속 잦음).
   let times = new Map<number, number[]>();
@@ -57,7 +59,8 @@ export function createAccumulator(data: GameData): LiveAccumulator {
 
   function feedCoverage(r: LogRecord) {
     if (!isObj(r)) return;
-    const branch: unknown = r.branch;
+    // 선택 뒤 결과는 대표 갈래 묶음별로 모은다(computeCoverage의 aftermathGroup과 같다)
+    const branch: unknown = typeof r.branch === "number" ? hist.alias.get(r.branch) ?? r.branch : r.branch;
     const list = open.get(branch);
     if (list) {
       const keep: OpenPick[] = [];
@@ -114,19 +117,37 @@ export function createAccumulator(data: GameData): LiveAccumulator {
   }
 
   function feed(r: LogRecord) {
-    feedCoverage(r);
-    if (!isValidRecord(r)) return;
-    if (r.seq < maxSeq) histDirty = true;
-    else maxSeq = r.seq;
-    if (!histDirty) applyHistoryRecord(hist, r);
-    feedNoisy(r);
+    const valid = isValidRecord(r);
+    if (valid) {
+      if (r.seq < maxSeq) histDirty = true;
+      else maxSeq = r.seq;
+      if (!histDirty) {
+        try { applyHistoryRecord(hist, r); } catch { histDirty = true; }
+      }
+    }
+    // 결과 묶음(대표 갈래)은 갈래 모델에 달려 있다. 모델이 어긋나면 진행도는 coverage() 때 처음부터 다시 만든다.
+    if (histDirty) covReplay = true;
+    if (!covReplay) feedCoverage(r);
+    if (valid) feedNoisy(r);
   }
 
   function ensureHistory() {
     if (!histDirty) return;
-    const m = buildHistory(records);
-    hist = { branches: m.branches, runBranches: new Map(m.runs.map(x => [x.run, x.branches])), latestBranch: m.latestBranch };
+    hist = buildHistoryState(records);
     histDirty = false;
+  }
+
+  /** 전체 기록으로 진행도를 다시 쌓는다(seq가 거꾸로 들어온 드문 경로). */
+  function replayCoverage() {
+    ensureHistory();
+    cov = emptyCoverage();
+    lastOptions = new Map();
+    open = new Map();
+    covReplay = false;
+    for (const r of records) {
+      try { feedCoverage(r); } catch { /* 이상한 기록은 건너뛴다 */ }
+    }
+    covDirty = true;
   }
 
   function fresh() {
@@ -153,6 +174,7 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       open = new Map();
       covDirty = true;
       covCopy = null;
+      covReplay = false;
       times = new Map();
       noisySet = new Set();
       version++;
@@ -166,7 +188,10 @@ export function createAccumulator(data: GameData): LiveAccumulator {
           ensureHistory();
           const m = historyModelOf(hist);
           const branches = new Map([...m.branches].map(([id, b]) => [id, { ...b, children: b.children.slice() }]));
-          c.model = { branches, runs: m.runs.map(x => ({ run: x.run, branches: x.branches.slice() })), latestBranch: m.latestBranch };
+          c.model = {
+            branches, runs: m.runs.map(x => ({ run: x.run, branches: x.branches.slice() })), alias: new Map(m.alias),
+            latestBranch: m.latestBranch,
+          };
         } catch {
           c.model = buildHistory(records);
         }
@@ -174,6 +199,9 @@ export function createAccumulator(data: GameData): LiveAccumulator {
       return c.model;
     },
     coverage() {
+      if (covReplay) {
+        try { replayCoverage(); } catch { cov = computeCoverage(records, data); covReplay = false; covDirty = true; }
+      }
       if (!covCopy || covDirty) {
         const picks = new Map<string, PickInfo[]>();
         for (const [k, l] of cov.picks) picks.set(k, l.map(p => ({ ...p, aftermath: p.aftermath.slice() })));

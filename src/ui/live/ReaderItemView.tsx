@@ -55,4 +55,28 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "battle":
       return <p className="text-center text-sm text-muted-foreground">⚔ 전투</p>;
   }
-}, (a, b) => a.item === b.item || JSON.stringify(a.item) === JSON.stringify(b.item));
+}, (a, b) => sameItem(a.item, b.item));
+
+function sameLines(a: string[], b: string[]): boolean {
+  return a.length === b.length && a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
+}
+
+/**
+ * 다시 그릴 필요가 있는지 가벼운 비교(파생할 때마다 항목 객체가 새로 만들어진다).
+ * 같은 key(같은 기록 seq)면 내용은 거의 그대로이므로 key·종류·반복 수·줄 수·첫/끝 줄 등만 본다.
+ */
+function sameItem(a: ReaderItem, b: ReaderItem): boolean {
+  if (a === b) return true;
+  if (a.key !== b.key || a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case "chapter": return a.text === (b as typeof a).text;
+    case "message": {
+      const m = b as typeof a;
+      return a.repeat === m.repeat && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines);
+    }
+    case "scroll": return sameLines(a.lines, (b as typeof a).lines);
+    case "picture": return a.name === (b as typeof a).name;
+    case "choice": return a.label === (b as typeof a).label;
+    case "battle": return true;
+  }
+}

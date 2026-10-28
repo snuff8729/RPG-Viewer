@@ -2,9 +2,10 @@ import type { WritableGameFolder } from "../fs/folder";
 import { parseLogText } from "./log";
 import type { LiveSnapshot, LogRecord } from "./types";
 
-export interface TailResult { records: LogRecord[]; badLines: number; reset: boolean; changed: boolean; more: boolean }
+/** eof: 이번 poll 뒤 파일 끝까지 읽은 것이 확실함(파일 없음 포함). 읽기 실패·예외면 false. */
+export interface TailResult { records: LogRecord[]; badLines: number; reset: boolean; changed: boolean; more: boolean; eof: boolean }
 
-const NONE: TailResult = { records: [], badLines: 0, reset: false, changed: false, more: false };
+const NONE: TailResult = { records: [], badLines: 0, reset: false, changed: false, more: false, eof: false };
 const DEFAULT_CHUNK = 4 * 1024 * 1024;
 
 /** 로그 파일에서 새로 붙은 바이트만 읽는다. 마지막 개행 뒤 조각은 다음 poll로 이월. */
@@ -33,12 +34,12 @@ export class LogTail {
   private async doPoll(): Promise<TailResult> {
     try {
       const st = await this.folder.stat(this.path);
-      if (!st) return { ...NONE };
+      if (!st) return { ...NONE, eof: true };
       if (st.size < this.offset) this.pendingReset = true;
       const reset = this.pendingReset;
       const baseOffset = reset ? 0 : this.offset;
       const baseCarry = reset ? new Uint8Array(0) : this.carry;
-      if (!reset && st.size === baseOffset) return { ...NONE };
+      if (!reset && st.size === baseOffset) return { ...NONE, eof: true };
       const end = Math.min(st.size, baseOffset + this.chunkBytes);
       const buf = await this.folder.readRange(this.path, baseOffset, end);
       if (!buf) return { ...NONE };
@@ -52,9 +53,9 @@ export class LogTail {
       const more = st.size > this.offset;
       const nl = all.lastIndexOf(0x0a);
       this.carry = nl < 0 ? all : all.slice(nl + 1);
-      if (nl < 0) return { ...NONE, reset, changed: reset, more };
+      if (nl < 0) return { ...NONE, reset, changed: reset, more, eof: !more };
       const { records, badLines } = parseLogText(new TextDecoder().decode(all.subarray(0, nl + 1)));
-      return { records, badLines, reset, changed: reset || records.length > 0 || badLines > 0, more };
+      return { records, badLines, reset, changed: reset || records.length > 0 || badLines > 0, more, eof: !more };
     } catch {
       return { ...NONE };
     }

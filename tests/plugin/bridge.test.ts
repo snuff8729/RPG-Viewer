@@ -6,6 +6,15 @@ import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH,
 let h: Harness;
 afterEach(() => { h?.bridge?._flushNow(); });
 
+// emits one story (message) record on the current branch
+const say = (hh: Harness) => {
+  const list = [cmd(101, ["", 0, 0, 2, ""]), cmd(401, ["hi"]), cmd(0)];
+  hh.addMapEvent(3, [list], 0);
+  const interp = hh.g.$gameMap._interpreter;
+  interp.setup(list, 3);
+  hh.runCommand(interp, 0);
+  hh.bridge._flushNow();
+};
 const types = (log: any[]) => log.map((r) => r.type);
 
 function newGame(engine: "MZ" | "MV" = "MZ", fs?: MemFs): Harness {
@@ -309,6 +318,7 @@ describe("RPGViewerBridge", () => {
     it("writes held-back values before the next branchStart", async () => {
       h = newGame();
       await h.g.DataManager.saveGame(1);
+      say(h);
       throttle();
       h.g.DataManager.setupNewGame();
       let log = h.readLog();
@@ -381,16 +391,17 @@ describe("RPGViewerBridge", () => {
       h.g.$gameSwitches.setValue(1, true);
       await h.g.DataManager.saveGame(1);
       expect(h.saves[1].rpgViewer).toEqual({ run: 1, branch: 1, seq: 2 });
+      say(h);
       h.clock.t += 5000;
       const loaded = await h.g.DataManager.loadGame(1);
       expect(loaded).toBe(engine === "MZ" ? 0 : true);
       const log = h.readLog();
-      expect(types(log)).toEqual(["branchStart", "state", "save", "branchStart", "load"]);
+      expect(types(log)).toEqual(["branchStart", "state", "save", "message", "branchStart", "load"]);
       expect(log[2]).toMatchObject({ seq: 3, run: 1, branch: 1, slot: 1 });
-      expect(log[3]).toEqual({
-        v: 1, seq: 4, t: 1_005_000, run: 1, branch: 2, type: "branchStart", reason: "load", parentBranch: 1, fromSeq: 2,
+      expect(log[4]).toEqual({
+        v: 1, seq: 5, t: 1_005_000, run: 1, branch: 2, type: "branchStart", reason: "load", parentBranch: 1, fromSeq: 2,
       });
-      expect(log[4]).toMatchObject({ seq: 5, run: 1, branch: 2, type: "load", slot: 1 });
+      expect(log[5]).toMatchObject({ seq: 6, run: 1, branch: 2, type: "load", slot: 1 });
     });
   }
 
@@ -433,7 +444,7 @@ describe("RPGViewerBridge", () => {
     h = newGame();
     h.g.$gameVariables.setValue(1, 1);
     h.readLog();
-    expect(JSON.parse(h.fs.readFileSync(META_PATH))).toEqual({ nextRun: 2, nextBranch: 2, nextSeq: 3 });
+    expect(JSON.parse(h.fs.readFileSync(META_PATH))).toEqual({ nextRun: 2, nextBranch: 2, nextSeq: 3, lastStory: { "1": 0 } });
     const fs = h.fs;
     h = newGame("MZ", fs);
     const log = h.readLog();
@@ -448,6 +459,191 @@ describe("RPGViewerBridge", () => {
     fs.files.delete(META_PATH);
     h = newGame("MZ", fs);
     expect(h.readLog()[2]).toMatchObject({ seq: 3, run: 2, branch: 2 });
+  });
+
+  it("starting with a stale meta.json never reuses seqs from the log tail", () => {
+    h = newGame();
+    h.g.$gameVariables.setValue(1, 1);
+    h.readLog();
+    const fs = h.fs;
+    const last = h.readLog().at(-1).seq;
+    fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+    h = newGame("MZ", fs);
+    const log = h.readLog();
+    const seqs = log.map((r) => r.seq);
+    expect(new Set(seqs).size).toBe(seqs.length);
+    expect(log.at(-1)).toMatchObject({ run: 2, branch: 2 });
+    expect(log.at(-1).seq).toBeGreaterThan(last);
+  });
+
+  it("only reads the tail of a large log and ignores the cut first line", () => {
+    const fs = new MemFs();
+    fs.dirs.add("/game/www/rpg-viewer");
+    const filler = Array.from({ length: 4000 }, (_, i) => JSON.stringify({ v: 1, seq: i + 1, run: 1, branch: 1, type: "state", pad: "x".repeat(30) }));
+    filler.push(JSON.stringify({ v: 1, seq: 5000, run: 3, branch: 4, type: "state" }));
+    fs.files.set(LOG_PATH, filler.join("\n") + "\n");
+    fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+    h = newGame("MZ", fs);
+    const rec = h.readLog().at(-1);
+    expect(rec.seq).toBe(5001);
+    expect(rec).toMatchObject({ run: 4, branch: 5 });
+  });
+
+  describe("fd tail read", () => {
+    class FdFs extends MemFs {
+      reads: { len: number; pos: number }[] = [];
+      closed = 0;
+      failRead = false;
+      statSync(p: string) { return { size: Buffer.byteLength(this.readFileSync(p)) }; }
+      openSync(p: string) { this.readFileSync(p); return 7; }
+      readSync(_fd: number, buf: Buffer, off: number, len: number, pos: number) {
+        this.reads.push({ len, pos });
+        if (this.failRead) throw new Error("EIO");
+        Buffer.from(this.readFileSync(LOG_PATH)).copy(buf, off, pos, pos + len);
+        return len;
+      }
+      closeSync() { this.closed++; }
+    }
+    const bigLog = () => {
+      const lines = Array.from({ length: 4000 }, (_, i) => JSON.stringify({ v: 1, seq: i + 1, run: 1, branch: 1, type: "state", pad: "한".repeat(5) }));
+      lines.push(JSON.stringify({ v: 1, seq: 5000, run: 3, branch: 4, type: "state" }));
+      return lines.join("\n") + "\n";
+    };
+
+    it("reads only the last 64KB, drops the cut first line, closes the fd", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      const text = bigLog();
+      fs.files.set(LOG_PATH, text);
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+      const size = Buffer.byteLength(text);
+      h = newGame("MZ", fs);
+      expect(fs.reads).toEqual([{ len: 65536, pos: size - 65536 }]);
+      expect(fs.closed).toBe(1);
+      expect(h.readLog().at(-1)).toMatchObject({ seq: 5001, run: 4, branch: 5 });
+    });
+
+    it("meta.json missing + large log: only the tail is read and counters recover", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      const text = bigLog();
+      fs.files.set(LOG_PATH, text);
+      const spy = vi.spyOn(fs, "readFileSync");
+      h = newGame("MZ", fs);
+      expect(fs.reads).toEqual([{ len: 65536, pos: Buffer.byteLength(text) - 65536 }]);
+      expect(spy.mock.calls.filter((c) => c[0] === LOG_PATH).length).toBeLessThanOrEqual(3); // stat/open helpers + fake readSync
+      expect(h.readLog().at(-1)).toMatchObject({ seq: 5001, run: 4, branch: 5 });
+    });
+
+    it("handles a short read by decoding only the bytes read", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      fs.files.set(LOG_PATH, bigLog());
+      fs.readSync = function (_fd: number, buf: Buffer, off: number, len: number, pos: number) {
+        this.reads.push({ len, pos });
+        const n = len - 200; // last 200 bytes "not read"; the rest of buf stays uninitialised-looking junk
+        buf.fill(0x7a);
+        Buffer.from(this.readFileSync(LOG_PATH)).copy(buf, off, pos, pos + n);
+        return n;
+      };
+      h = newGame("MZ", fs);
+      const rec = h.readLog().at(-1);
+      expect(rec.seq).toBeGreaterThan(3500); // recovered from the lines that were read
+      expect(rec.seq).toBeLessThanOrEqual(5001);
+    });
+
+    it("closes the fd when readSync throws and does not read the whole log", () => {
+      const fs = new FdFs();
+      fs.dirs.add("/game/www/rpg-viewer");
+      fs.files.set(LOG_PATH, bigLog());
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 }));
+      fs.failRead = true;
+      const spy = vi.spyOn(fs, "readFileSync");
+      h = newGame("MZ", fs);
+      expect(fs.closed).toBe(1);
+      const logReads = spy.mock.calls.filter((c) => c[0] === LOG_PATH).length;
+      expect(logReads).toBeLessThanOrEqual(2); // statSync/openSync helpers only, no readFileSync of the log by the plugin
+      expect(h.g.$gameMap).toBeDefined();
+    });
+  });
+
+  describe("continue vs new branch on load", () => {
+    it("save -> only state records -> load keeps the branch (no branchStart)", async () => {
+      h = newGame();
+      h.g.$gameSwitches.setValue(1, true);
+      await h.g.DataManager.saveGame(1);
+      h.g.$gameSwitches.setValue(2, true);
+      await h.g.DataManager.loadGame(1);
+      const log = h.readLog();
+      expect(types(log)).toEqual(["branchStart", "state", "save", "state", "load"]);
+      expect(log.at(-1)).toMatchObject({ type: "load", run: 1, branch: 1 });
+    });
+
+    it("save -> message -> load starts a new branch", async () => {
+      h = newGame();
+      await h.g.DataManager.saveGame(1);
+      say(h);
+      await h.g.DataManager.loadGame(1);
+      const log = h.readLog();
+      expect(log.filter((r) => r.type === "branchStart")).toHaveLength(2);
+      expect(log.at(-2)).toMatchObject({ type: "branchStart", reason: "load", parentBranch: 1 });
+    });
+
+    it("persists lastStory across a restart (resume after quit and continue)", async () => {
+      h = newGame();
+      say(h);
+      await h.g.DataManager.saveGame(1);
+      const stamp = h.saves[1];
+      h.bridge._tick();
+      expect(JSON.parse(h.fs.readFileSync(META_PATH)).lastStory).toEqual({ "1": 2 });
+      const fs = h.fs;
+      h = newGame("MZ", fs); // restart + a new game (branch 2) before continuing
+      h.saves[1] = stamp;
+      await h.g.DataManager.loadGame(1);
+      const log = h.readLog();
+      expect(log.filter((r) => r.type === "branchStart")).toHaveLength(2); // 1 old + the restart's newGame
+      expect(log.at(-1).branch).toBe(1);
+    });
+
+    it("recovers lastStory from the log tail when meta.json lacks it; unknown -> new branch", () => {
+      h = newGame();
+      say(h);
+      const fs = h.fs;
+      h.bridge._flushNow();
+      fs.files.set(META_PATH, JSON.stringify({ nextRun: 1, nextBranch: 1, nextSeq: 1 })); // no lastStory
+      h = newGame("MZ", fs);
+      const nb = h.readLog().filter((r) => r.type === "branchStart").length;
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 1, branch: 1, seq: 5 } }); // story seq 2 <= 5: resume
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb);
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 1, branch: 1, seq: 1 } }); // story after stamp: new branch
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 1);
+      h.g.DataManager.extractSaveContents({ rpgViewer: { run: 1, branch: 77, seq: 5 } }); // never seen: safe default
+      expect(h.readLog().filter((r) => r.type === "branchStart")).toHaveLength(nb + 2);
+    });
+
+    it("keeps at most 200 branches in lastStory", () => {
+      h = newGame();
+      for (let i = 0; i < 230; i++) h.g.DataManager.extractSaveContents({});
+      h.bridge._tick();
+      expect(Object.keys(JSON.parse(h.fs.readFileSync(META_PATH)).lastStory)).toHaveLength(200);
+    });
+  });
+
+  it("writes meta.json on the tick, not on scheduled flushes", () => {
+    h = newGame();
+    h.bridge._tick();
+    const metaWrites: string[] = [];
+    const orig = h.fs.writeFileSync.bind(h.fs);
+    h.fs.writeFileSync = (p: string, d: string) => { if (p === META_PATH) metaWrites.push(d); orig(p, d); };
+    h.clock.t += 100;
+    h.g.$gamePlayer.reserveTransfer(1, 5, 6);
+    h.g.$gamePlayer.performTransfer();
+    h.bridge._runScheduled();
+    expect(metaWrites).toHaveLength(0);
+    h.bridge._tick();
+    expect(metaWrites).toHaveLength(1);
+    h.bridge._tick();
+    expect(metaWrites).toHaveLength(1); // unchanged -> no rewrite
   });
 
   it("reports runningCmd from the innermost interpreter", () => {
@@ -545,7 +741,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.0.4", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.0.5", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -728,6 +924,7 @@ describe("RPGViewerBridge", () => {
     const msg = recs.find((r) => r.type === "message");
     expect(st).toBeDefined();
     expect(st.seq).toBeLessThan(msg.seq);
+    h.bridge._tick();
     expect(JSON.parse(h.fs.files.get(META_PATH)!).nextSeq).toBeGreaterThan(msg.seq);
     // a new message within 50ms of the flush stays pending until the gap passes
     h.clock.t += 10;
@@ -742,13 +939,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.0\.4"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.0\.5"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.0.4");
+    expect(h.bridge.VERSION).toBe("1.0.5");
   });
 
   it("uses ES2015-compatible syntax only", () => {

@@ -45,19 +45,36 @@ export function choiceFlow(args: {
     const flushSeg = () => {
       const list = seg;
       seg = [];
-      const messages = list.filter(i => i.kind === "message" || i.kind === "scroll").length;
-      const pictures = list.filter(i => i.kind === "picture").length;
-      if (messages === 0 && pictures === 0) return;
+      let messages = 0, pictures = 0;
+      for (const i of list) {
+        if (i.kind === "message" || i.kind === "scroll") {
+          if (!(i.kind === "message" && i.repeat !== undefined)) messages += Array.isArray(i.lines) ? i.lines.length : 0;   // 반복 항목은 줄 수에서 제외
+        } else if (i.kind === "picture") pictures++;
+      }
+      if (messages === 0 && pictures === 0) return;   // 반복 항목만 있는 구간은 요약 없이 건너뛴다
       out.push({ kind: "segment", key: `s${list[0].key}`, items: list, messages, pictures });
     };
 
     const lastOptions = new Map<string, string[]>();   // 위치+cmd → 직전 choices 옵션
     let lastMsg: Extract<ReaderItem, { kind: "message" }> | null = null;
     let pending: { k: string | null; question: Question } | null = null;
+    // key → reader 위치들(오름차순). 위치는 앞으로만 움직이고, 없으면 위치를 유지한 채 이 기록만 건너뛴다.
+    const readerIdx = new Map<string, number[]>();
+    reader.forEach((it, j) => {
+      const k = it?.key;
+      if (typeof k !== "string") return;
+      const a = readerIdx.get(k);
+      if (a) a.push(j); else readerIdx.set(k, [j]);
+    });
+    const pathSeqs = new Set<number>();
+    for (const h of items) {
+      if (h && (h.kind === "record" || h.kind === "repeat") && h.record) pathSeqs.add(h.record.seq);
+    }
     const take = (key: string): ReaderItem | null => {
-      // 키가 어긋나면 앞으로 훑어 맞는 항목에 맞춘다(없으면 위치를 유지하고 이 기록만 건너뛴다)
-      for (let j = ri; j < reader.length; j++) {
-        if (reader[j]?.key === key) { ri = j + 1; return reader[j]; }
+      const a = readerIdx.get(key);
+      if (!a) return null;
+      for (const j of a) {
+        if (j >= ri) { ri = j + 1; return reader[j]; }
       }
       return null;
     };
@@ -97,12 +114,17 @@ export function choiceFlow(args: {
               const idx = cancel && i === labels.length - 1 ? -2 : i;
               const elsewhere: string[] = [];
               for (const p of infos) {
-                if (p.branch === branch || p.seq === r.seq || p.picked !== idx) continue;   // 이 기록 자신(상속된 선택 포함)은 제외
+                if (p.branch === branch || p.seq === r.seq || p.picked !== idx || pathSeqs.has(p.seq)) continue;   // 이 기록 자신(상속된 선택 포함)은 제외
                 const bl = branchLabel(model, p.branch);
                 if (!elsewhere.includes(bl)) elsewhere.push(bl);
               }
               return { label, picked: idx === r.picked, elsewhere };
             });
+            if (!options.some(o => o.picked)) {
+              // 이 경로에 choices 기록이 없거나 picked가 범위를 벗어나면 reader 라벨로 고른 옵션을 보인다
+              const label = typeof it.label === "string" ? it.label : "";
+              if (label) options.push({ label, picked: true, elsewhere: [] });
+            }
             const question = pending && pending.k === k ? pending.question : null;
             pending = null;
             out.push({ kind: "choice", key: it.key, seq: it.seq, question, options });

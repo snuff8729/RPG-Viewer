@@ -25,6 +25,18 @@ const rec = { v: 1, run: 1, branch: 1, t: 0 } as const;
 const item = (record: LogRecord): HistoryItem => ({ kind: "record", uncertain: false, changed: false, record });
 
 describe("readerItems", () => {
+  it("shows no branch-start chapter for a save-load continuation", () => {
+    const recs = [
+      { ...rec, seq: 1, type: "branchStart", reason: "newGame", parentBranch: null, fromSeq: null },
+      { ...rec, seq: 2, type: "save", slot: 1 },
+      { ...rec, seq: 3, branch: 2, type: "branchStart", reason: "load", parentBranch: 1, fromSeq: 2 },
+      { ...rec, seq: 4, branch: 2, type: "load", slot: 1 },
+    ] as LogRecord[];
+    const m = buildHistory(recs);
+    const out = readerItems(foldTimeline(branchPath(recs, m, 1), m, {}), data, new Map(), m);
+    expect(out).toEqual([{ kind: "chapter", key: "c1", text: "— 1회차 갈래 1 시작 —" }]);
+  });
+
   it("builds the novel-style flow for branch 1", () => {
     const items = build(1);
     expect(items.map(i => i.kind)).toEqual([
