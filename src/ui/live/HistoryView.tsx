@@ -1,17 +1,17 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
-import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
+import { branchPath, foldTimeline } from "@/core/live/history";
 import { locationKey, pageLocation } from "@/core/index/locations";
 import { findNodePathByCmd } from "@/core/interpret/interpret";
 import type { Location } from "@/core/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { openPage } from "../navigation";
 import { highlightNode } from "../highlight";
+import { BranchPicker } from "./BranchPicker";
 import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
 import { TimelineItem, type TimelineCtx } from "./TimelineItem";
@@ -175,19 +175,9 @@ export function HistoryView() {
   return (
     // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
     <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
-      {!empty && (
+      {!empty && selected !== null && (
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Select value={String(selected)} onValueChange={(v) => { setPicked(Number(v)); setShown(PAGE); }}>
-            <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {model.runs.map(run => (
-                <SelectGroup key={run.run}>
-                  <SelectLabel>{run.run}회차</SelectLabel>
-                  {run.branches.map(id => <SelectItem key={id} value={String(id)}>{branchLabel(model, id)}</SelectItem>)}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
+          <BranchPicker selected={selected} onSelect={onSelect} />
           <ToggleGroup type="multiple" variant="outline" size="sm" value={[...kinds]} onValueChange={onKinds}>
             {KIND_LABELS.map(([k, label]) => <ToggleGroupItem key={k} value={k}>{label}</ToggleGroupItem>)}
           </ToggleGroup>

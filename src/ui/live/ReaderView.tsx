@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
-import { branchLabel, branchPath, foldTimeline, representative } from "@/core/live/history";
+import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { BranchPicker } from "./BranchPicker";
 import { ChoiceFlowView } from "./ChoiceFlowView";
 import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
@@ -489,17 +489,7 @@ export function ReaderView() {
     <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
       {hasBranch && (
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Select value={String(selected)} onValueChange={v => setPicked(Number(v))}>
-            <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {model.runs.map(run => (
-                <SelectGroup key={run.run}>
-                  <SelectLabel>{run.run}회차</SelectLabel>
-                  {run.branches.map(id => <SelectItem key={id} value={String(id)}>{branchLabel(model, id)}</SelectItem>)}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
+          <BranchPicker selected={selected} onSelect={setPicked} />
           <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={onMode}>
             <ToggleGroupItem value="full">전체 읽기</ToggleGroupItem>
             <ToggleGroupItem value="flow">선택 흐름</ToggleGroupItem>
