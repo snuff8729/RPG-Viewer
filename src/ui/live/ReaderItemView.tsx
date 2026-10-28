@@ -16,6 +16,7 @@ import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
 import { NoticeLine } from "./NoticeLine";
+import { isRepeatOpen, setRepeatOpen } from "./repeatOpen";
 import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
@@ -148,22 +149,40 @@ function BattleBlock({ item }: { item: BattleReaderItem }) {
   );
 }
 
+/**
+ * 다시 본 같은 대화(접힘). 접힌 대화가 새 그림을 남겼으면 그 그림은 접힌 부분 밖에 보인다.
+ * 펼치면 회차마다(`1회째`…) 그 대화의 대사·그림·알림·플러그인 글을 모두 보인다. 펼침 상태는 항목 key로 기억한다.
+ */
+function RepeatTalk({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
+  const [open, setOpen] = useState(() => isRepeatOpen(item.key));
+  const occurrences = item.occurrences ?? [];
+  return (
+    <>
+      {item.screen && <Screen shot={item.screen} />}
+      <Collapsible open={open} onOpenChange={(on) => { setOpen(on); setRepeatOpen(item.key, on); }}>
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="sm" className="text-muted-foreground">↻ 같은 대화 다시 봄 ×{item.repeat}</Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3 pt-1 text-muted-foreground">
+          {occurrences.length === 0 ? <MessageLines item={item} /> : occurrences.map((occ, i) => (
+            <div key={occ[0]?.key ?? i} className="space-y-2">
+              <Badge variant="outline">{i + 1}회째</Badge>
+              {occ.map(x => <ReaderItemView key={x.key} item={x} />)}
+            </div>
+          ))}
+        </CollapsibleContent>
+      </Collapsible>
+    </>
+  );
+}
+
 /** 읽기 항목 하나(대사·그림·고른 선택·장면 구분·전투). 전체 읽기와 선택 흐름이 함께 쓴다. */
 export const ReaderItemView = memo(function ReaderItemView({ item }: { item: ReaderItem }) {
   switch (item.kind) {
     case "chapter":
       return <p className="py-2 text-center text-sm text-muted-foreground">{item.text}</p>;
     case "message":
-      if (item.repeat !== undefined) {
-        return (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-muted-foreground">↻ 같은 대화 다시 봄 ×{item.repeat}</Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-1 text-muted-foreground"><MessageLines item={item} /></CollapsibleContent>
-          </Collapsible>
-        );
-      }
+      if (item.repeat !== undefined) return <RepeatTalk item={item} />;
       return item.screen ? <><Screen shot={item.screen} /><MessageLines item={item} /></> : <MessageLines item={item} />;
     case "scroll":
       return (
@@ -193,6 +212,11 @@ function sameAction(a: BattleAction | undefined, b: BattleAction | undefined): b
   return battleActionLabel(a) === battleActionLabel(b) && a.enemy === b.enemy && a.targets.join("|") === b.targets.join("|");
 }
 
+function sameOccurrences(a: ReaderItem[][] | undefined, b: ReaderItem[][] | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.length === b.length && a.every((occ, i) => occ.length === b[i].length && occ.every((x, j) => sameItem(x, b[i][j])));
+}
+
 function sameLines(a: string[], b: string[]): boolean {
   return a.length === b.length && a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
 }
@@ -208,7 +232,8 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     case "chapter": return a.text === (b as typeof a).text;
     case "message": {
       const m = b as typeof a;
-      return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines);
+      return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)
+        && sameOccurrences(a.occurrences, m.occurrences);
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
     case "picture": {

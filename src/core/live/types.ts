@@ -151,7 +151,8 @@ export interface HistoryModel {
 }
 export type HistoryItem =
   | { kind: "record"; record: LogRecord; uncertain: boolean; changed: boolean }
-  | { kind: "repeat"; record: RecordOf<"message">; count: number }
+  /** occurrences: 접힌 대화 회차마다 그 기록(대사·그림·화면·알림·플러그인). 예전 항목엔 없을 수 있다. */
+  | { kind: "repeat"; record: RecordOf<"message">; count: number; occurrences?: LogRecord[][] }
   | { kind: "stateGroup"; records: RecordOf<"state">[]; count: number }
   | { kind: "fork"; atSeq: number; branches: number[] }
   /**

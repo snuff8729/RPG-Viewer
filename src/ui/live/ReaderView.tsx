@@ -133,7 +133,7 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   }, [liveBranch, varsKey]);
   const items = useMemo(() => {
     if (!data || branch === null) return [];
-    const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
+    const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null });
     const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, {
       battles: battlesShown, notices: noticesShown, compose: { ctx: pictureCtx, vars },
     });

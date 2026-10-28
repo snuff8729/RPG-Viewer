@@ -227,16 +227,37 @@ function battleSignature(start: RecordOf<"battle">, end: RecordOf<"battle"> | nu
 
 /** 경로 기록을 화면용 타임라인으로 접는다(반복 대화, 상태 변경 묶음, 잦은 변수 제외, 갈래 지점, 전투 묶음). */
 /** opts.noisy: 기록 전체 기준 잦은 변수(noisyVariables(전체 기록)). 없으면 경로에서 계산한다. */
-export function foldTimeline(
-  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number> },
-): HistoryItem[] {
+export function foldTimeline(path: LogRecord[], model: HistoryModel, opts: FoldOptions): HistoryItem[] {
   return fold(path, model, opts, false);
 }
 
-function fold(
-  path: LogRecord[], model: HistoryModel, opts: { uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number> },
-  nested: boolean,
-): HistoryItem[] {
+/** foldTimeline 설정. isHiddenImage: 읽기에서 숨긴 그림(반복 대화의 그림 비교에서 뺀다) */
+export interface FoldOptions {
+  uncertainSeqs?: Set<number>; changedSeqs?: Set<number>; noisy?: Set<number>;
+  isHiddenImage?: ((name: string) => boolean) | null;
+}
+
+/**
+ * 대화 한 번에 보인 그림 이름들(그림 표시 명령·화면 기록·대사 그림, 숨긴 그림 제외)을 정렬해 이은 열쇠.
+ * 글이 같아도 그림이 다르면 다른 대화로 본다(접지 않는다).
+ */
+export function episodePictureKey(records: readonly LogRecord[], hidden?: ((name: string) => boolean) | null): string {
+  const names = new Set<string>();
+  const add = (n: unknown) => {
+    if (typeof n !== "string" || n === "") return;
+    try { if (hidden && hidden(n)) return; } catch { /* 그대로 */ }
+    names.add(n);
+  };
+  for (const r of Array.isArray(records) ? records : []) {
+    if (!r || typeof r !== "object") continue;
+    if (r.type === "picture") { if (r.op === undefined) add(r.name); continue; }
+    const pics = (r as { pics?: unknown }).pics;
+    if (Array.isArray(pics)) for (const e of pics) if (Array.isArray(e)) add(e[1]);
+  }
+  return [...names].sort().join("\n");
+}
+
+function fold(path: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean): HistoryItem[] {
   const records = bySeq(Array.isArray(path) ? path : []);
   const uncertain = (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false;
   const changed = (seq: number) => opts?.changedSeqs?.has(seq) ?? false;
@@ -277,13 +298,16 @@ function fold(
     episode = null;
     const messages = ep.records.filter((r): r is RecordOf<"message"> => r.type === "message");
     const hasChoice = ep.records.some(r => r.type === "choices" || r.type === "choice");
-    const signature = ep.key !== null && messages.length > 0 ? `${ep.key}|${messages.map(m => m.cmd).join(",")}` : null;
+    // 글(명령 위치)과 보인 그림이 모두 같아야 같은 대화
+    const signature = ep.key !== null && messages.length > 0
+      ? `${ep.key}|${messages.map(m => m.cmd).join(",")}|${episodePictureKey(ep.records, opts?.isHiddenImage)}` : null;
     const foldable = signature !== null && !hasChoice && seenSignatures.has(signature)
       && !ep.records.some(r => uncertain(r.seq));
     if (foldable) {
       const last = items[items.length - 1];
-      if (last?.kind === "repeat" && lastRepeatKey === signature) last.count++;
-      else { push({ kind: "repeat", record: messages[0], count: 1 }); lastRepeatKey = signature; }
+      // 접힌 대화마다 그 기록 전부(대사·그림·화면·알림·플러그인 글)를 남긴다(펼치면 회차별로 보인다)
+      if (last?.kind === "repeat" && lastRepeatKey === signature) { last.count++; last.occurrences = [...(last.occurrences ?? []), ep.records]; }
+      else { push({ kind: "repeat", record: messages[0], count: 1, occurrences: [ep.records] }); lastRepeatKey = signature; }
     } else {
       for (const r of ep.records) pushRecord(r);
     }
