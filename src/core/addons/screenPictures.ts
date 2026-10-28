@@ -20,6 +20,11 @@ export interface ScreenPicture {
   anchor?: [number, number];
   /** 그림 크기(px, 1.7.0+). 없으면 그림 파일에서 읽은 크기를 쓴다. */
   w?: number; h?: number;
+  /**
+   * 1.10.0+: "sprite" = 그림 명령이 아니라 다른 플러그인이 직접 띄운 그림(전투 컷인 등). id는 1000부터 그리는 순서로 붙인
+   * 임시 번호라 그림 구분은 이름(spriteKeyOf)으로 고른다. 위치·크기·각도는 화면 기준(부모 변환을 모두 더한 것).
+   */
+  kind?: "sprite";
 }
 
 const MAX_PICS = 60;
@@ -55,6 +60,7 @@ export function parsePic(e: unknown): ScreenPicture | null {
   if (anchor) p.anchor = anchor;
   const w = fin(e[11], 0), h = fin(e[12], 0);
   if (w > 0 && h > 0) { p.w = w; p.h = h; }
+  if (e[13] === "sprite") p.kind = "sprite";
   return p;
 }
 
@@ -76,6 +82,7 @@ export function parsePics(v: unknown): ScreenPicture[] | null {
  * - 갈래 시작(branchStart)은 앞의 묶음을 잊는다(플러그인도 갈래마다 처음부터 쓴다).
  * - 선택지(choices)의 `pics`는 묶음만 바꾼다.
  * - 1.8.0 전투 시작·끝(battle)·전투 로그(battlelog)도 pics/picsSame이 있으면 그 seq에 넣는다(없으면 묶음은 그대로).
+ * - 1.10.0 화면 기록(screen, 대사 사이에 잠깐 보인 그림)도 같다.
  */
 export function picturesBySeq(path: LogRecord[]): Map<number, ScreenPicture[]> {
   const out = new Map<number, ScreenPicture[]>();
@@ -91,7 +98,7 @@ export function picturesBySeq(path: LogRecord[]): Map<number, ScreenPicture[]> {
         continue;
       }
       // 1.8.0 전투: 시작·끝은 pics/picsSame, 전투 로그 줄은 그림이 바뀌었을 때만 pics. 둘 다 없으면 묶음은 그대로(지도에 안 넣음)
-      if (r.type === "battle" || r.type === "battlelog") {
+      if (r.type === "battle" || r.type === "battlelog" || r.type === "screen") {
         const p = parsePics(o.pics);
         if (p) cur = p;
         if (cur && (p || o.picsSame === true)) out.set(r.seq, cur);
@@ -126,6 +133,20 @@ export type PictureRole = "cg" | "stand" | "hud" | "hidden";
 export type PictureRoles = Record<number, PictureRole>;
 export const PICTURE_ROLES: readonly PictureRole[] = ["cg", "stand", "hud", "hidden"];
 export const isPictureRole = (v: unknown): v is PictureRole => PICTURE_ROLES.includes(v as PictureRole);
+/** 게임별 플러그인이 띄운 그림(kind "sprite")의 이름 열쇠(spriteKeyOf) → 직접 고른 구분 */
+export type SpriteRoles = Record<string, PictureRole>;
+
+/**
+ * 플러그인이 띄운 그림의 구분 열쇠: 폴더 안 그림이면 폴더("organ/"), 아니면 끝의 번호를 뺀 이름
+ * ("actor01_cutin_A_0001" → "actor01_cutin_A"). 같은 컷인의 여러 장이 한 열쇠로 묶인다.
+ */
+export function spriteKeyOf(name: string): string {
+  const n = typeof name === "string" ? name : "";
+  const slash = n.lastIndexOf("/");
+  if (slash > 0) return n.slice(0, slash + 1);
+  const stripped = n.replace(/[_\-\s.]*\d+$/, "");
+  return stripped || n;
+}
 
 export interface PicSize { w: number; h: number }
 /** 그림 이름 → 크기(그림 파일에서 읽은 것). 모르면 null. */
@@ -135,6 +156,8 @@ export type SizeOf = (name: string) => PicSize | null | undefined;
 export interface PictureContext {
   screen: ScreenSize;
   roles?: PictureRoles | null;
+  /** 플러그인이 띄운 그림(1.10.0)의 이름 열쇠별 구분 */
+  spriteRoles?: SpriteRoles | null;
   hud?: ReadonlySet<string> | null;
   sizeOf?: SizeOf | null;
 }
@@ -233,9 +256,12 @@ export function hudKeys(counts: Map<ScreenPicture[], number>, screen: ScreenSize
   return out;
 }
 
-/** 그림 하나의 구분: 직접 고른 구분 → 화면 장식 → 화면의 80% 이상을 덮으면 이벤트 그림 → 나머지는 스탠딩 */
+/**
+ * 그림 하나의 구분: 직접 고른 구분(플러그인이 띄운 그림은 이름 열쇠로) → 화면 장식 → 화면의 80% 이상을 덮으면 이벤트 그림
+ * → 나머지는 스탠딩(플러그인 컷인은 겹친 부분만 잘라 보인다)
+ */
 export function roleOf(p: ScreenPicture, ctx: PictureContext): PictureRole {
-  const o = ctx.roles?.[p.id];
+  const o = p.kind === "sprite" ? ctx.spriteRoles?.[spriteKeyOf(p.name)] : ctx.roles?.[p.id];
   if (isPictureRole(o)) return o;
   if (ctx.hud?.has(hudKeyOf(p))) return "hud";
   const r = pictureRect(p, ctx.sizeOf);
@@ -325,20 +351,27 @@ export interface SeenPicture { id: number; names: string[]; auto: PictureRole }
  * 기록에서 최근 본 그림 번호 목록(번호 순). auto = 직접 고르지 않았을 때의 자동 구분(가장 최근 모습 기준).
  * limit: 최근 대사 묶음 몇 개까지 볼지.
  */
+const PICS_TYPES = new Set(["message", "choices", "battle", "battlelog", "screen"]);
+
+/** 끝에서부터 pics가 있는 기록의 그림 묶음(최근 것부터, 최대 limit개, picsSame은 앞의 것과 같으므로 뺀다) */
+function recentPics(records: LogRecord[], limit: number): ScreenPicture[][] {
+  const recent: ScreenPicture[][] = [];
+  const list = Array.isArray(records) ? records : [];
+  for (let i = list.length - 1; i >= 0 && recent.length < limit; i--) {
+    const o = list[i] as unknown as Record<string, unknown> | null;
+    if (!o || !PICS_TYPES.has(o.type as string)) continue;
+    const p = parsePics(o.pics);
+    if (p) recent.push(p);
+  }
+  return recent;
+}
+
 export function seenPictures(records: LogRecord[], ctx: PictureContext, limit = 2000): SeenPicture[] {
   const byId = new Map<number, { names: string[]; last: ScreenPicture }>();
   try {
-    const recent: ScreenPicture[][] = [];
-    const list = Array.isArray(records) ? records : [];
-    // 끝에서부터 pics가 있는 기록만 모은다(picsSame은 앞의 것과 같다)
-    for (let i = list.length - 1; i >= 0 && recent.length < limit; i--) {
-      const o = list[i] as unknown as Record<string, unknown> | null;
-      if (!o || (o.type !== "message" && o.type !== "choices" && o.type !== "battle" && o.type !== "battlelog")) continue;
-      const p = parsePics(o.pics);
-      if (p) recent.push(p);
-    }
-    for (const pics of recent) {
+    for (const pics of recentPics(records, limit)) {
       for (const p of pics) {
+        if (p.kind === "sprite") continue; // 플러그인이 띄운 그림은 seenSprites
         const e = byId.get(p.id);
         if (!e) byId.set(p.id, { names: [p.name], last: p });
         else if (e.names.length < 3 && !e.names.includes(p.name)) e.names.push(p.name);
@@ -347,6 +380,28 @@ export function seenPictures(records: LogRecord[], ctx: PictureContext, limit = 
   } catch { /* 모은 데까지 */ }
   const noRoles: PictureContext = { ...ctx, roles: null };
   return [...byId.entries()].sort((a, b) => a[0] - b[0]).map(([id, e]) => ({ id, names: e.names, auto: roleOf(e.last, noRoles) }));
+}
+
+/** 설정 화면용: 플러그인이 띄운 그림(1.10.0)의 이름 열쇠와 그 이름들(최근 것부터 최대 3개) */
+export interface SeenSprite { key: string; names: string[]; auto: PictureRole }
+
+/** 기록에서 최근 본 플러그인이 띄운 그림을 이름 열쇠(spriteKeyOf)별로(열쇠 순). auto = 가장 최근 모습의 자동 구분. */
+export function seenSprites(records: LogRecord[], ctx: PictureContext, limit = 2000): SeenSprite[] {
+  const byKey = new Map<string, { names: string[]; last: ScreenPicture }>();
+  try {
+    for (const pics of recentPics(records, limit)) {
+      for (const p of pics) {
+        if (p.kind !== "sprite") continue;
+        const k = spriteKeyOf(p.name);
+        const e = byKey.get(k);
+        if (!e) byKey.set(k, { names: [p.name], last: p });
+        else if (e.names.length < 3 && !e.names.includes(p.name)) e.names.push(p.name);
+      }
+    }
+  } catch { /* 모은 데까지 */ }
+  const noRoles: PictureContext = { ...ctx, roles: null, spriteRoles: null };
+  return [...byKey.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([key, e]) => ({ key, names: e.names, auto: roleOf(e.last, noRoles) }));
 }
 
 /** 번호가 이어지는(간격 2 이하) 그림끼리 묶는다: 60 | 101–103 | 111–143 */

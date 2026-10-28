@@ -114,9 +114,9 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     if (!data || branch === null) return [];
     const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy });
     const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, { battles: battlesShown, notices: noticesShown });
-    // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만
-    return showAllPlugins ? all : all.filter(it => it.kind !== "plugin" || !it.tech);
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown]);
+    // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
+    return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || it.kind !== "screen"));
+  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, screenShown]);
   const total = items.length;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)

@@ -5,7 +5,7 @@ import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
 import type { AddonFile } from "@/core/addons/settings";
 import { cleanNoticeHooks } from "@/core/addons/notices";
-import type { PictureRole, PictureRoles } from "@/core/addons/screenPictures";
+import type { PictureRole, PictureRoles, SpriteRoles } from "@/core/addons/screenPictures";
 import { gameKeyOf } from "@/ui/live/readPosition";
 
 /** 게임별 애드온(부가 기능) 켜짐 상태와 화면 그림 구분. */
@@ -19,6 +19,10 @@ export interface AddonsValue {
   pictureRoles: PictureRoles;
   /** 그림 번호들의 구분을 정한다(null = 자동). 선택 핸들러 안에서 부를 것. */
   setPictureRole(ids: number[], role: PictureRole | null): void;
+  /** 플러그인이 띄운 그림(1.10.0): 이름 열쇠 → 직접 고른 구분 */
+  spriteRoles: SpriteRoles;
+  /** 이름 열쇠들의 구분을 정한다(null = 자동). 선택 핸들러 안에서 부를 것. */
+  setSpriteRole(keys: string[], role: PictureRole | null): void;
   /** 알림 문구 기록: 직접 추가한 함수 경로(Global.path.to.fn) */
   noticeHooks: string[];
   /** 직접 추가한 함수 경로를 바꾼다(쓸 수 없는 경로는 버린다). 클릭 핸들러 안에서 부를 것. */
@@ -32,9 +36,11 @@ export interface AddonsValue {
 const EMPTY: AddonState = {};
 const NO_ROLES: PictureRoles = {};
 const NO_HOOKS: string[] = [];
+const NO_SPRITE_ROLES: SpriteRoles = {};
 const EMPTY_FILE: AddonFile = { state: EMPTY, pictureRoles: NO_ROLES };
 const NONE: AddonsValue = {
-  state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
+  state: EMPTY, isOn: () => false, setOn: () => {}, pictureRoles: NO_ROLES, setPictureRole: () => {},
+  spriteRoles: NO_SPRITE_ROLES, setSpriteRole: () => {}, noticeHooks: NO_HOOKS, setNoticeHooks: () => {}, controlFlags: {}, savedInFolder: false,
 };
 const AddonsContext = createContext<AddonsValue | null>(null);
 
@@ -62,6 +68,7 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const state = current?.file.state ?? EMPTY;
   const pictureRoles = current?.file.pictureRoles ?? NO_ROLES;
   const noticeHooks = current?.file.noticeHooks ?? NO_HOOKS;
+  const spriteRoles = current?.file.spriteRoles ?? NO_SPRITE_ROLES;
 
   /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
@@ -94,6 +101,19 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   }, [update]);
 
+  const setSpriteRole = useCallback((keys: string[], role: PictureRole | null) => {
+    update((prev) => {
+      const roles: SpriteRoles = { ...(prev.spriteRoles ?? {}) };
+      for (const k of keys) {
+        if (role === null) delete roles[k];
+        else roles[k] = role;
+      }
+      const next: AddonFile = { ...prev };
+      if (Object.keys(roles).length > 0) next.spriteRoles = roles; else delete next.spriteRoles;
+      return next;
+    });
+  }, [update]);
+
   const setNoticeHooks = useCallback((paths: string[]) => {
     update((prev) => {
       const hooks = cleanNoticeHooks(paths);
@@ -109,11 +129,13 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     setOn,
     pictureRoles,
     setPictureRole,
+    spriteRoles,
+    setSpriteRole,
     noticeHooks,
     setNoticeHooks,
     controlFlags: addonControlFlags(state, { noticeHooks }),
     savedInFolder: current?.inFolder ?? false,
-  }), [state, setOn, pictureRoles, setPictureRole, noticeHooks, setNoticeHooks, current?.inFolder]);
+  }), [state, setOn, pictureRoles, setPictureRole, spriteRoles, setSpriteRole, noticeHooks, setNoticeHooks, current?.inFolder]);
 
   return <AddonsContext.Provider value={value}>{children}</AddonsContext.Provider>;
 }

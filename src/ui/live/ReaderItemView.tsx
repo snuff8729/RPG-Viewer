@@ -183,6 +183,8 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
       return <>{item.screen && <Screen shot={item.screen} />}{item.action ? <BattleActionLine action={item.action} /> : <p className="text-sm text-muted-foreground">{item.text}</p>}</>;
     case "notice":
       return <NoticeLine text={item.text} source={item.source} />;
+    case "screen":
+      return <Screen shot={item.screen} />;
   }
 }, (a, b) => sameItem(a.item, b.item));
 
@@ -232,5 +234,6 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
       const p = b as typeof a;
       return a.text === p.text && a.source === p.source;
     }
+    case "screen": return sameShot(a.screen, (b as typeof a).screen);
   }
 }
