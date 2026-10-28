@@ -132,6 +132,9 @@ export function AppSidebar({ route, showEmpty, onShowEmptyChange }: {
     const label = (
       <>
         <span className="truncate">{m.name}</span>
+        {m.id === data?.templateMapId ? (
+          <Badge variant="outline" className="shrink-0 text-xs text-muted-foreground">템플릿</Badge>
+        ) : null}
         {newCounts.get(m.id) ? (
           <Badge variant="outline" className="ml-auto shrink-0 text-xs">새 {newCounts.get(m.id)}</Badge>
         ) : null}

@@ -191,7 +191,7 @@ export function mapInteractables(
   }
 }
 
-/** 로드된 모든 맵의 새것(isNew) 이벤트 수. 0인 맵은 넣지 않는다. live 없음 → 빈 Map. 예외를 던지지 않는다. */
+/** 로드된 모든 맵(템플릿 맵 제외)의 새것(isNew) 이벤트 수. 0인 맵은 넣지 않는다. live 없음 → 빈 Map. 예외를 던지지 않는다. */
 export function mapNewCounts(
   data: GameData, index: GameIndex, coverage: Coverage, live: LiveSnapshot | null,
 ): Map<number, number> {
@@ -200,6 +200,7 @@ export function mapNewCounts(
     if (!live || !isObj(coverage) || !(data?.maps instanceof Map)) return out;
     const byKey = pageEntries(index);
     for (const mapId of data.maps.keys()) {
+      if (mapId === data.templateMapId) continue;   // 템플릿 맵은 실제로 가는 곳이 아니다
       const n = interactablesOn(data, byKey, coverage, live, mapId).filter(i => i.isNew).length;
       if (n > 0) out.set(mapId, n);
     }

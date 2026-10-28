@@ -28,12 +28,14 @@ function comparePaths(a: number[], b: number[]): number {
 
 /** 안 고른 선택지 항목 + 안 본 대사가 있는 페이지. 예외를 던지지 않는다. */
 export function computeMissing(index: GameIndex, data: GameData, coverage: Coverage, live: LiveSnapshot | null): MissingItem[] {
-  void data;
+  const templateMapId = data?.templateMapId;
   const out: { item: MissingItem; order: number }[] = [];
   const pages = arr<PageEntry | null>(index?.pages);
   pages.forEach((entry, order) => {
     try {
       if (!entry || typeof entry !== "object" || !entry.location) return;
+      // 템플릿 맵(TemplateEvent)의 이벤트는 실제 맵에 풀려 들어가므로 따로 세지 않는다.
+      if (templateMapId !== undefined && entry.location.source === "map" && entry.location.mapId === templateMapId) return;
       const ctx = pageCtx(entry);
       const base = pageRequirements(entry, live, ctx);
       const onCurrentMap = !!live && entry.location.source === "map" && live.mapId === entry.location.mapId;

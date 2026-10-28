@@ -134,3 +134,18 @@ describe("mapNewCounts cost (synthetic 400 maps × 120 events)", () => {
     expect(secondMs).toBeLessThan(firstMs * 0.5);
   });
 });
+
+describe("mapNewCounts + TemplateEvent", () => {
+  it("does not count the template map", async () => {
+    const r = await loadGame(loadFixtureFolder("sample-te"));
+    if (!r.ok) throw new Error("load failed");
+    const te = r.data;
+    const live = { ...fixtureLive(), mapId: 99, events: [], switches: [], variables: {}, selfSwitches: [] };
+    const counts = mapNewCounts(te, buildIndex(te), computeCoverage([], te), live);
+    expect(counts.has(2)).toBe(false);
+    expect(counts.get(1)).toBe(3);
+    // 템플릿 맵이 없으면(templateMapId 없음) 맵 2도 센다
+    const plain = { ...te, templateMapId: undefined };
+    expect(mapNewCounts(plain, buildIndex(plain), computeCoverage([], plain), live).get(2)).toBe(4);
+  });
+});

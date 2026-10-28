@@ -125,3 +125,15 @@ describe("computeMissing", () => {
     expect(() => computeMissing(odd, data, empty, fixtureLive())).not.toThrow();
   });
 });
+
+describe("computeMissing + TemplateEvent", () => {
+  it("skips the template map's own pages, keeps expanded events", async () => {
+    const r = await loadGame(loadFixtureFolder("sample-te"));
+    if (!r.ok) throw new Error("load failed");
+    const te = r.data;
+    const m = computeMissing(buildIndex(te), te, computeCoverage([], te), null);
+    const maps = m.map(i => (i.entry.location.source === "map" ? i.entry.location.mapId : -1));
+    expect(maps).not.toContain(2);
+    expect(m.map(i => i.label)).toEqual(expect.arrayContaining(["안녕하세요!", "물건 보고 가세요."]));
+  });
+});
