@@ -3,11 +3,16 @@ import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
-import { representative } from "@/core/live/history";
+import { branchLabel, representative } from "@/core/live/history";
 import { BranchPathCache, MenuFilterCache, PathFactsCache, ScenesCache } from "@/core/live/readerPath";
-import { lastSeqOf, ReaderItemsBuilder } from "@/core/live/reader";
+import { lastSeqOf, ReaderItemsBuilder, type ReaderItem } from "@/core/live/reader";
+import { firstSeqOf, hasSeq, indexOfSeq, itemSummary } from "@/core/live/readerNav";
+import type { Bookmark } from "@/core/live/readerFile";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
-import { ChevronsDown, Info, Settings2, X } from "lucide-react";
+import { useReaderFile } from "@/app/ReaderFileProvider";
+import { ChevronsDown, Info, ListTree, Settings2, X } from "lucide-react";
+import { ReaderTocShell, TocBookmarks, TocJumps, type BookmarkRow } from "./ReaderToc";
+import { ReaderLineMenu, type LineAction } from "./ReaderLineMenu";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
@@ -90,7 +95,16 @@ interface BodyOpts {
   /** 본문이 걸어 두는 손잡이: 자동으로 맨 아래로를 켠 순간 맨 아래로(떼면 null) */
   onFollowOn: (fn: (() => void) | null) => void;
   mobile: boolean;
+  /** 다른 갈래의 북마크로 갈 때: 그 갈래로 바꾸고 jump로 그 줄을 알려 준다 */
+  onJumpBranch: (branch: number, seq: number) => void;
+  /** 갈래를 바꾼 뒤 갈 줄(그 갈래 본문이 처음 그려진 뒤 한 번) */
+  jump: PendingJump | null;
+  /** jump를 썼다(다시 이 갈래를 열 때 또 가지 않게) */
+  onJumpDone: (n: number) => void;
 }
+
+/** 갈래를 바꾼 뒤 갈 줄. n은 같은 줄로 다시 가도 새 요청이 되게 하는 번호 */
+interface PendingJump { branch: number; seq: number; n: number }
 
 function FullReader({ branch, withLive, ...opts }: { branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
@@ -112,9 +126,10 @@ function FullReader({ branch, withLive, ...opts }: { branch: number | null; with
 }
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
-function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
+function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
+  const readerFile = useReaderFile();
   const live = withLive ? liveNow : null;
 
   // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
@@ -468,13 +483,72 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [next]);
 
+  // ── 바로 가기(목차·북마크) ───────────────────────────────────
+  const [tocOpen, setTocOpen] = useState(false);
+  /** idx 항목으로 간다: 구간을 그 둘레로 다시 잡고 그 항목을 위로. 자동으로 맨 아래로는 끈다. */
+  const jumpToIdx = useCallback((idx: number) => {
+    if (idx < 0 || idx >= total) return;
+    setTocOpen(false);
+    if (autoRef.current) onAutoFollow(false);
+    autoRef.current = false;
+    follow.current = false;
+    applyRange(rangeShowing(range, idx, total, PAGE), { kind: "key", key: keyFrom(idx) });
+  }, [total, range, keyFrom, applyRange, onAutoFollow]);
+  const jumpToSeq = useCallback((seq: number) => jumpToIdx(indexOfSeq(items, seq)), [items, jumpToIdx]);
+  const goFirst = useCallback(() => jumpToIdx(0), [jumpToIdx]);
+  /** 읽던 곳: 첫 안 읽은 항목(다 읽었으면 맨 끝) */
+  const goReading = useCallback(() => {
+    if (firstUnreadIdx >= 0) { jumpToIdx(firstUnreadIdx); return; }
+    setTocOpen(false);
+    applyRange(tailRange(total, PAGE), { kind: "bottom" });
+  }, [firstUnreadIdx, jumpToIdx, applyRange, total]);
+  /** 맨 끝: 자동으로 맨 아래로는 그대로 둔다(읽음 표시는 보이는 만큼만) */
+  const goLast = useCallback(() => {
+    setTocOpen(false);
+    applyRange(tailRange(total, PAGE), { kind: "bottom" });
+  }, [applyRange, total]);
+  // 다른 갈래의 북마크로 갈래를 바꿨으면 처음 위치를 잡은 뒤 그 줄로 간다(한 번)
+  const jumpDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!jump || jump.branch !== branch || jumpDone.current === jump.n || !cur || !positioned.current) return;
+    jumpDone.current = jump.n;
+    jumpToSeq(jump.seq);
+    onJumpDone(jump.n);
+  }, [jump, branch, cur, jumpToSeq, onJumpDone]);
+
+  const { bookmarks, addBookmark, removeBookmark, renameBookmark } = readerFile;
+  const bookmarkRows = useMemo<BookmarkRow[]>(() => (tocOpen ? bookmarks.map((b) => {
+    const missing = !model.branches.has(b.branch) || !hasSeq(records, b.seq);
+    const where = b.branch === branch ? "" : `다른 갈래 · ${branchLabel(model, b.branch)}`;
+    return { bookmark: b, where, missing };
+  }) : []), [tocOpen, bookmarks, model, records, branch]);
+  const goBookmark = useCallback((b: Bookmark) => {
+    if (b.branch === branch) jumpToSeq(b.seq);
+    else { setTocOpen(false); onJumpBranch(b.branch, b.seq); }
+  }, [branch, jumpToSeq, onJumpBranch]);
+
+  // 줄 메뉴: 같은 함수를 계속 넘겨 줄을 다시 그리지 않게(값은 ref로 읽는다)
+  const lineCtx = useRef({ branch, addBookmark });
+  useLayoutEffect(() => { lineCtx.current = { branch, addBookmark }; }, [branch, addBookmark]);
+  const onLineAction = useCallback((item: ReaderItem, action: LineAction) => {
+    const c = lineCtx.current;
+    if (action.kind === "bookmark") {
+      const seq = firstSeqOf(item) ?? lastSeqOf(item);
+      if (c.branch === null || seq === null) return;
+      c.addBookmark({ branch: c.branch, seq, name: itemSummary(item, 20) });
+    }
+  }, []);
+
   // 본문 줄: 항목·구간·읽음 줄이 바뀔 때만 다시 만든다(게임 상태가 매초 바뀌어도 수백 줄을 다시 그리지 않게)
   const rangeStart = range.start, rangeEnd = range.end;
   const lines = useMemo(() => items.slice(rangeStart, rangeEnd).map((item, i) => {
     const seq = lastSeqOf(item);
     return (
       <div key={item.key}>
-        <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode}><ReaderItemView item={item} /></div>
+        <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode} className="group/line flex items-start gap-1">
+          <div className="min-w-0 flex-1"><ReaderItemView item={item} /></div>
+          {seq !== null && <ReaderLineMenu item={item} onAction={onLineAction} />}
+        </div>
         {rangeStart + i === lastReadIdx && unread > 0 && (
           <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
             <Separator className="flex-1" />
@@ -484,13 +558,35 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         )}
       </div>
     );
-  }), [items, rangeStart, rangeEnd, lastReadIdx, unread, observeNode]);
+  }), [items, rangeStart, rangeEnd, lastReadIdx, unread, observeNode, onLineAction]);
 
   if (!data) return null;
   const empty = total === 0 && !live?.choice;
 
+  const tocButton = (
+    <Button
+      variant="outline"
+      size={mobile ? "icon" : "sm"}
+      className={mobile ? "absolute right-16 bottom-3 size-10 bg-background shadow-md" : undefined}
+      aria-label="목차"
+      onClick={() => setTocOpen(true)}
+    >
+      <ListTree />
+      {!mobile && "목차"}
+    </Button>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {!mobile && (
+        <div className="mx-auto flex w-full max-w-2xl shrink-0 items-center gap-2 px-2">
+          {tocButton}
+        </div>
+      )}
+      <ReaderTocShell open={tocOpen} onOpenChange={setTocOpen} mobile={mobile}>
+        <TocJumps onFirst={goFirst} onReading={goReading} onLast={goLast} disabled={total === 0} />
+        <TocBookmarks rows={bookmarkRows} onGo={goBookmark} onRename={renameBookmark} onRemove={removeBookmark} />
+      </ReaderTocShell>
       {layered && !hintClosed && (
         <Alert className="mx-auto max-w-2xl shrink-0">
           <Info />
@@ -546,6 +642,8 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
           </Button>
         </div>
       )}
+      {/* 휴대폰: 보기 설정(ReaderView, 오른쪽 아래) 옆의 목차 */}
+      {mobile && tocButton}
       </div>
       {/* 좁은 화면(휴대폰)에서는 줄을 바꾼다 */}
       {!mobile && <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
@@ -591,6 +689,13 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const { records, model, latestBranch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
   const [picked, setPicked] = useState<number | null>(null);
+  // 다른 갈래의 북마크로 갈 때: 갈래를 바꾸고 새 본문이 그 줄로 간다
+  const [jump, setJump] = useState<PendingJump | null>(null);
+  const onJumpBranch = useCallback((b: number, seq: number) => {
+    setPicked(b);
+    setJump((j) => ({ branch: b, seq, n: (j?.n ?? 0) + 1 }));
+  }, []);
+  const onJumpDone = useCallback((n: number) => setJump((j) => (j?.n === n ? null : j)), []);
   // 읽은 위치·갈래 고르기는 대표 갈래 id 기준(이어진 갈래 id가 들어와도 대표 갈래로)
   const selected = picked !== null && model.branches.has(picked) ? representative(model, picked) : latestBranch;
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
@@ -624,7 +729,7 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const hasBranch = records.length > 0 && selected !== null;
   const body = hasBranch && mode === "flow"
     ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
-    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} />;
+    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} />;
 
   if (mobile) {
     return (

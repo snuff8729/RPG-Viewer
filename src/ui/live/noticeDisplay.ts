@@ -6,9 +6,11 @@ const KEY = "rpgv.reader.notices";
 const listeners = new Set<() => void>();
 let shown: boolean | null = null;
 
-function load(): boolean {
+/** 저장된 `알림 문구 보기`(읽기 숨김 규칙으로 옮길 때도 읽는다) */
+export function loadNoticesShown(): boolean {
   try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
 }
+const load = loadNoticesShown;
 function subscribe(fn: () => void): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
@@ -44,6 +46,10 @@ export function parseHiddenKinds(raw: string | null): ReadonlySet<NoticeKind> {
   } catch {
     return EMPTY;
   }
+}
+/** 저장된 숨긴 알림 종류 */
+export function loadHiddenNoticeKinds(): ReadonlySet<NoticeKind> {
+  try { return parseHiddenKinds(localStorage.getItem(KINDS_KEY)); } catch { return EMPTY; }
 }
 function getKinds(): ReadonlySet<NoticeKind> {
   if (hiddenKinds === null) {
