@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FaceImage } from "../script/FaceImage";
 import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
@@ -187,6 +188,15 @@ function RepeatTalk({ item }: { item: Extract<ReaderItem, { kind: "message" }> }
 export const ReaderItemView = memo(function ReaderItemView({ item }: { item: ReaderItem }) {
   switch (item.kind) {
     case "chapter":
+      if (item.part) {
+        return (
+          <div className="flex items-center gap-3 pt-6 pb-2">
+            <Separator className="flex-1" />
+            <span className="shrink-0 text-sm font-medium">{item.text}</span>
+            <Separator className="flex-1" />
+          </div>
+        );
+      }
       return <p className="py-2 text-center text-sm text-muted-foreground">{item.text}</p>;
     case "message":
       if (item.repeat !== undefined) return <RepeatTalk item={item} />;
@@ -238,7 +248,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
   if (a === b) return true;
   if (a.key !== b.key || a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "chapter": return a.text === (b as typeof a).text;
+    case "chapter": return a.text === (b as typeof a).text && a.part === (b as typeof a).part;
     case "message": {
       const m = b as typeof a;
       return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)

@@ -15,7 +15,8 @@ import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginT
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "./types";
 
 export type ReaderItem =
-  | { kind: "chapter"; key: string; text: string }
+  /** 장면 구분(장소 이동·갈래 시작). part = 목차의 큰 단위(플레이 묶음·변수 값) 제목 줄(읽기 화면이 넣는다, key p{seq}) */
+  | { kind: "chapter"; key: string; text: string; part?: true }
   /** screen: 화면 그림 따라 그리기 — 이 대사에서 새로 보일 이벤트 그림·스탠딩(nextShot)이 있을 때만 */
   | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number; screen?: ScreenShot;
     /** 접힌 반복 대화(repeat)의 회차별 항목(대사·그림·알림·플러그인 글). 펼치면 `1회째`·`2회째`…로 보인다. */

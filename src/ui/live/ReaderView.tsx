@@ -7,11 +7,13 @@ import { branchLabel, representative } from "@/core/live/history";
 import { BranchPathCache, MenuFilterCache, PathFactsCache, ScenesCache } from "@/core/live/readerPath";
 import { lastSeqOf, ReaderItemsBuilder, type ReaderItem } from "@/core/live/reader";
 import { firstSeqOf, hasSeq, indexOfSeq, itemSummary } from "@/core/live/readerNav";
+import { ChaptersCache, partIndexAt, partTitle } from "@/core/live/chapters";
+import { ReaderDisplayCache, type DisplayConfig } from "@/core/live/readerDisplay";
 import type { Bookmark } from "@/core/live/readerFile";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { useReaderFile } from "@/app/ReaderFileProvider";
 import { ChevronsDown, Info, ListTree, Settings2, X } from "lucide-react";
-import { ReaderTocShell, TocBookmarks, TocJumps, type BookmarkRow } from "./ReaderToc";
+import { ReaderPosition, ReaderTocShell, TocBookmarks, TocChapterVar, TocJumps, TocParts, type BookmarkRow } from "./ReaderToc";
 import { ReaderLineMenu, type LineAction } from "./ReaderLineMenu";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
@@ -138,6 +140,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // 기록 전체를 훑는 것(갈래 경로·메뉴 그림 빼기·대사별 그림·선택 문구 등)은 새로 붙은 기록만으로 이어 만든다(core/live/readerPath)
   const [caches] = useState(() => ({
     branchPath: new BranchPathCache(), menu: new MenuFilterCache(), facts: new PathFactsCache(), scenes: new ScenesCache(), choices: new ChoiceTextsCache(),
+    chapters: new ChaptersCache(), display: new ReaderDisplayCache(),
   }));
   const path = useMemo(
     () => (branch === null ? [] : caches.menu.get(caches.branchPath.get(records, model, branch), menuPicturesShown, menuEvents)),
@@ -175,14 +178,26 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // 기록이 갈래 끝에 덧붙기만 했으면(보통) 앞에서 만든 항목을 두고 새 기록만 더 만든다(이어 만들기).
   // 갈래·설정·앞의 기록이 바뀌면 처음부터. 결과는 처음부터 만든 것과 언제나 같다.
   const [builder] = useState(() => new ReaderItemsBuilder());
-  const items = useMemo(() => {
+  const built = useMemo(() => {
     if (!data || branch === null) return [];
-    const all = builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, caches.choices.get(path, data), overrides, pictures, {
+    return builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, caches.choices.get(path, data), overrides, pictures, {
       battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx: pictureCtx, vars },
     });
-    // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
-    return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
-  }, [builder, caches, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
+  }, [builder, caches, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, pictures, battlesShown, noticesShown, hiddenNoticeKinds, pictureCtx, vars]);
+  // 자동 목차(플레이 묶음·장면, 또는 고른 날짜·진행 변수): 새 기록만 이어 계산한다(core/live/chapters)
+  const { chapterVar } = readerFile;
+  const chapters = useMemo(() => caches.chapters.get(path, chapterVar), [caches, path, chapterVar]);
+  const { heads, varId } = chapters;
+  const displayHeads = useMemo(() => heads.map((h) => ({
+    seq: h.seq, item: { kind: "chapter", key: `p${h.seq}`, text: partTitle(h, varId, data), part: true } as ReaderItem,
+  })), [heads, varId, data]);
+  // 보일 항목: 큰 단위 제목 줄을 넣고, 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만,
+  // 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만(앞부분이 같으면 이어 계산한다)
+  const displayCfg = useMemo<DisplayConfig>(() => ({
+    heads: displayHeads,
+    drop: (it) => (!showAllPlugins && it.kind === "plugin" && it.tech) || (!screenShown && (it.kind === "screen" || it.kind === "cutin")),
+  }), [displayHeads, showAllPlugins, screenShown]);
+  const items = useMemo(() => caches.display.get(built, displayCfg), [caches, built, displayCfg]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
   const layered = !picturesOn && (facts?.layered ?? false);
@@ -516,12 +531,17 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     onJumpDone(jump.n);
   }, [jump, branch, cur, jumpToSeq, onJumpDone]);
 
-  const { bookmarks, addBookmark, removeBookmark, renameBookmark } = readerFile;
+  const { bookmarks, addBookmark, removeBookmark, renameBookmark, setChapterVar } = readerFile;
   const bookmarkRows = useMemo<BookmarkRow[]>(() => (tocOpen ? bookmarks.map((b) => {
     const missing = !model.branches.has(b.branch) || !hasSeq(records, b.seq);
-    const where = b.branch === branch ? "" : `다른 갈래 · ${branchLabel(model, b.branch)}`;
+    let where = "";
+    if (b.branch !== branch) where = `다른 갈래 · ${branchLabel(model, b.branch)}`;
+    else {
+      const h = partIndexAt(heads, b.seq);
+      if (h >= 0) where = partTitle(heads[h], varId, data);
+    }
     return { bookmark: b, where, missing };
-  }) : []), [tocOpen, bookmarks, model, records, branch]);
+  }) : []), [tocOpen, bookmarks, model, records, branch, heads, varId, data]);
   const goBookmark = useCallback((b: Bookmark) => {
     if (b.branch === branch) jumpToSeq(b.seq);
     else { setTocOpen(false); onJumpBranch(b.branch, b.seq); }
@@ -579,13 +599,19 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {!mobile && (
-        <div className="mx-auto flex w-full max-w-2xl shrink-0 items-center gap-2 px-2">
+        <div className="mx-auto flex w-full max-w-2xl shrink-0 items-center gap-3 px-2">
           {tocButton}
+          <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="min-w-0 flex-1" />
         </div>
+      )}
+      {mobile && total > 0 && (
+        <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="shrink-0 px-2 text-center text-xs" />
       )}
       <ReaderTocShell open={tocOpen} onOpenChange={setTocOpen} mobile={mobile}>
         <TocJumps onFirst={goFirst} onReading={goReading} onLast={goLast} disabled={total === 0} />
         <TocBookmarks rows={bookmarkRows} onGo={goBookmark} onRename={renameBookmark} onRemove={removeBookmark} />
+        <TocParts chapters={chapters} data={data} readSeq={readSeq} onGo={jumpToSeq} />
+        <TocChapterVar path={path} data={data} varId={varId} onPick={setChapterVar} />
       </ReaderTocShell>
       {layered && !hintClosed && (
         <Alert className="mx-auto max-w-2xl shrink-0">
