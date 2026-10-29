@@ -3,11 +3,18 @@ import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
-import { representative } from "@/core/live/history";
+import { branchLabel, representative } from "@/core/live/history";
 import { BranchPathCache, MenuFilterCache, PathFactsCache, ScenesCache } from "@/core/live/readerPath";
-import { lastSeqOf, ReaderItemsBuilder } from "@/core/live/reader";
+import { lastSeqOf, ReaderItemsBuilder, type ReaderItem } from "@/core/live/reader";
+import { firstSeqOf, hasSeq, indexOfSeq, itemSummary } from "@/core/live/readerNav";
+import { ChaptersCache, partIndexAt, partTitle } from "@/core/live/chapters";
+import { ReaderDisplayCache, type DisplayConfig } from "@/core/live/readerDisplay";
+import type { Bookmark } from "@/core/live/readerFile";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
-import { ChevronsDown, Info, Settings2, X } from "lucide-react";
+import { useReaderFile } from "@/app/ReaderFileProvider";
+import { ChevronsDown, Info, ListTree, Settings2, X } from "lucide-react";
+import { ReaderPosition, ReaderTocShell, TocBookmarks, TocChapterVar, TocHiddenRules, TocJumps, TocParts, type BookmarkRow } from "./ReaderToc";
+import { ReaderLineMenu, type LineAction } from "./ReaderLineMenu";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
@@ -31,10 +38,10 @@ import {
 } from "./readerWindow";
 import { ReaderItemView } from "./ReaderItemView";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
-import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
-import { useBattlesShown } from "./battleDisplay";
-import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
-import { NoticeKindsMenu } from "./NoticeKindsMenu";
+import { usePluginOverrides } from "./pluginDisplay";
+import { ReaderHideContext } from "./readerHide";
+import { compileHideRules, matchHide } from "@/core/live/hideRules";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 import { isRemoteView } from "@/app/share";
 import { cn } from "@/lib/utils";
@@ -43,6 +50,8 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 const PAGE = 300;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
 const EMPTY_IDS: number[] = [];
+/** 읽기 항목은 전투·알림을 모두 만들고 보일지는 숨김 규칙이 정한다 */
+const NO_NOTICE_KINDS: ReadonlySet<never> = new Set();
 
 /** 입력 중이거나 목록·대화상자 안에 포커스가 있으면 Space/↓를 가로채지 않는다. */
 function typingTarget(t: EventTarget | null): boolean {
@@ -90,7 +99,16 @@ interface BodyOpts {
   /** 본문이 걸어 두는 손잡이: 자동으로 맨 아래로를 켠 순간 맨 아래로(떼면 null) */
   onFollowOn: (fn: (() => void) | null) => void;
   mobile: boolean;
+  /** 다른 갈래의 북마크로 갈 때: 그 갈래로 바꾸고 jump로 그 줄을 알려 준다 */
+  onJumpBranch: (branch: number, seq: number) => void;
+  /** 갈래를 바꾼 뒤 갈 줄(그 갈래 본문이 처음 그려진 뒤 한 번) */
+  jump: PendingJump | null;
+  /** jump를 썼다(다시 이 갈래를 열 때 또 가지 않게) */
+  onJumpDone: (n: number) => void;
 }
+
+/** 갈래를 바꾼 뒤 갈 줄. n은 같은 줄로 다시 가도 새 요청이 되게 하는 번호 */
+interface PendingJump { branch: number; seq: number; n: number }
 
 function FullReader({ branch, withLive, ...opts }: { branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
@@ -112,9 +130,10 @@ function FullReader({ branch, withLive, ...opts }: { branch: number | null; with
 }
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
-function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
+function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
+  const readerFile = useReaderFile();
   const live = withLive ? liveNow : null;
 
   // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
@@ -123,6 +142,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // 기록 전체를 훑는 것(갈래 경로·메뉴 그림 빼기·대사별 그림·선택 문구 등)은 새로 붙은 기록만으로 이어 만든다(core/live/readerPath)
   const [caches] = useState(() => ({
     branchPath: new BranchPathCache(), menu: new MenuFilterCache(), facts: new PathFactsCache(), scenes: new ScenesCache(), choices: new ChoiceTextsCache(),
+    chapters: new ChaptersCache(), display: new ReaderDisplayCache(),
   }));
   const path = useMemo(
     () => (branch === null ? [] : caches.menu.get(caches.branchPath.get(records, model, branch), menuPicturesShown, menuEvents)),
@@ -130,10 +150,6 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   );
   const facts = useMemo(() => (data ? caches.facts.get(path, data) : null), [caches, path, data]);
   const { overrides } = usePluginOverrides();
-  const [showAllPlugins] = usePluginShowAll();
-  const [battlesShown] = useBattlesShown();
-  const [noticesShown] = useNoticesShown();
-  const [hiddenNoticeKinds] = useHiddenNoticeKinds();
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
@@ -160,14 +176,34 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // 기록이 갈래 끝에 덧붙기만 했으면(보통) 앞에서 만든 항목을 두고 새 기록만 더 만든다(이어 만들기).
   // 갈래·설정·앞의 기록이 바뀌면 처음부터. 결과는 처음부터 만든 것과 언제나 같다.
   const [builder] = useState(() => new ReaderItemsBuilder());
-  const items = useMemo(() => {
+  const built = useMemo(() => {
     if (!data || branch === null) return [];
-    const all = builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, caches.choices.get(path, data), overrides, pictures, {
-      battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx: pictureCtx, vars },
+    return builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, caches.choices.get(path, data), overrides, pictures, {
+      battles: true, notices: true, hiddenNoticeKinds: NO_NOTICE_KINDS, compose: { ctx: pictureCtx, vars },
     });
-    // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
-    return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
-  }, [builder, caches, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
+  }, [builder, caches, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, pictures, pictureCtx, vars]);
+  // 자동 목차(플레이 묶음·장면, 또는 고른 날짜·진행 변수): 새 기록만 이어 계산한다(core/live/chapters)
+  const { chapterVar } = readerFile;
+  const chapters = useMemo(() => caches.chapters.get(path, chapterVar), [caches, path, chapterVar]);
+  const { heads, varId } = chapters;
+  const displayHeads = useMemo(() => heads.map((h) => ({
+    seq: h.seq, item: { kind: "chapter", key: `p${h.seq}`, text: partTitle(h, varId, data), part: true } as ReaderItem,
+  })), [heads, varId, data]);
+  // 숨김 규칙(reader.json): 문장 숨기기에 맞는 줄은 `숨긴 문구 N줄`로 묶고, 종류 숨기기는 자리 없이 뺀다.
+  // 전투 안 줄은 ReaderItemView가 같은 판정으로 뺀다.
+  const { hideRules } = readerFile;
+  const compiledHide = useMemo(() => compileHideRules(hideRules), [hideRules]);
+  const isHidden = useCallback((it: ReaderItem) => matchHide(it, compiledHide) >= 0, [compiledHide]);
+  // 보일 항목: 큰 단위 제목 줄을 넣고, 숨김 규칙에 맞는 줄을 묶고, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
+  // (앞부분이 같으면 이어 계산한다 — 규칙·경계가 바뀔 때만 처음부터)
+  const displayCfg = useMemo<DisplayConfig>(() => ({
+    heads: displayHeads,
+    drop: screenShown ? null : (it) => it.kind === "screen" || it.kind === "cutin",
+    match: (it) => matchHide(it, compiledHide),
+    // 종류 숨기기(기술 플러그인 명령 등)는 자리 없이 뺀다 — 문장 숨기기만 `숨긴 문구 N줄` 자리를 남긴다
+    silent: (rule) => compiledHide.rules[rule]?.kind === "type",
+  }), [displayHeads, screenShown, compiledHide]);
+  const items = useMemo(() => caches.display.get(built, displayCfg), [caches, built, displayCfg]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
   const layered = !picturesOn && (facts?.layered ?? false);
@@ -468,13 +504,83 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [next]);
 
+  // ── 바로 가기(목차·북마크) ───────────────────────────────────
+  const [tocOpen, setTocOpen] = useState(false);
+  /** idx 항목으로 간다: 구간을 그 둘레로 다시 잡고 그 항목을 위로. 자동으로 맨 아래로는 끈다. */
+  const jumpToIdx = useCallback((idx: number) => {
+    if (idx < 0 || idx >= total) return;
+    setTocOpen(false);
+    if (autoRef.current) onAutoFollow(false);
+    autoRef.current = false;
+    follow.current = false;
+    applyRange(rangeShowing(range, idx, total, PAGE), { kind: "key", key: keyFrom(idx) });
+  }, [total, range, keyFrom, applyRange, onAutoFollow]);
+  const jumpToSeq = useCallback((seq: number) => jumpToIdx(indexOfSeq(items, seq)), [items, jumpToIdx]);
+  const goFirst = useCallback(() => jumpToIdx(0), [jumpToIdx]);
+  /** 읽던 곳: 첫 안 읽은 항목(다 읽었으면 맨 끝) */
+  const goReading = useCallback(() => {
+    if (firstUnreadIdx >= 0) { jumpToIdx(firstUnreadIdx); return; }
+    setTocOpen(false);
+    applyRange(tailRange(total, PAGE), { kind: "bottom" });
+  }, [firstUnreadIdx, jumpToIdx, applyRange, total]);
+  /** 맨 끝: 자동으로 맨 아래로는 그대로 둔다(읽음 표시는 보이는 만큼만) */
+  const goLast = useCallback(() => {
+    setTocOpen(false);
+    applyRange(tailRange(total, PAGE), { kind: "bottom" });
+  }, [applyRange, total]);
+  // 다른 갈래의 북마크로 갈래를 바꿨으면 처음 위치를 잡은 뒤 그 줄로 간다(한 번)
+  const jumpDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!jump || jump.branch !== branch || jumpDone.current === jump.n || !cur || !positioned.current) return;
+    jumpDone.current = jump.n;
+    jumpToSeq(jump.seq);
+    onJumpDone(jump.n);
+  }, [jump, branch, cur, jumpToSeq, onJumpDone]);
+
+  const { bookmarks, addBookmark, removeBookmark, renameBookmark, setChapterVar } = readerFile;
+  const bookmarkRows = useMemo<BookmarkRow[]>(() => (tocOpen ? bookmarks.map((b) => {
+    const missing = !model.branches.has(b.branch) || !hasSeq(records, b.seq);
+    let where = "";
+    if (b.branch !== branch) where = `다른 갈래 · ${branchLabel(model, b.branch)}`;
+    else {
+      const h = partIndexAt(heads, b.seq);
+      if (h >= 0) where = partTitle(heads[h], varId, data);
+    }
+    return { bookmark: b, where, missing };
+  }) : []), [tocOpen, bookmarks, model, records, branch, heads, varId, data]);
+  const goBookmark = useCallback((b: Bookmark) => {
+    if (b.branch === branch) jumpToSeq(b.seq);
+    else { setTocOpen(false); onJumpBranch(b.branch, b.seq); }
+  }, [branch, jumpToSeq, onJumpBranch]);
+
+  // 줄 메뉴: 같은 함수를 계속 넘겨 줄을 다시 그리지 않게(값은 ref로 읽는다)
+  const { addHideRule, removeHideRule } = readerFile;
+  const lineCtx = useRef({ branch, addBookmark, addHideRule });
+  useLayoutEffect(() => { lineCtx.current = { branch, addBookmark, addHideRule }; }, [branch, addBookmark, addHideRule]);
+  const onLineAction = useCallback((item: ReaderItem, action: LineAction) => {
+    const c = lineCtx.current;
+    if (action.kind === "bookmark") {
+      const seq = firstSeqOf(item) ?? lastSeqOf(item);
+      if (c.branch === null || seq === null) return;
+      c.addBookmark({ branch: c.branch, seq, name: itemSummary(item, 20) });
+    } else if (action.kind === "hide") {
+      c.addHideRule(action.rule);
+    }
+  }, []);
+  // 숨긴 문구 관리: 규칙마다 이 갈래에서 숨긴 줄 수(그 탭을 열었을 때만 센다)
+  const [tocTab, setTocTab] = useState("toc");
+  const hiddenCounts = tocOpen && tocTab === "hidden" ? caches.display.hiddenCounts(hideRules.length) : EMPTY_IDS;
+
   // 본문 줄: 항목·구간·읽음 줄이 바뀔 때만 다시 만든다(게임 상태가 매초 바뀌어도 수백 줄을 다시 그리지 않게)
   const rangeStart = range.start, rangeEnd = range.end;
   const lines = useMemo(() => items.slice(rangeStart, rangeEnd).map((item, i) => {
     const seq = lastSeqOf(item);
     return (
       <div key={item.key}>
-        <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode}><ReaderItemView item={item} /></div>
+        <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode} className="group/line flex items-start gap-1">
+          <div className="min-w-0 flex-1"><ReaderItemView item={item} /></div>
+          {seq !== null && <ReaderLineMenu item={item} onAction={onLineAction} />}
+        </div>
         {rangeStart + i === lastReadIdx && unread > 0 && (
           <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
             <Separator className="flex-1" />
@@ -484,13 +590,52 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         )}
       </div>
     );
-  }), [items, rangeStart, rangeEnd, lastReadIdx, unread, observeNode]);
+  }), [items, rangeStart, rangeEnd, lastReadIdx, unread, observeNode, onLineAction]);
 
   if (!data) return null;
   const empty = total === 0 && !live?.choice;
 
+  const tocButton = (
+    <Button
+      variant="outline"
+      size={mobile ? "icon" : "sm"}
+      className={mobile ? "absolute right-16 bottom-3 size-10 bg-background shadow-md" : undefined}
+      aria-label="목차"
+      onClick={() => setTocOpen(true)}
+    >
+      <ListTree />
+      {!mobile && "목차"}
+    </Button>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {!mobile && (
+        <div className="mx-auto flex w-full max-w-2xl shrink-0 items-center gap-3 px-2">
+          {tocButton}
+          <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="min-w-0 flex-1" />
+        </div>
+      )}
+      {mobile && total > 0 && (
+        <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="shrink-0 px-2 text-center text-xs" />
+      )}
+      <ReaderTocShell open={tocOpen} onOpenChange={setTocOpen} mobile={mobile}>
+        <Tabs value={tocTab} onValueChange={setTocTab}>
+          <TabsList className="w-full">
+            <TabsTrigger value="toc">목차</TabsTrigger>
+            <TabsTrigger value="hidden">숨긴 문구{hideRules.length > 0 && ` ${hideRules.length}`}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="toc" className="flex flex-col gap-4 pt-2">
+            <TocJumps onFirst={goFirst} onReading={goReading} onLast={goLast} disabled={total === 0} />
+            <TocBookmarks rows={bookmarkRows} onGo={goBookmark} onRename={renameBookmark} onRemove={removeBookmark} />
+            <TocParts chapters={chapters} data={data} readSeq={readSeq} onGo={jumpToSeq} />
+            <TocChapterVar path={path} data={data} varId={varId} onPick={setChapterVar} />
+          </TabsContent>
+          <TabsContent value="hidden" className="pt-2">
+            <TocHiddenRules rules={hideRules} counts={hiddenCounts} onRemove={removeHideRule} />
+          </TabsContent>
+        </Tabs>
+      </ReaderTocShell>
       {layered && !hintClosed && (
         <Alert className="mx-auto max-w-2xl shrink-0">
           <Info />
@@ -516,7 +661,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
                   <Button variant="outline" size="sm" onClick={showEarlier}>이전 대사 더 보기</Button>
                 </div>
               )}
-              {lines}
+              <ReaderHideContext.Provider value={isHidden}>{lines}</ReaderHideContext.Provider>
               {!atEnd && (
                 <div className="flex justify-center">
                   <Button variant="outline" size="sm" onClick={showLater}>다음 대사 더 보기</Button>
@@ -546,6 +691,8 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
           </Button>
         </div>
       )}
+      {/* 휴대폰: 보기 설정(ReaderView, 오른쪽 아래) 옆의 목차 */}
+      {mobile && tocButton}
       </div>
       {/* 좁은 화면(휴대폰)에서는 줄을 바꾼다 */}
       {!mobile && <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
@@ -591,12 +738,16 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const { records, model, latestBranch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
   const [picked, setPicked] = useState<number | null>(null);
+  // 다른 갈래의 북마크로 갈 때: 갈래를 바꾸고 새 본문이 그 줄로 간다
+  const [jump, setJump] = useState<PendingJump | null>(null);
+  const onJumpBranch = useCallback((b: number, seq: number) => {
+    setPicked(b);
+    setJump((j) => ({ branch: b, seq, n: (j?.n ?? 0) + 1 }));
+  }, []);
+  const onJumpDone = useCallback((n: number) => setJump((j) => (j?.n === n ? null : j)), []);
   // 읽은 위치·갈래 고르기는 대표 갈래 id 기준(이어진 갈래 id가 들어와도 대표 갈래로)
   const selected = picked !== null && model.branches.has(picked) ? representative(model, picked) : latestBranch;
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
-  const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
-  const [battlesShown, setBattlesShown] = useBattlesShown();
-  const [noticesShown, setNoticesShown] = useNoticesShown();
   // 자동으로 맨 아래로(본문과 휴대폰 보기 설정 서랍이 함께 쓴다)
   const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
   const followOn = useRef<(() => void) | null>(null);
@@ -611,9 +762,6 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const picturesOn = useAddons().isOn("screenPictures");
   const hasPictureRecords = useMemo(() => mobile && records.some(r => r.type === "picture" && r.op === undefined && !!r.name), [mobile, records]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // `알림 문구 보기`는 알림 문구 기록을 켰거나 기록에 알림 문구가 있을 때만
-  const noticesOn = useAddons().isOn("notices");
-  const hasNotices = useMemo(() => noticesOn || records.some(r => r.type === "notice"), [noticesOn, records]);
   const onMode = (v: string) => {
     if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
     setMode(v);
@@ -624,7 +772,7 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const hasBranch = records.length > 0 && selected !== null;
   const body = hasBranch && mode === "flow"
     ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
-    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} />;
+    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} />;
 
   if (mobile) {
     return (
@@ -657,17 +805,6 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
                 </>
               )}
               <SettingRow id="reader-m-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
-              {hasBranch && (
-                <>
-                  <SettingRow id="reader-m-plugin-all" label="플러그인 명령 모두 보기" checked={showAllPlugins} onChange={setShowAllPlugins} />
-                  <SettingRow id="reader-m-battles" label="전투 기록 보기" checked={battlesShown} onChange={setBattlesShown} />
-                  {hasNotices && (
-                    <SettingRow id="reader-m-notices" label="알림 문구 보기" checked={noticesShown} onChange={setNoticesShown}>
-                      <NoticeKindsMenu disabled={!noticesShown} />
-                    </SettingRow>
-                  )}
-                </>
-              )}
               {(picturesOn || hasPictureRecords) && (
                 <SettingRow id="reader-m-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
               )}
@@ -688,21 +825,6 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
             <ToggleGroupItem value="full">전체 읽기</ToggleGroupItem>
             <ToggleGroupItem value="flow">선택 흐름</ToggleGroupItem>
           </ToggleGroup>
-          <div className="flex items-center gap-2">
-            <Switch id="reader-plugin-all" checked={showAllPlugins} onCheckedChange={setShowAllPlugins} />
-            <Label htmlFor="reader-plugin-all">플러그인 명령 모두 보기</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch id="reader-battles" checked={battlesShown} onCheckedChange={setBattlesShown} />
-            <Label htmlFor="reader-battles">전투 기록 보기</Label>
-          </div>
-          {hasNotices && (
-            <div className="flex items-center gap-2">
-              <Switch id="reader-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
-              <Label htmlFor="reader-notices">알림 문구 보기</Label>
-              <NoticeKindsMenu disabled={!noticesShown} />
-            </div>
-          )}
         </div>
       )}
       {body}

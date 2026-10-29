@@ -10,6 +10,8 @@ export interface LivePaths { base: string; pluginsJs: string; pluginFile: string
   requestFile: string;
   /** 보조·치트 즐겨찾기(게임 폴더별 — PC·휴대폰·따로 창이 함께 쓴다, core/live/favoritesFile) */
   favoritesFile: string;
+  /** 읽기 화면의 북마크·숨김 규칙·챕터 변수(PC·휴대폰·따로 창이 함께 쓴다, core/live/readerFile) */
+  readerFile: string;
 }
 
 export function livePaths(dataRoot: string): LivePaths {
@@ -27,6 +29,7 @@ export function livePaths(dataRoot: string): LivePaths {
     backupFile: j("rpg-viewer/plugins.js.bak"),
     requestFile: j("rpg-viewer/request.json"),
     favoritesFile: j("rpg-viewer/favorites.json"),
+    readerFile: j("rpg-viewer/reader.json"),
   };
 }
 

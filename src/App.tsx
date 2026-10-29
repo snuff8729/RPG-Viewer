@@ -18,6 +18,7 @@ import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider, useLive } from "@/app/LiveProvider";
 import { AddonsProvider } from "@/app/AddonsProvider";
 import { FavoritesProvider } from "@/app/FavoritesProvider";
+import { ReaderFileProvider } from "@/app/ReaderFileProvider";
 import { GameSettingsSheet } from "@/ui/addons/GameSettingsSheet";
 import { popupGameKey } from "@/app/popup";
 import { parseModuleWindow } from "@/app/popout";
@@ -200,9 +201,11 @@ export default function App() {
             {/* 게임 창 단축키의 백업·복원(PC만, 화면에 그리지 않음) */}
             <BackupHotkeys />
             <FavoritesProvider>
-              <DiagnosisProvider>
-                <Shell />
-              </DiagnosisProvider>
+              <ReaderFileProvider>
+                <DiagnosisProvider>
+                  <Shell />
+                </DiagnosisProvider>
+              </ReaderFileProvider>
             </FavoritesProvider>
           </LiveProvider>
         </AddonsProvider>

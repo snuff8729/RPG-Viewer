@@ -5,9 +5,11 @@ const KEY = "rpgv.reader.battles";
 const listeners = new Set<() => void>();
 let shown: boolean | null = null;
 
-function load(): boolean {
+/** 저장된 `전투 기록 보기`(읽기 숨김 규칙으로 옮길 때도 읽는다) */
+export function loadBattlesShown(): boolean {
   try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
 }
+const load = loadBattlesShown;
 function subscribe(fn: () => void): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
