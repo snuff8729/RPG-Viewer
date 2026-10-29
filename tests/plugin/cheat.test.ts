@@ -163,4 +163,28 @@ describe("cheat commands (1.14.0)", () => {
     expect(cheat(h, [{ op: "gold", add: 1 }])).toBe("ok");
     expect(h.readLive().actors).toBeUndefined();
   });
+
+  it("live.json always carries actor names changed in play (1.20.1), also for actors outside the party", () => {
+    h = newGame();
+    h.g.$gameActors.actor(2); // created, name unchanged
+    h.bridge._snapshotNow();
+    expect(h.readLive().actorNames).toBeUndefined();
+    h.g.$gameActors.actor(1).setName("아마네");
+    h.g.$gameActors.actor(2).setName("테레즈");
+    h.clock.t += 1000;
+    h.bridge._snapshotNow();
+    expect(h.readLive().actorNames).toEqual({ 1: "아마네" });
+    h.g.$gameActors.actor(2).setName("리나");
+    h.clock.t += 1000;
+    h.bridge._snapshotNow();
+    expect(h.readLive().actorNames).toEqual({ 1: "아마네", 2: "리나" });
+  });
+
+  it("a broken actor does not stop the snapshot or the other names", () => {
+    h = newGame();
+    h.g.$gameActors.actor(1).name = () => { throw new Error("broken"); };
+    h.g.$gameActors.actor(2).setName("리나");
+    h.bridge._snapshotNow();
+    expect(h.readLive().actorNames).toEqual({ 2: "리나" });
+  });
 });

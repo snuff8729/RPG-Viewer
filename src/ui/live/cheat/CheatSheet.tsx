@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WandSparkles } from "lucide-react";
-import { useGame } from "@/app/GameProvider";
 import { isRemoteView } from "@/app/share";
-import { useAssist, useLive } from "@/app/LiveProvider";
+import { useAssist, useLive, useLiveData } from "@/app/LiveProvider";
 import { loadAutoBackup, makeBackup, notifyBackupsChanged } from "@/app/backups";
 import {
   CHEAT_MIN_VERSION, CHEAT_STATUS_TEXT, describeCheatOp, inverseCheatOps, undoable, type CheatOp, type CheatStatus,
@@ -51,7 +50,7 @@ const STATUS_VARIANT: Record<CheatStatus, "default" | "secondary" | "destructive
 
 /** 상단 `치트` 버튼과 창: 아이템·돈, 캐릭터, 스위치·변수. 바꾼 것은 실행 중인 게임에 바로 적용된다. */
 export function CheatSheet() {
-  const { data } = useGame();
+  const data = useLiveData();
   const { live, connection } = useLive();
   const { cheatSupported, sendCheat, cheatResults, setLiveActors } = useAssist();
   const [open, setOpen] = useState(false);

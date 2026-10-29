@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, ChevronsUpDown, EllipsisVertical } from "lucide-react";
-import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { branchLabel, representative } from "@/core/live/history";
 import {
   branchList, hideUpTo, isHidden, KEEP_RECENT, summarizeBranches, tidyOld, tidyOldCount, updatePref,
@@ -37,7 +36,7 @@ type Confirm = { kind: "tidy"; count: number } | { kind: "upTo"; id: number; cou
  * selected·onSelect는 대표 갈래 id.
  */
 export function BranchPicker({ selected, onSelect }: { selected: number; onSelect: (id: number) => void }) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { records, model, latestBranch } = useLive();
   const { overrides } = usePluginOverrides();
   const [prefs, updatePrefs] = useBranchPrefs();

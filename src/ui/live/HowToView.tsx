@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { atomKey, type Req, type Writer } from "@/core/deps/graph";
 import { howTo, type HowTo, type HowToEnd, type HowToStep } from "@/core/deps/howTo";
 import { locationKey } from "@/core/index/locations";
@@ -93,7 +92,7 @@ function EndBlock({ end }: { end: HowToEnd }) {
  * 끝 상태(갈림길·알 수 없음 등)는 단계 1보다 먼저 풀어야 하는 것이라 목록 위에 보여준다.
  */
 export function HowToView({ req, from }: { req: Req; from?: Writer }) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { live } = useLive();
   const condLive = useConditionsLive(live);
   const result = useMemo(

@@ -94,6 +94,11 @@ export interface LiveSnapshot {
   assist?: LiveAssist;
   /** 파티 캐릭터 자세히(플러그인 1.14.0+, 뷰어가 control.json `liveActors: true`로 부탁할 때만) */
   actors?: LiveActor[];
+  /**
+   * 게임 중에 바뀐 캐릭터 이름(플러그인 1.20.1+, 이름 변경·이름 입력): id → 지금 이름. 데이터베이스 이름과 다른 것만, 없으면 빠진다.
+   * 대사는 원문(\N[n] 그대로)으로 기록되므로 뷰어가 이 이름으로 푼다(withActorNames).
+   */
+  actorNames?: Record<string, string>;
   /** 게임의 실제 화면 크기(플러그인 1.18.2+, Graphics.width·height) */
   screen?: { w: number; h: number };
 }
