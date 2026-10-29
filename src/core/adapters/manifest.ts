@@ -1,6 +1,7 @@
 import { isAddonId, type AddonId, type AddonState } from "../addons/registry";
 import { isPictureRole, spriteKeyOf, type PictureRole, type ScreenPicture } from "../addons/screenPictures";
 import { parsePluginsJs } from "../live/installer";
+import { maskFileName, maskString } from "../mask/text";
 
 /**
  * 게임 전용 어댑터(저장소의 adapters/<id>/manifest.json). 게임에 맞는 어댑터를 찾아 게임 설정에서 켜고,
@@ -178,19 +179,34 @@ export function enabledPluginsOf(pluginsText: string | null | undefined): string
   }
 }
 
+/**
+ * 가린 사본을 보고 만든 어댑터는 게임 이름·파일 이름 자리에 토큰(T_…)을 쓴다. 사전 없이 맞추려고, 토큰이 든 조건이면
+ * 게임 쪽 값을 가린 사본과 같은 규칙으로 가려서도 비교한다(같은 글 = 같은 토큰).
+ */
+const HAS_TOKEN = /T_[0-9a-f]{14}/;
+const hasToken = (s: string) => HAS_TOKEN.test(s);
+
 /** 이 게임에 맞는 어댑터인가: 플러그인 조건(있으면)과 제목 조건(있으면)이 모두 맞아야 한다 */
 export function matchesGame(m: AdapterManifest, game: GameTraits): boolean {
   try {
-    const have = new Set((game.plugins ?? []).map(p => String(p).trim().toLowerCase()));
     const want = (m.match.plugins ?? []).map(p => p.toLowerCase());
+    const masked = (m.match.plugins ?? []).some(hasToken);
+    const have = new Set<string>();
+    for (const p of game.plugins ?? []) {
+      const n = String(p).trim();
+      have.add(n.toLowerCase());
+      if (masked) have.add(maskString(n).toLowerCase());
+    }
     if (want.length > 0) {
       const ok = m.match.pluginsMode === "any" ? want.some(p => have.has(p)) : want.every(p => have.has(p));
       if (!ok) return false;
     }
     const titles = m.match.gameTitle ?? [];
     if (titles.length > 0) {
-      const t = (game.gameTitle ?? "").toLowerCase();
-      if (!titles.some(s => t.includes(s.toLowerCase()))) return false;
+      const raw = game.gameTitle ?? "";
+      const t = raw.toLowerCase();
+      const mt = titles.some(hasToken) ? maskString(raw).toLowerCase() : "";
+      if (!titles.some(s => t.includes(s.toLowerCase()) || (mt !== "" && mt.includes(s.toLowerCase())))) return false;
     }
     return want.length > 0 || titles.length > 0;
   } catch {
@@ -241,9 +257,7 @@ function globRe(pattern: string): RegExp {
   return re;
 }
 
-/** 이름 규칙이 그림 이름에 맞는가("폴더/" = 그 폴더 안, * = 아무 글자(이름 또는 이름 열쇠), 나머지 = 이름 열쇠나 이름과 같음) */
-export function spritePatternMatches(pattern: string, name: string): boolean {
-  if (typeof pattern !== "string" || typeof name !== "string" || pattern === "") return false;
+function patternMatchesRaw(pattern: string, name: string): boolean {
   if (pattern.endsWith("/") && !pattern.includes("*")) return name.startsWith(pattern);
   const key = spriteKeyOf(name);
   if (pattern.includes("*")) {
@@ -251,6 +265,30 @@ export function spritePatternMatches(pattern: string, name: string): boolean {
     return re.test(name) || re.test(key);
   }
   return pattern === key || pattern === name;
+}
+
+const maskedNameCache = new Map<string, string[]>();
+/** 그림 이름을 가린 사본에 보이는 모양들: 기록 속 글(maskString)과 파일 이름(maskFileName), 이름 열쇠를 가린 것 */
+function maskedNamesOf(name: string): string[] {
+  let v = maskedNameCache.get(name);
+  if (!v) {
+    const key = spriteKeyOf(name);
+    v = [...new Set([maskString(name), maskFileName(name), maskString(key), maskFileName(key)])];
+    if (maskedNameCache.size > 2000) maskedNameCache.clear();
+    maskedNameCache.set(name, v);
+  }
+  return v;
+}
+
+/**
+ * 이름 규칙이 그림 이름에 맞는가("폴더/" = 그 폴더 안, * = 아무 글자(이름 또는 이름 열쇠), 나머지 = 이름 열쇠나 이름과 같음).
+ * 규칙에 토큰이 있으면 가린 이름에도 맞춰 본다.
+ */
+export function spritePatternMatches(pattern: string, name: string): boolean {
+  if (typeof pattern !== "string" || typeof name !== "string" || pattern === "") return false;
+  if (patternMatchesRaw(pattern, name)) return true;
+  if (!hasToken(pattern)) return false;
+  return maskedNamesOf(name).some(m => m !== name && patternMatchesRaw(pattern, m));
 }
 
 /** 어댑터 기본값이 정한 그림 하나의 구분(없으면 null) */

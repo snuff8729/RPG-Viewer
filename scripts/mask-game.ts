@@ -119,8 +119,10 @@ This folder is a **read-only masked mirror** of an RPG Maker game. The original 
   ASCII identifiers, numbers, paths and English code are kept. Line numbers in JS files match the original.
 - \`img/\`, \`audio/\`, \`movies/\` 아래 파일은 이름만 있는 **빈 파일**입니다.
   Files under \`img/\`, \`audio/\`, \`movies/\` are **empty placeholders** (names only).
-- 게임은 절대 고치지 않습니다. 고칠 점은 RPG-Viewer 저장소(adapters/ 등)에 만들고, 그 안에 토큰을 써도 됩니다 — 사용자가 \`npm run unmask\`로 원래 글로 바꿉니다.
-  The game is never edited. Put fixes in the RPG-Viewer repo (adapters/ etc.); they may reference tokens — the user converts them with \`npm run unmask\`.
+- 게임은 절대 고치지 않습니다. 고칠 점은 RPG-Viewer 저장소(adapters/ 등)에 만들고, 게임 이름·플러그인 이름·파일 이름은 토큰 그대로 씁니다
+  (manifest의 match·spriteRoles, bridge.js) — 뷰어가 열린 게임에서 원래 글로 바꿉니다. 저장소 파일을 unmask하지 마세요.
+  The game is never edited. Put fixes in the RPG-Viewer repo (adapters/ etc.) and write game/plugin/file names as tokens
+  (manifest match/spriteRoles, bridge.js) — the viewer resolves them against the open game. Never unmask repo files.
 - 문제 설명과 자동 진단 보고서는 \`REPORT.md\`에 있습니다. / The problem description and diagnosis report are in \`REPORT.md\`.
 `;
 
@@ -191,26 +193,51 @@ const defaultDeps: MainDeps = {
 
 const isDir = (p: string) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
+/** 실제 경로(있는 데까지 따라감) — 심볼릭 링크로 게임 안을 가리키는 출력 폴더도 막는다 */
+function realish(p: string): string {
+  const rest: string[] = [];
+  let cur = path.resolve(p);
+  for (;;) {
+    try { return path.join(fs.realpathSync.native(cur), ...rest.reverse()); } catch { /* 위로 */ }
+    const up = path.dirname(cur);
+    if (up === cur) return path.resolve(p);
+    rest.push(path.basename(cur));
+    cur = up;
+  }
+}
+
+export type ExportResult = { ok: true; out: string; summary: MaskSummary } | { ok: false; error: string };
+
+/**
+ * 게임 폴더 → 가린 사본(out은 비었거나 아직 없어야 하고, 게임 안·게임을 품은 곳이면 안 된다). 명령줄과 뷰어 서버가 함께 쓴다.
+ * 오류 문구에는 경로를 넣지 않는다(게임 폴더 이름이 드러나지 않게).
+ */
+export async function exportMirror(gameDir: string, outDir: string, note: string | null, adapters: AdapterManifest[]): Promise<ExportResult> {
+  const game = path.resolve(gameDir), out = path.resolve(outDir);
+  if (!isDir(game)) return { ok: false, error: "게임 폴더가 없어요." };
+  const rg = realish(game), ro = realish(out);
+  if (isInside(out, game) || isInside(ro, rg)) return { ok: false, error: "출력 폴더가 게임 폴더 안에 있어요. 게임 밖의 빈 폴더를 주세요." };
+  if (isInside(game, out) || isInside(rg, ro)) return { ok: false, error: "게임 폴더가 출력 폴더 안에 있어요. 다른 빈 폴더를 주세요." };
+  if (fs.existsSync(out)) {
+    if (!isDir(out)) return { ok: false, error: "출력 경로가 폴더가 아니에요." };
+    if (fs.readdirSync(out).length > 0) return { ok: false, error: "출력 폴더가 비어 있지 않아요. 빈 폴더나 아직 없는 경로를 주세요." };
+  }
+  const pass = await runMaskPass(game, adapters);
+  if (pass.report === null && !pass.entries.some((e) => e.kind === "json" && /(^|\/)data\/system\.json$/i.test(e.rel))) {
+    return { ok: false, error: "RPG Maker 게임 데이터를 찾지 못했어요(www/data/System.json 또는 data/System.json)." };
+  }
+  fs.mkdirSync(out, { recursive: true });
+  return { ok: true, out, summary: await writeMirror(pass, out, note, adapters) };
+}
+
 /** 돌려주는 값: 종료 코드(0 성공, 1 못 함, 2 사본은 만들었지만 남은 낱말이 있음) */
 export async function main(argv: readonly string[], deps: Partial<MainDeps> = {}): Promise<number> {
   const d: MainDeps = { ...defaultDeps, ...deps };
   const args = parseArgs(argv);
   if (!args.ok) { d.error(args.message); return 1; }
-  const game = path.resolve(args.path), out = path.resolve(args.out);
-  if (!isDir(game)) { d.error(`게임 폴더가 없어요: ${args.path}`); return 1; }
-  if (isInside(out, game)) { d.error("출력 폴더가 게임 폴더 안에 있어요. 게임 밖의 빈 폴더를 주세요."); return 1; }
-  if (isInside(game, out)) { d.error("게임 폴더가 출력 폴더 안에 있어요. 다른 빈 폴더를 주세요."); return 1; }
-  if (fs.existsSync(out)) {
-    if (!isDir(out)) { d.error(`출력 경로가 폴더가 아니에요: ${args.out}`); return 1; }
-    if (fs.readdirSync(out).length > 0) { d.error(`출력 폴더가 비어 있지 않아요: ${args.out}\n빈 폴더나 아직 없는 경로를 주세요.`); return 1; }
-  }
-  const pass = await runMaskPass(game, d.adapters());
-  if (pass.report === null && !pass.entries.some((e) => e.kind === "json" && /(^|\/)data\/system\.json$/i.test(e.rel))) {
-    d.error("RPG Maker 게임 데이터를 찾지 못했어요(www/data/System.json 또는 data/System.json).");
-    return 1;
-  }
-  fs.mkdirSync(out, { recursive: true });
-  const s = await writeMirror(pass, out, args.note, d.adapters());
+  const r = await exportMirror(args.path, args.out, args.note, d.adapters());
+  if (!r.ok) { d.error(r.error); return 1; }
+  const out = r.out, s = r.summary;
   d.log([
     `가린 사본을 만들었어요: ${out}`,
     `- 글 파일 ${s.textFiles}개, 빈 자리 파일(그림·소리·영상) ${s.placeholders}개`,

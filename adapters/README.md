@@ -38,7 +38,12 @@
    `RPGViewerBridge.registerExtension({ id, onInstall(api), captureScene(scene), snapshotEntry(sprite, entry, scene), snapshotMeta(sprite, entry, scene) })`
    로 붙습니다(자세한 계약은 `plugin/RPGViewerBridge.js`의 `game extensions` 주석).
 4. (선택) `viewer.ts`: `export const viewer: AdapterViewer = { ... }` — 읽기 화면에 쓰는 순수 함수(`src/core/adapters/bundle.ts`).
-5. `npx vitest run`으로 확인합니다(`src/core/adapters/manifest.test.ts`가 모든 manifest를 검사합니다).
+5. **가린 사본의 토큰**: 가린 사본(`T_` + 16진수 14자리)만 보고 만든 어댑터는 게임 이름·플러그인 이름·그림 이름 자리에 토큰을 그대로 써도 됩니다.
+   - `match.plugins`, `match.gameTitle`, `defaults.spriteRoles`의 열쇠: 원래 글과 토큰 모두 맞습니다(뷰어가 게임 쪽 값을 같은 규칙으로 가려서 비교).
+   - `bridge.js`: 설치할 때 그 게임에서 원래 글을 찾아 바꿔 씁니다. 못 찾은 토큰은 그대로 두고 설치 화면에 알립니다.
+   - `label`·`description`·`options`·`viewer.ts`의 토큰은 바꾸지 않습니다(화면에 토큰 그대로 보임) — 여기에는 쓰지 마세요.
+   - 저장소 파일에 `npm run unmask`를 돌리지 마세요(원래 글이 저장소에 들어갑니다).
+6. `npx vitest run`으로 확인합니다(`src/core/adapters/manifest.test.ts`가 모든 manifest를 검사합니다).
 
 ## 지금 있는 어댑터
 

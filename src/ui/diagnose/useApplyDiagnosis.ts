@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useAddons } from "@/app/AddonsProvider";
 import { useGame } from "@/app/GameProvider";
 import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
-import { installAdapter } from "@/core/adapters/install";
+import { installAdapter, unknownTokensNote } from "@/core/adapters/install";
 import type { DiagnoseAction } from "@/core/diagnose";
 import { isWritableFolder } from "@/core/fs/folder";
 
@@ -28,11 +28,13 @@ export function useApplyDiagnosis(): (actions: readonly DiagnoseAction[]) => Pro
     let granted = false;
     try { granted = await folder.requestWrite(); } catch { granted = false; }
     if (!granted) return "게임 쪽 확장을 설치하려면 쓰기 권한이 필요해요.";
-    const failed: string[] = [];
+    const failed: string[] = [], warned: string[] = [];
     for (const i of installs) {
       const r = await installAdapter(folder, data.dataRoot, i.id, i.label, i.script);
       if (!r.ok) failed.push(`${i.label}: ${r.message}`);
+      else if (r.unknownTokens !== undefined) warned.push(`${i.label}: ${unknownTokensNote(r.unknownTokens)}`);
     }
-    return failed.length > 0 ? failed.join("\n") : "게임 쪽 확장을 설치했어요. 게임을 다시 시작하면 적용돼요.";
+    if (failed.length > 0) return [...failed, ...warned].join("\n");
+    return ["게임 쪽 확장을 설치했어요. 게임을 다시 시작하면 적용돼요.", ...warned].join("\n");
   }, [setOn, setAdapterOn, setSpriteRole, setPictureRole, folder, data]);
 }

@@ -11,6 +11,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AiHandoff } from "./AiHandoff";
 import { useApplyDiagnosis } from "./useApplyDiagnosis";
 
 const BADGE: Record<DiagnoseStatus, "default" | "secondary" | "destructive" | "outline"> = {
@@ -105,6 +106,7 @@ export function DiagnoseView() {
             <Wand2 />추천 설정 모두 적용{actions.length > 0 ? ` (${actions.length})` : ""}
           </Button>
           <Button variant="outline" onClick={copy}><ClipboardCopy />개발용 보고서 복사</Button>
+          <AiHandoff />
         </CardContent>
       </Card>
       {note && (
