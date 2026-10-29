@@ -115,7 +115,7 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="w-72 justify-between font-normal">
+          <Button variant="outline" className="w-72 max-w-full justify-between font-normal">
             <span className="truncate">{prefs.branches[String(current)]?.pinned ? "★ " : ""}{nameOf(current)}</span>
             <ChevronsUpDown className="opacity-50" />
           </Button>

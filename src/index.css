@@ -156,3 +156,23 @@
     @apply font-sans;
     }
 }
+
+/* 터치 화면(휴대폰·태블릿): 누르는 컨트롤을 최소 40px로. 모양은 shadcn 그대로 두고 크기만 키운다. */
+@media (pointer: coarse) {
+  [data-slot="button"],
+  [data-slot="toggle"],
+  [data-slot="toggle-group-item"],
+  [data-slot="sidebar-menu-button"],
+  [data-slot="sidebar-trigger"],
+  [data-slot="popover-trigger"],
+  [data-slot="dropdown-menu-trigger"],
+  [data-slot="tooltip-trigger"][data-size],
+  [data-slot="select-trigger"],
+  [data-slot="input"] {
+    min-height: 2.5rem;
+  }
+  [data-size^="icon"]:is([data-slot="button"], [data-slot="dropdown-menu-trigger"], [data-slot="popover-trigger"], [data-slot="tooltip-trigger"]),
+  [data-slot="sidebar-trigger"] {
+    min-width: 2.5rem;
+  }
+}

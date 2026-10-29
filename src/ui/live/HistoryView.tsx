@@ -186,7 +186,7 @@ export function HistoryView() {
       {!empty && selected !== null && (
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <BranchPicker selected={selected} onSelect={onSelect} />
-          <ToggleGroup type="multiple" variant="outline" size="sm" value={[...kinds]} onValueChange={onKinds}>
+          <ToggleGroup type="multiple" variant="outline" size="sm" className="max-w-full flex-wrap" value={[...kinds]} onValueChange={onKinds}>
             {KIND_LABELS.map(([k, label]) => <ToggleGroupItem key={k} value={k}>{label}</ToggleGroupItem>)}
           </ToggleGroup>
           <div className="flex items-center gap-2">

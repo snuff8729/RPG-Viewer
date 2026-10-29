@@ -108,7 +108,8 @@ function Shell() {
     window.location.hash = formatRoute({ kind: "missing" });
   };
 
-  if ((popupKey !== null || remote) && isPlay) return <PlayView popup />;
+  // 휴대폰 보기는 사이드바(좁으면 시트)를 그대로 써서 기록·못 본 것으로도 갈 수 있게 한다
+  if (popupKey !== null && isPlay) return <PlayView popup />;
 
   return (
     <SidebarProvider open={isPlay ? playNavOpen : navOpen} onOpenChange={onNavOpen}>
@@ -160,7 +161,8 @@ function Shell() {
           )}
         </header>
         <main className="flex-1 p-4">
-          {route.kind !== "diagnose" && <DiagnoseBanner />}
+          {/* 진단 안내는 설정을 바꾸러 가는 것이라 휴대폰 보기에서는 띄우지 않는다 */}
+          {route.kind !== "diagnose" && !remote && <DiagnoseBanner />}
           {route.kind === "home" && <ExplorerView state={explorer} onStateChange={setExplorer} />}
           {route.kind === "page" && <EventView route={route} />}
           {route.kind === "read" && <ReaderView />}

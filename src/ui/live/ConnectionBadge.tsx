@@ -42,7 +42,8 @@ export function ConnectionBadge() {
   } else if (connection === "waiting") {
     text = "○ 게임 꺼짐";
   } else {
-    text = "플러그인 미설치";
+    // 휴대폰 보기에서는 설치할 수 없으니 설치 안내 대신 꺼짐으로만 보여 준다
+    text = isRemoteView() ? "○ 게임 꺼짐" : "플러그인 미설치";
   }
 
   const badge = <Badge variant={variant} className={muted ? "text-muted-foreground" : undefined}>{text}</Badge>;

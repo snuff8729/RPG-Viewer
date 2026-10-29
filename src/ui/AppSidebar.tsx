@@ -71,7 +71,8 @@ export function AppSidebar({ route, follow, onFollowChange, onOpenMissing, onSea
           <SidebarGroupLabel>보기</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map(({ view, route: r, icon: Icon }) => {
+              {/* 게임 진단은 설정을 바꾸는 화면이라 휴대폰 보기에서는 뺀다 */}
+              {NAV.filter((n) => !(isRemoteView() && n.view === "diagnose")).map(({ view, route: r, icon: Icon }) => {
                 const n = badge(view);
                 return (
                   <SidebarMenuItem key={view}>
