@@ -11,7 +11,8 @@
  * 바꾸기)는 RPG Viewer에서 누를 때만, 실행 중인 게임에 바로 적용합니다.
  * 플러그인 명령이나 파라미터는 없습니다.
  * 게임 창 단축키: F6 배속(×1→×2→×4→×8), F7 본 대사 자동 넘기기,
- * 전투 중 F10 이기기, F11 지기. 선택지는 자동으로 고르지 않습니다.
+ * 전투 중 F10 이기기, F11 지기, Home 내 체력 100%, End 내 체력 1%(맵·전투).
+ * 선택지는 자동으로 고르지 않습니다.
  * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  * 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357)의 이름과 문자열 인자도
@@ -48,7 +49,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.19.0",
+    VERSION: "1.20.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -114,7 +115,7 @@
   var KEY_HP_FULL = "rpgvHpFull", KEY_HP_LOW = "rpgvHpLow";
   var HOTKEY_NAMES = ["speed", "skip", "win", "lose", "hpFull", "hpLow"];
   var HOTKEY_BUTTONS = { speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW };
-  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null }; // F6 F7 F10 F11, HP keys off
+  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 }; // F6 F7 F10 F11, Home End (HP keys on by default since 1.20.0)
   // keyCodes the engine itself uses (default Input.keyMapper, F2-F5, F8, F9): never offered as hotkeys
   var RESERVED_KEYS = {
     9: true, 13: true, 16: true, 17: true, 18: true, 27: true, 32: true, 33: true, 34: true,
@@ -122,7 +123,7 @@
     96: true, 98: true, 100: true, 102: true, 104: true,
     113: true, 114: true, 115: true, 116: true, 119: true, 120: true
   };
-  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null }; // wanted bindings (null = disabled)
+  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 }; // wanted bindings (null = disabled)
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
   var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
   var seenMessages = Object.create(null), seenPages = Object.create(null);
