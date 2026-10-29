@@ -872,9 +872,43 @@ describe("RPGViewerBridge", () => {
       h.clock.t += 1000;
       runList(h, list); // new run 1 s later: within 2 s
       expect(plugins(h.readLog())).toHaveLength(2);
-      h.clock.t += 1000;
+      h.clock.t += 60_000; // (a third run within a minute would be a frequent command — see below)
       runList(h, list);
       expect(plugins(h.readLog())).toHaveLength(3);
+    });
+
+    it("records a src+cmd run 3+ times a minute once per minute, counting the runs left out (1.24.0)", () => {
+      h = newGame("MV");
+      const list = [cmd(356, ["CulSkillEffect"]), cmd(0)];
+      h.addMapEvent(5, [list]);
+      runList(h, list); // t0: recorded
+      h.clock.t += 5000;
+      runList(h, list); // t5: recorded (2 runs within a minute)
+      h.clock.t += 5000;
+      const looping = runList(h, list); // t10: third run within a minute → left out
+      h.runCommand(looping, 0); // the same run again (a loop) is not another run
+      h.clock.t += 5000;
+      runList(h, list); // t15: left out
+      expect(plugins(h.readLog())).toHaveLength(2);
+      expect(plugins(h.readLog())[1].skipped).toBeUndefined();
+      h.clock.t += 50_000;
+      runList(h, list); // t65: a minute after the last record → recorded with the 2 runs left out
+      const recs = plugins(h.readLog());
+      expect(recs).toHaveLength(3);
+      expect(recs[2]).toEqual(expect.objectContaining({ cmd: 0, text: "CulSkillEffect", skipped: 2 }));
+      // another command at another place is not affected
+      const other = [cmd(356, ["Look"]), cmd(0)];
+      h.addMapEvent(6, [other]);
+      runList(h, other, 6);
+      expect(plugins(h.readLog())).toHaveLength(4);
+      // runs slower than 3 a minute are all recorded
+      h.clock.t += 70_000;
+      runList(h, list);
+      h.clock.t += 31_000;
+      runList(h, list);
+      h.clock.t += 31_000;
+      runList(h, list);
+      expect(plugins(h.readLog()).filter((r) => r.text === "CulSkillEffect")).toHaveLength(6);
     });
 
     it("records at most 20 plugin commands per second", () => {

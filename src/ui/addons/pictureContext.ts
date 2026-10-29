@@ -3,8 +3,9 @@ import { useGame } from "@/app/GameProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import { useLive } from "@/app/LiveProvider";
 import {
-  DEFAULT_SCREEN, hudKeys, latestKnownScreen, liveScreenSize, screenSizeMarks, snapshotCounts, type AlphaStats, type PicSize, type PictureContext, type ScreenPicture,
+  DEFAULT_SCREEN, hudKeysOfTally, latestKnownScreen, liveScreenSize, type AlphaStats, type PicSize, type PictureContext,
 } from "@/core/addons/screenPictures";
+import { CommandNamesScan, ScreenSizeMarksScan, SnapshotScan } from "@/core/addons/pictureScans";
 import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
 import { pictureInfo } from "./imageStats";
 import type { LogRecord } from "@/core/live/types";
@@ -15,13 +16,6 @@ const sizeCaches = new WeakMap<object, Map<string, PicSize | null>>();
 const statsCaches = new WeakMap<object, Map<string, AlphaStats | null>>();
 /** 지금 읽는 중인 그림 이름(게임 그림 저장소별) */
 const inflight = new WeakMap<object, Set<string>>();
-
-/** 기록의 그림 표시(231) 이름들(그림 명령으로 다시 쌓는 화면용) */
-function commandPictureNames(records: LogRecord[]): Set<string> {
-  const names = new Set<string>();
-  for (const r of records) if (r?.type === "picture" && r.op === undefined && typeof r.name === "string" && r.name) names.add(r.name);
-  return names;
-}
 
 /**
  * 1.18.2: 게임의 실제 화면 크기 — 기록마다(sw·sh) 그때 것(sizes), 모르면 live.json의 것(liveScreen), 그것도 모르면
@@ -34,7 +28,8 @@ export function useScreenSizes(records: LogRecord[]): Pick<PictureContext, "scre
   const liveW = ls?.width ?? 0, liveH = ls?.height ?? 0;
   const liveScreen = useMemo(() => (liveW > 0 && liveH > 0 ? { width: liveW, height: liveH } : null), [liveW, liveH]);
   const guessed = data?.screenSize ?? DEFAULT_SCREEN;
-  const marks = useMemo(() => screenSizeMarks(records), [records]);
+  const [marksScan] = useState(() => new ScreenSizeMarksScan());
+  const marks = useMemo(() => marksScan.get(records), [marksScan, records]);
   // 기록이 늘어도 크기 표시가 그대로면 같은 배열(그림 구분 문맥이 기록마다 바뀌지 않게 — 읽기 이어 만들기)
   const sizes = useSameByKey(marks, useMemo(() => JSON.stringify(marks), [marks]));
   return useMemo(() => ({ screen: liveScreen ?? guessed, sizes, liveScreen }), [liveScreen, guessed, sizes]);
@@ -61,13 +56,16 @@ export function usePictureContext(records: LogRecord[], on: boolean, compose = f
   const { pictureRoles, spriteRoles, defaultRole, hiddenImages } = useAddons();
   const hidden = useMemo(() => hiddenImageMatcher(hiddenImages), [hiddenImages]);
   const { screen, sizes, liveScreen } = useScreenSizes(records);
-  const counts = useMemo(() => (on ? snapshotCounts(records) : null), [on, records]);
+  // 기록 전체를 훑는 것은 새로 붙은 기록만으로 이어 모은다(core/addons/pictureScans)
+  const [scans] = useState(() => ({ snapshots: new SnapshotScan(), commands: new CommandNamesScan() }));
+  const counts = useMemo(() => (on ? scans.snapshots.get(records) : null), [scans, on, records]);
+  const commandNames = useMemo(() => (compose ? scans.commands.get(records) : null), [scans, compose, records]);
   // 보일 수 있는 그림 이름들(크기·투명도 통계를 읽는다)
   const need = useMemo(() => {
-    const names = compose ? commandPictureNames(records) : new Set<string>();
-    if (counts) for (const pics of counts.keys()) for (const p of pics as ScreenPicture[]) names.add(p.name);
+    const names = new Set<string>(commandNames ?? []);
+    if (counts) for (const n of counts.names) names.add(n);
     return [...names].sort().join("\n");
-  }, [counts, compose, records]);
+  }, [counts, commandNames]);
   const [version, setVersion] = useState(0);
   useEffect(() => {
     if (!assets || !need) return;
@@ -111,7 +109,7 @@ export function usePictureContext(records: LogRecord[], on: boolean, compose = f
     };
   }, [assets, version]);
   const hudScreen = latestKnownScreen({ sizes, liveScreen }) ?? screen;
-  const hudNow = useMemo(() => (counts ? hudKeys(counts, hudScreen, lookups.sizeOf) : null), [counts, hudScreen, lookups]);
+  const hudNow = useMemo(() => (counts ? hudKeysOfTally(counts.tally, counts.total, hudScreen, lookups.sizeOf) : null), [counts, hudScreen, lookups]);
   // 화면 장식 판정이 그대로면 같은 집합(기록이 늘 때마다 문맥이 바뀌지 않게)
   const hud = useSameByKey(hudNow, useMemo(() => (hudNow ? [...hudNow].sort().join("\n") : "-"), [hudNow]));
   const active = !!counts || compose;

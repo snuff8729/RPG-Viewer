@@ -449,7 +449,10 @@ function run(
         const { key, plugin } = pluginCommandKey(r as Extract<LogRecord, { type: "plugin" }>);
         if (!key) continue;
         if (plugin ? isKnownPlugin(plugin, adapterPlugins) : KNOWN_COMMANDS.has(key.toLowerCase()) || isKnownPlugin(key, adapterPlugins)) continue;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
+        // 1.24.0: 잦은 명령은 1분에 한 번만 남고 빠진 실행 수(skipped)를 싣는다
+        const skipped = (r as { skipped?: unknown }).skipped;
+        const n = 1 + (typeof skipped === "number" && Number.isFinite(skipped) && skipped > 0 ? Math.floor(skipped) : 0);
+        counts.set(key, (counts.get(key) ?? 0) + n);
       }
       const top = [...counts].filter(([, n]) => n >= 5).sort((a, b) => b[1] - a[1]).slice(0, 10);
       if (top.length > 0) push({

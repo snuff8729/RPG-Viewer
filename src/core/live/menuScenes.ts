@@ -137,45 +137,51 @@ export function withoutMenuRecords(path: LogRecord[], keepMenu: boolean, menu?: 
   if (!Array.isArray(path)) return [];
   if (keepMenu) return path;
   const out: LogRecord[] = [];
-  let changed = false;
-  let inMenu = false;
-  for (const r of path) {
-    try {
-      if (!r || typeof r !== "object") { out.push(r); continue; }
-      let isMenu = false;
-      if (taggedMenu(r)) isMenu = true;
-      else {
-        const ce = commonIdOf(r);
-        if (ce === undefined) {
-          if (ENDS_MENU.has(r.type)) inMenu = false;
-          else if (r.type === "screen" && (r as { scene?: unknown }).scene === "battle") inMenu = false;
-        } else if (ce !== null && menu && menu.after === ce) {
-          inMenu = false;
-        } else if (ce !== null && menu && menu.direct.has(ce)) {
-          inMenu = true;
-        } else if (ce !== null && menu && inMenu) {
-          /* 메뉴가 열린 동안의 커먼 이벤트(메뉴 커먼 이벤트가 부른 것) */
-        } else {
-          inMenu = false;
-        }
-        isMenu = inMenu;
-      }
-      if (!isMenu) { out.push(r); continue; }
-      changed = true;
-      if (r.type === "picture" || r.type === "screen") continue;
-      const o = r as unknown as Record<string, unknown>;
-      if (r.type === "message") {
-        const { pics: _p, ...rest } = o;
-        out.push({ ...rest, picsSame: true } as unknown as LogRecord);
-      } else if ("pics" in o || "picsSame" in o) {
-        const { pics: _p, picsSame: _s, ...rest } = o;
-        out.push(rest as unknown as LogRecord);
+  const st = newMenuState();
+  for (const r of path) menuStep(st, r, menu, out);
+  return st.changed ? out : path;
+}
+
+/** withoutMenuRecords를 기록 하나씩 이어 하는 상태. changed = 지금까지 뺀(바꾼) 기록이 있다. */
+export interface MenuState { inMenu: boolean; changed: boolean }
+export const newMenuState = (): MenuState => ({ inMenu: false, changed: false });
+
+/** withoutMenuRecords의 기록 하나: 남길 것(그대로 또는 그림을 뺀 사본)을 out에 넣는다. 예외를 던지지 않는다. */
+export function menuStep(st: MenuState, r: LogRecord, menu: MenuCommonEvents | null | undefined, out: LogRecord[]): void {
+  try {
+    if (!r || typeof r !== "object") { out.push(r); return; }
+    let isMenu = false;
+    if (taggedMenu(r)) isMenu = true;
+    else {
+      const ce = commonIdOf(r);
+      if (ce === undefined) {
+        if (ENDS_MENU.has(r.type)) st.inMenu = false;
+        else if (r.type === "screen" && (r as { scene?: unknown }).scene === "battle") st.inMenu = false;
+      } else if (ce !== null && menu && menu.after === ce) {
+        st.inMenu = false;
+      } else if (ce !== null && menu && menu.direct.has(ce)) {
+        st.inMenu = true;
+      } else if (ce !== null && menu && st.inMenu) {
+        /* 메뉴가 열린 동안의 커먼 이벤트(메뉴 커먼 이벤트가 부른 것) */
       } else {
-        out.push(r);
+        st.inMenu = false;
       }
-    } catch {
+      isMenu = st.inMenu;
+    }
+    if (!isMenu) { out.push(r); return; }
+    st.changed = true;
+    if (r.type === "picture" || r.type === "screen") return;
+    const o = r as unknown as Record<string, unknown>;
+    if (r.type === "message") {
+      const { pics: _p, ...rest } = o;
+      out.push({ ...rest, picsSame: true } as unknown as LogRecord);
+    } else if ("pics" in o || "picsSame" in o) {
+      const { pics: _p, picsSame: _s, ...rest } = o;
+      out.push(rest as unknown as LogRecord);
+    } else {
       out.push(r);
     }
+  } catch {
+    out.push(r);
   }
-  return changed ? out : path;
 }

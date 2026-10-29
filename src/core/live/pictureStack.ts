@@ -56,17 +56,20 @@ function varValue(vars: PictureVars | null, r: LogRecord, id: unknown): number |
  */
 export function pictureVarIds(records: readonly LogRecord[], data: GameData): number[] {
   const ids = new Set<number>();
-  for (const r of records) {
-    try {
-      if (r.type !== "picture" || r.op !== undefined || typeof r.name !== "string" || !r.name) continue;
-      const id = idOf(r);
-      if (id === null || (num(r.x) !== null && num(r.y) !== null)) continue;
-      const p = commandParams(r, data, 231);
-      if (!p || !(p[0] === id || p[0] === undefined) || p[3] !== 1) continue;
-      for (const v of [p[4], p[5]]) if (typeof v === "number") ids.add(v);
-    } catch { /* pictureOp처럼 넘긴다 */ }
-  }
+  for (const r of records) pictureVarIdsOf(r, data, ids);
   return [...ids].sort((a, b) => a - b);
+}
+
+/** pictureVarIds의 기록 하나: 그 기록이 읽을 수 있는 변수 번호를 ids에 더한다. 예외를 던지지 않는다. */
+export function pictureVarIdsOf(r: LogRecord, data: GameData, ids: Set<number>): void {
+  try {
+    if (r.type !== "picture" || r.op !== undefined || typeof r.name !== "string" || !r.name) return;
+    const id = idOf(r);
+    if (id === null || (num(r.x) !== null && num(r.y) !== null)) return;
+    const p = commandParams(r, data, 231);
+    if (!p || !(p[0] === id || p[0] === undefined) || p[3] !== 1) return;
+    for (const v of [p[4], p[5]]) if (typeof v === "number") ids.add(v);
+  } catch { /* pictureOp처럼 넘긴다 */ }
 }
 
 /** 기록 하나 → 그림 바꾸기. 그림 기록이 아니거나 모르면 null. */

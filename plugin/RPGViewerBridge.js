@@ -26,6 +26,7 @@
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
  * 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357)의 이름과 문자열 인자도
  * 기록합니다. 병렬 이벤트·병렬 커먼 이벤트의 것은 기록하지 않습니다.
+ * 같은 곳의 플러그인 명령이 1분에 세 번 이상 실행되면 1분에 한 번만 남깁니다(빠진 횟수는 함께 적음).
  * RPG Viewer에서 "화면 그림 따라 그리기"를 켠 게임에서만, 대사 글자가 그려지기
  * 시작할 때 화면에 실제로 보이는 그림(스탠딩 이미지 등)의 이름·위치·크기도
  * 기록합니다(숨겨졌거나 투명한 그림은 빼고). 전투 화면의 그림도 같습니다.
@@ -3194,8 +3195,12 @@
   // Plugin commands (356 MV / 357 MZ) run by events, recorded so the viewer can tell an examine
   // spot or plugin-shown text was reached. Parallel interpreters are skipped; the same src+cmd is
   // recorded once per interpreter run and once per 2 s, and at most 20 records per second overall.
+  // 1.24.0: once it ran more than PLUGIN_FREQ_COUNT times within PLUGIN_FREQ_WINDOW_MS, at most once per
+  // PLUGIN_FREQ_EMIT_MS; the next record carries skipped = runs not recorded since the previous one.
   var PLUGIN_TEXT_MAX = 500, PLUGIN_REPEAT_MS = 2000, PLUGIN_CAP = 20, PLUGIN_CAP_MS = 1000, PLUGIN_KEYS_MAX = 1000;
+  var PLUGIN_FREQ_COUNT = 2, PLUGIN_FREQ_WINDOW_MS = 60000, PLUGIN_FREQ_EMIT_MS = 60000;
   var pluginLastT = {}, pluginKeyCount = 0; // src+cmd key -> time it was last recorded
+  var pluginRuns = {};                      // src+cmd key -> { times: last runs (recorded or skipped), skipped }
   var pluginTimes = [];                     // times of the last PLUGIN_CAP plugin records
 
   function clipText(s) { return s.length > PLUGIN_TEXT_MAX ? s.slice(0, PLUGIN_TEXT_MAX) : s; }
@@ -3281,7 +3286,19 @@
     if (has(pluginLastT, key) && t - pluginLastT[key] < PLUGIN_REPEAT_MS) return;
     if (pluginTimes.length >= PLUGIN_CAP && t - pluginTimes[0] < PLUGIN_CAP_MS) return; // over the cap: drop
     seen[key] = true;
-    if (pluginKeyCount >= PLUGIN_KEYS_MAX) { pluginLastT = {}; pluginKeyCount = 0; }
+    // 1.24.0: a src+cmd re-run often (a common event called every few seconds) is recorded once per minute;
+    // the runs left out are counted on the next record of it (skipped)
+    var fr = has(pluginRuns, key) ? pluginRuns[key] : (pluginRuns[key] = { times: [], skipped: 0 });
+    fr.times.push(t);
+    if (fr.times.length > PLUGIN_FREQ_COUNT + 1) fr.times.shift();
+    if (fr.times.length > PLUGIN_FREQ_COUNT && t - fr.times[0] <= PLUGIN_FREQ_WINDOW_MS &&
+        has(pluginLastT, key) && t - pluginLastT[key] < PLUGIN_FREQ_EMIT_MS) {
+      fr.skipped++;
+      return;
+    }
+    var skipped = fr.skipped;
+    fr.skipped = 0;
+    if (pluginKeyCount >= PLUGIN_KEYS_MAX) { pluginLastT = {}; pluginRuns = {}; pluginRuns[key] = fr; pluginKeyCount = 0; }
     if (!has(pluginLastT, key)) pluginKeyCount++;
     pluginLastT[key] = t;
     pluginTimes.push(t);
@@ -3291,6 +3308,7 @@
     if (code === 357) rec.plugin = f.plugin;
     rec.name = f.name;
     rec.args = f.args;
+    if (skipped > 0) rec.skipped = skipped;
     emit("plugin", rec);
   }
 

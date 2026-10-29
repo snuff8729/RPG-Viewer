@@ -20,7 +20,7 @@ import { CheatContent, onOpenCheatRequest } from "./cheat/CheatSheet";
 import { useCheatSession } from "./cheat/useCheatSession";
 import { useConnectionStatus } from "./useConnectionStatus";
 import { InstallDialog } from "./InstallDialog";
-import { choiceAppeared, countLines, isPlayTab, loadPlayTab, savePlayTab, unseenLines, type PlayTab } from "./mobilePlay";
+import { choiceAppeared, LineCounter, isPlayTab, loadPlayTab, savePlayTab, unseenLines, type PlayTab } from "./mobilePlay";
 import { isMapBelowTab, loadMapBelowTab, saveMapBelowTab, type MapBelowTab } from "./playLayout";
 import { MapPicture, NextStory, PlayMapProvider, TodoList } from "./PlayMap";
 import { PlayMenu } from "./PlayMenu";
@@ -163,7 +163,8 @@ export function MobilePlayView() {
   useEffect(() => onOpenCheatRequest(() => { setTabState("cheat"); savePlayTab("cheat"); }), []);
 
   // 읽기 탭을 마지막으로 봤을 때의 대사 수(읽기 탭을 보는 동안은 계속 맞춘다)
-  const lines = useMemo(() => countLines(records), [records]);
+  const [counter] = useState(() => new LineCounter());
+  const lines = useMemo(() => counter.count(records), [counter, records]);
   const [seen, setSeen] = useState(lines);
   if (tab === "read" && seen !== lines) setSeen(lines);
   const unseen = tab === "read" ? 0 : unseenLines(seen, lines);
