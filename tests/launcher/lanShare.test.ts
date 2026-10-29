@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createFsMiddleware, FsSessions } from "../../scripts/fsApi";
+import { createFsMiddleware, FsSessions, remoteWriteAllowed } from "../../scripts/fsApi";
 import {
   createGateMiddleware, createShareMiddleware, fileShareStore, gateRequest, memoryShareStore, MSG_EXPIRED, MSG_NOT_LAN, MSG_OFF,
   MSG_READ_ONLY, MSG_STALE, parseCookies, remoteRouteAllowed, SHARE_COOKIE, shareCookie, shareUrls, ShareState, type ShareStore,
@@ -66,12 +66,31 @@ describe("cookies and routes", () => {
     expect(parseCookies(undefined)).toEqual({});
     expect(shareCookie("tok", 60)).toBe("rpgv_share=tok; Max-Age=60; Path=/; HttpOnly; SameSite=Lax");
   });
-  it("lets remote clients use pages and read APIs only", () => {
-    for (const p of ["/", "/src/main.tsx", "/@vite/client", "/assets/x.js", "/api/fs/read", "/api/fs/range", "/api/fs/list", "/api/fs/stat", "/api/share/current"]) {
+  it("lets remote clients use pages, read APIs and write (the file is checked by the folder API)", () => {
+    for (const p of ["/", "/src/main.tsx", "/@vite/client", "/assets/x.js", "/api/fs/read", "/api/fs/range", "/api/fs/list", "/api/fs/stat", "/api/fs/write", "/api/share/current"]) {
       expect(remoteRouteAllowed(p)).toBe(true);
     }
-    for (const p of ["/api/fs/write", "/api/fs/remove", "/api/fs/open", "/api/fs/pick", "/api/fs/ping", "/api/game/launch", "/api/game/backups/list", "/api/share/start", "/api/share/stop", "/__open-in-editor"]) {
+    for (const p of ["/api/fs/remove", "/api/fs/open", "/api/fs/pick", "/api/fs/ping", "/api/game/launch", "/api/game/backups/list", "/api/share/start", "/api/share/stop", "/__open-in-editor"]) {
       expect(remoteRouteAllowed(p)).toBe(false);
+    }
+  });
+});
+
+describe("remoteWriteAllowed", () => {
+  it("allows only control.json and addons.json under the engine's rpg-viewer folder", () => {
+    expect(remoteWriteAllowed("MV", "www/rpg-viewer/control.json")).toBe(true);
+    expect(remoteWriteAllowed("MV", "www/rpg-viewer/addons.json")).toBe(true);
+    expect(remoteWriteAllowed("MZ", "rpg-viewer/control.json")).toBe(true);
+    expect(remoteWriteAllowed("MZ", "rpg-viewer/addons.json")).toBe(true);
+    for (const [engine, p] of [
+      ["MV", "rpg-viewer/control.json"], ["MZ", "www/rpg-viewer/control.json"],
+      ["MZ", "rpg-viewer/live.json"], ["MZ", "rpg-viewer/log.jsonl"], ["MZ", "rpg-viewer/seen-archive.json"],
+      ["MZ", "js/plugins.js"], ["MZ", "rpg-viewer/control.json.tmp"], ["MZ", "RPG-VIEWER/CONTROL.JSON"],
+      ["MZ", "rpg-viewer/../rpg-viewer/control.json"], ["MZ", "x/../rpg-viewer/control.json"], ["MZ", "/rpg-viewer/control.json"],
+      ["MZ", "rpg-viewer\\control.json"], ["MZ", "C:/g/rpg-viewer/control.json"], ["MZ", ""], ["MZ", 1],
+      [null, "rpg-viewer/control.json"], ["", "rpg-viewer/control.json"],
+    ] as const) {
+      expect(remoteWriteAllowed(engine, p)).toBe(false);
     }
   });
 });
@@ -205,11 +224,11 @@ describe("gateRequest", () => {
       .toEqual({ kind: "remote", setCookie: shareCookie(tok, 6 * DAY / 1000) });
   });
 
-  it("refuses write and launcher routes even with a valid token", () => {
+  it("refuses remove, open and launcher routes even with a valid token", () => {
     const { share } = makeShare();
     share.start(7, game);
     const cookie = `${SHARE_COOKIE}=${share.token()}`;
-    for (const url of ["/api/fs/write", "/api/fs/open", "/api/game/launch", "/api/share/start", "/__open-in-editor?file=x"]) {
+    for (const url of ["/api/fs/remove", "/api/fs/open", "/api/game/launch", "/api/share/start", "/__open-in-editor?file=x"]) {
       expect(gateRequest({ ip: lan, method: "POST", url, cookie }, share)).toEqual({ kind: "deny", message: MSG_READ_ONLY });
     }
     expect(gateRequest({ ip: lan, method: "POST", url: "/api/fs/read", cookie }, share)).toEqual({ kind: "remote" });
@@ -320,9 +339,23 @@ describe("share API and remote file access", () => {
     expect(read.status).toBe(200);
     expect(read.body).toBe("{\"t\":1}");
 
-    // 쓰기·열기·실행은 막힌다
+    // 게임 보조·치트·게임 설정 파일 둘만 쓸 수 있다
+    for (const f of ["control.json", "addons.json"]) {
+      const w = await call({ ...phone, cookie, method: "POST", url: "/api/fs/write", body: { id: cur.id, path: `www/rpg-viewer/${f}`, text: "{\"v\":1}" } });
+      expect(w.status).toBe(200);
+      expect(JSON.parse(w.body)).toEqual({ ok: true });
+      expect(fs.readFileSync(path.join(game, "www/rpg-viewer", f), "utf8")).toBe("{\"v\":1}");
+    }
+
+    // 다른 쓰기·지우기·열기·실행은 막힌다
     for (const [url, body] of [
       ["/api/fs/write", { id: cur.id, path: "www/rpg-viewer/x.json", text: "1" }],
+      ["/api/fs/write", { id: cur.id, path: "www/rpg-viewer/live.json", text: "1" }],
+      ["/api/fs/write", { id: cur.id, path: "www/js/plugins.js", text: "1" }],
+      ["/api/fs/write", { id: cur.id, path: "rpg-viewer/control.json", text: "1" }],
+      ["/api/fs/write", { id: cur.id, path: "www/rpg-viewer/../rpg-viewer/control.json", text: "1" }],
+      ["/api/fs/write", { id: cur.id, path: "www/../www/rpg-viewer/control.json", text: "1" }],
+      ["/api/fs/remove", { id: cur.id, path: "www/rpg-viewer/control.json" }],
       ["/api/fs/remove", { id: cur.id, path: "www/rpg-viewer/live.json" }],
       ["/api/fs/open", { path: other }],
       ["/api/game/launch", { path: game }],
@@ -330,7 +363,15 @@ describe("share API and remote file access", () => {
       expect((await call({ ...phone, cookie, method: "POST", url, body })).status).toBe(403);
     }
     expect(fs.existsSync(path.join(game, "www/rpg-viewer/x.json"))).toBe(false);
-    expect(fs.existsSync(path.join(game, "www/rpg-viewer/live.json"))).toBe(true);
+    expect(fs.readFileSync(path.join(game, "www/rpg-viewer/live.json"), "utf8")).toBe("{\"t\":1}");
+    expect(fs.existsSync(path.join(game, "www/rpg-viewer/control.json"))).toBe(true);
+    expect(fs.existsSync(path.join(game, "rpg-viewer"))).toBe(false);
+    expect(fs.existsSync(path.join(game, "www/js"))).toBe(false);
+
+    // 다른 세션에는 허용된 파일 이름으로도 못 쓴다
+    const otherWrite = sessions.open(other);
+    expect(otherWrite.ok && (await call({ ...phone, cookie, method: "POST", url: "/api/fs/write", body: { id: otherWrite.id, path: "rpg-viewer/control.json", text: "1" } })).status).toBe(403);
+    expect(fs.existsSync(path.join(other, "rpg-viewer"))).toBe(false);
 
     // 다른 세션(PC가 연 다른 게임)은 못 읽는다
     const otherId = sessions.open(other);

@@ -57,7 +57,7 @@ function CopyUrl({ url }: { url: string }) {
 
 /**
  * 상단 `휴대폰으로 보기`. 뷰어 서버(npm run dev / preview)가 있을 때만 보인다.
- * 켜면 같은 와이파이의 휴대폰이 QR 주소로 플레이 화면을 읽기 전용으로 본다. 허용 기간(1·7·30일) 동안은 다시 찍지 않아도 된다.
+ * 켜면 같은 와이파이의 휴대폰이 QR 주소로 플레이 화면을 본다(게임 보조·치트·게임 설정도 쓸 수 있다). 허용 기간(1·7·30일) 동안은 다시 찍지 않아도 된다.
  */
 export function ShareButton() {
   const { data } = useGame();

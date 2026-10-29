@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Bot, Check, Copy, Languages } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { agentInstruction, exportMasked, unmaskWithGame, type MaskExportResult, type UnmaskResult } from "@/app/maskApi";
-import { isReadOnlyFolder, ServerFolder } from "@/app/serverFolder";
+import { isRemoteFolder, ServerFolder } from "@/app/serverFolder";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -56,7 +56,7 @@ export function AiHandoff() {
   const [busy, setBusy] = useState(false);
 
   if (!data) return null;
-  const remote = isReadOnlyFolder(folder);
+  const remote = isRemoteFolder(folder);
   const reason = remote ? "휴대폰에서는 쓸 수 없어요." : !available ? "뷰어를 npm run dev로 열었을 때만 쓸 수 있어요." : null;
   const knowsGame = (folder instanceof ServerFolder) || path !== null;
   const target = { folder, path };

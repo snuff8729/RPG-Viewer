@@ -1,12 +1,14 @@
 /**
- * 휴대폰 보기: 같은 와이파이의 휴대폰·태블릿이 PC 뷰어의 플레이 화면을 읽기 전용으로 본다.
+ * 휴대폰 보기: 같은 와이파이의 휴대폰·태블릿이 PC 뷰어의 플레이 화면을 본다.
+ * 휴대폰이 쓸 수 있는 것은 게임 보조·치트·게임 설정 파일 둘뿐이다(scripts/fsApi.ts REMOTE_WRITE_FILES).
  *
  * 서버는 모든 네트워크에서 듣지만(vite `host: true`), 이 PC(루프백)가 아닌 요청은 맨 앞 미들웨어가 모두 막는다.
  * 다음을 다 만족할 때만 통과한다.
  * - 보낸 쪽(소켓 주소)이 공유기 안쪽 주소(10/8, 172.16/12, 192.168/16, 169.254/16, fc00::/7, fe80::/10)
  * - 휴대폰 보기가 켜져 있고 허용 기간이 남았다
  * - 지금 토큰을 가졌다: QR 주소의 `?share=<토큰>`을 처음 열면 HttpOnly 쿠키로 바꿔 주고(남은 기간만큼), 그 뒤엔 쿠키로 본다
- * 통과한 요청도 화면·자원과 `/api/fs/{read,range,list,stat}`(공유한 게임 하나), `/api/share/current`만 쓸 수 있다.
+ * 통과한 요청도 화면·자원과 `/api/fs/{read,range,list,stat,write}`(공유한 게임 하나, write는 정해 둔 파일만),
+ * `/api/share/current`만 쓸 수 있다.
  *
  * 켜짐·토큰·만료 시각·공유 게임 경로는 `~/.rpg-viewer/share.json`에 남겨, 뷰어 서버를 다시 켜도 그대로다.
  * 끄면 토큰을 바로 버린다(다시 켜면 새 QR). 켜져 있는 동안 다시 켜면 같은 토큰을 그대로 쓴다.
@@ -38,7 +40,7 @@ export const MSG_NOT_LAN = "같은 와이파이(로컬 네트워크)에 있는 �
 export const MSG_OFF = "휴대폰 보기가 꺼져 있어요. PC에서 휴대폰 보기를 다시 켜고 QR을 다시 찍어 주세요.";
 export const MSG_EXPIRED = "허용 기간이 끝났어요. PC에서 휴대폰 보기를 다시 켜고 QR을 찍어 주세요.";
 export const MSG_STALE = "연결 정보가 바뀌었어요. PC에서 휴대폰 보기를 다시 켜고 QR을 다시 찍어 주세요.";
-export const MSG_READ_ONLY = "휴대폰에서는 볼 수만 있어요.";
+export const MSG_READ_ONLY = "휴대폰에서는 쓸 수 없는 기능이에요.";
 export const ERR_NEED_GAME = "공유할 게임 폴더 위치가 필요해요";
 
 // ── 저장 ──
@@ -226,6 +228,7 @@ export class ShareState implements RemoteAccess {
   }
 
   sharedId(): string | null { return this.shared()?.id ?? null; }
+  sharedEngine(): string | null { return this.shared()?.engine ?? null; }
 
   markRemote(req: object): void { this.remotes.add(req); }
   isRemote(req: IncomingMessage): boolean { return this.remotes.has(req); }
@@ -249,9 +252,12 @@ export function shareCookie(token: string, maxAgeSeconds: number): string {
   return `${SHARE_COOKIE}=${token}; Max-Age=${maxAgeSeconds}; Path=/; HttpOnly; SameSite=Lax`;
 }
 
-const REMOTE_API = new Set(["/api/fs/read", "/api/fs/range", "/api/fs/list", "/api/fs/stat", "/api/share/current"]);
+const REMOTE_API = new Set(["/api/fs/read", "/api/fs/range", "/api/fs/list", "/api/fs/stat", "/api/fs/write", "/api/share/current"]);
 
-/** 휴대폰 보기에서 열 수 있는 경로: 화면·자원 전부, API는 읽기 몇 개만. 편집기 열기(dev)는 막는다. */
+/**
+ * 휴대폰 보기에서 열 수 있는 경로: 화면·자원 전부, API는 읽기 몇 개와 write(어느 파일인지는 폴더 API가 다시 본다).
+ * 편집기 열기(dev)는 막는다.
+ */
 export function remoteRouteAllowed(pathname: string): boolean {
   if (pathname.startsWith("/api/")) return REMOTE_API.has(pathname);
   if (pathname.startsWith("/__open-in-editor")) return false;

@@ -8,7 +8,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { openPage } from "../navigation";
 import { useLive } from "@/app/LiveProvider";
-import { isRemoteView } from "@/app/share";
 import { useNextStory } from "./useNextStory";
 
 const CONF_VARIANT: Record<Confidence, "default" | "secondary" | "outline"> = { high: "default", mid: "secondary", low: "outline" };
@@ -87,10 +86,7 @@ export function NextStoryCard({ compact = false }: { compact?: boolean }) {
       </CardContent>
       <CardFooter className="flex flex-wrap items-center gap-x-2 border-t py-2 text-xs text-muted-foreground">
         <span>{story ? `스토리 기준: ${story.label} = ${story.value}` : "스토리 기준을 찾지 못했어요"}</span>
-        {/* 게임 설정은 휴대폰 보기에서 열 수 없다 */}
-        {!isRemoteView() && (
-          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={openGameSettings}>{story ? "바꾸기" : "고르기"}</Button>
-        )}
+        <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={openGameSettings}>{story ? "바꾸기" : "고르기"}</Button>
       </CardFooter>
     </Card>
   );

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useGame } from "./GameProvider";
-import { loadAddonFile, saveAddonFile } from "./addons";
+import { addonFileText, loadAddonFile, readAddonFolderFile, updateAddonFile } from "./addons";
 import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
 import { cleanStoryProgress, type AddonFile } from "@/core/addons/settings";
@@ -77,6 +77,8 @@ const NONE: AddonsValue = {
   hiddenImages: NO_HIDDEN, setHiddenImages: () => {},
 };
 const NO_OPTIONS: Record<string, Record<string, boolean>> = {};
+/** 다른 뷰어가 바꾼 설정 파일을 확인하는 간격 */
+const ADDONS_POLL_MS = 3000;
 const AddonsContext = createContext<AddonsValue | null>(null);
 
 interface Loaded { key: string; file: AddonFile; inFolder: boolean }
@@ -128,21 +130,59 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const storyText = current?.file.storyProgress ?? null;
   const storyProgress = useMemo(() => parseKeyText(storyText), [storyText]);
 
-  /** 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다) */
+  /** 저장을 하나씩(읽고-고쳐-쓰기가 서로 겹치지 않게). saving = 아직 끝나지 않은 저장 수 */
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const saving = useRef(0);
+
+  /**
+   * 설정을 바꿔 저장한다(쓰기 권한은 클릭 안에서 요청한다). 화면에는 바로 보이고, 저장은 폴더의 지금 파일에 이번 변경만 얹는다
+   * — PC와 휴대폰 보기가 같은 addons.json을 바꿔도 서로의 변경을 지우지 않는다.
+   */
   const update = useCallback((change: (prev: AddonFile) => AddonFile) => {
     const { folder: f, dataRoot: root, gameKey: key } = latest.current;
     if (key === null) return;
     const perm = f && isWritableFolder(f) ? f.requestWrite().catch(() => false) : Promise.resolve(false);
     const prev = latest.current.loaded;
-    const next = change(prev && prev.key === key ? prev.file : EMPTY_FILE);
+    const base = prev && prev.key === key ? prev.file : EMPTY_FILE;
+    const next = change(base);
     const nextLoaded: Loaded = { key, file: next, inFolder: prev?.inFolder ?? false };
     latest.current = { ...latest.current, loaded: nextLoaded };
     setLoaded(nextLoaded);
-    void perm.then(async (granted) => {
-      const ok = await saveAddonFile(granted ? f : null, root, key, next);
-      setLoaded((p) => (p && p.key === key && p.file === next ? { ...p, inFolder: ok } : p));
-    });
+    saving.current++;
+    saveChain.current = saveChain.current.then(async () => {
+      try {
+        const granted = await perm;
+        const r = await updateAddonFile(granted ? f : null, root, key, next, granted ? change : (p) => p);
+        // 그사이 다른 변경이 없을 때만 저장한 내용(다른 뷰어의 변경이 섞였을 수 있다)으로 맞춘다.
+        setLoaded((p) => {
+          if (!p || p.key !== key || p.file !== next) return p;
+          const done: Loaded = { key, file: r.file, inFolder: r.inFolder };
+          if (latest.current.loaded === p) latest.current = { ...latest.current, loaded: done };
+          return done;
+        });
+      } finally {
+        saving.current--;
+      }
+    }).catch(() => { /* 조용히 */ });
   }, []);
+
+  // 다른 뷰어(PC·휴대폰 보기)가 바꾼 설정을 따라간다: 폴더의 파일을 몇 초마다 읽어, 저장 중이 아니고 내용이 다르면 받아들인다.
+  useEffect(() => {
+    if (!ready || gameKey === null || !folder || !isWritableFolder(folder)) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (document.visibilityState !== "visible" || saving.current > 0) return;
+      const disk = await readAddonFolderFile(folder, dataRoot);
+      if (cancelled || !disk || saving.current > 0) return;
+      const cur = latest.current.loaded;
+      if (!cur || cur.key !== gameKey || addonFileText(cur.file) === addonFileText(disk)) return;
+      const done: Loaded = { key: gameKey, file: disk, inFolder: true };
+      latest.current = { ...latest.current, loaded: done };
+      setLoaded(done);
+    };
+    const id = setInterval(() => { void poll(); }, ADDONS_POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [ready, folder, dataRoot, gameKey]);
 
   const setOn = useCallback((id: AddonId, on: boolean) => {
     update((prev) => ({ ...prev, state: { ...prev.state, [id]: on } }));

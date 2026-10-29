@@ -8,7 +8,8 @@
  *
  * 세션 id는 서버 메모리 안의 루트 경로를 가리키는 불투명 값이고, URL에는 아무것도 싣지 않는다.
  * 세션 목록(FsSessions)은 휴대폰 보기(scripts/lanShare.ts)와 함께 쓴다.
- * 휴대폰 보기로 들어온 요청은 공유한 게임 하나의 read·range·list·stat만 받는다.
+ * 휴대폰 보기로 들어온 요청은 공유한 게임 하나의 read·range·list·stat과,
+ * 게임 보조·치트·게임 설정이 쓰는 두 파일(REMOTE_WRITE_FILES)의 write만 받는다.
  * 경로는 `/` 구분 상대 경로만 받고 `..`·절대 경로·드라이브·역슬래시를 거부하며,
  * 실제 경로(realpath)가 루트 밖이면(심볼릭 링크 탈출) 거부한다.
  */
@@ -385,8 +386,25 @@ function readBody(req: IncomingMessage, max: number): Promise<string | null> {
 
 const FILE_ROUTES = ["read", "range", "list", "stat", "write", "remove"] as const;
 type FileRoute = (typeof FILE_ROUTES)[number];
-/** 휴대폰 보기에서 쓸 수 있는 파일 작업(읽기만) */
-export const REMOTE_FILE_ROUTES = ["read", "range", "list", "stat"] as const;
+/** 휴대폰 보기에서 쓸 수 있는 파일 작업(write는 REMOTE_WRITE_FILES만) */
+export const REMOTE_FILE_ROUTES = ["read", "range", "list", "stat", "write"] as const;
+
+/**
+ * 휴대폰 보기가 쓸 수 있는 파일(게임 루트 기준, MV는 앞에 `www/`):
+ * - rpg-viewer/control.json: 게임 보조·치트(뷰어 → 게임 설정·명령)
+ * - rpg-viewer/addons.json: 게임 설정(이 게임의 부가 기능·스토리 기준·숨긴 그림)
+ * 지우기(remove)는 받지 않는다. src/app/serverFolder.ts의 같은 목록과 맞출 것.
+ */
+export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json"] as const;
+
+/** 휴대폰 보기에서 이 경로에 쓸 수 있는가. 대소문자까지 그대로 맞아야 한다. */
+export function remoteWriteAllowed(engine: string | null | undefined, rel: unknown): boolean {
+  const segs = safeSegments(rel);
+  if (segs === null || (engine !== "MV" && engine !== "MZ")) return false;
+  const joined = segs.join("/");
+  const base = engine === "MV" ? "www/" : "";
+  return REMOTE_WRITE_FILES.some((f) => joined === base + f);
+}
 
 type Next = (err?: unknown) => void;
 
@@ -431,6 +449,8 @@ export interface RemoteAccess {
   isRemote(req: IncomingMessage): boolean;
   /** 휴대폰에 공유 중인 세션 id(없으면 null) */
   sharedId(): string | null;
+  /** 공유 중인 게임의 엔진("MV"·"MZ"). 없으면 휴대폰은 어떤 파일에도 쓰지 못한다. */
+  sharedEngine?(): string | null;
 }
 
 export interface FsApiDeps {
@@ -495,8 +515,12 @@ export function createFsMiddleware(deps: FsApiDeps = {}) {
       return;
     }
 
-    // 휴대폰은 공유한 게임 하나만 읽는다.
+    // 휴대폰은 공유한 게임 하나만, 쓰기는 정해 둔 두 파일만.
     if (remote && (typeof input.id !== "string" || input.id !== deps.remote?.sharedId())) {
+      sendJson(res, 403, { ok: false, error: "forbidden" });
+      return;
+    }
+    if (remote && route === "write" && !remoteWriteAllowed(deps.remote?.sharedEngine?.() ?? null, input.path)) {
       sendJson(res, 403, { ok: false, error: "forbidden" });
       return;
     }

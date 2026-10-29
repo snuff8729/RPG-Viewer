@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { GameFolder, WritableGameFolder } from "@/core/fs/folder";
-import { addonsFile, addonsStorageKey, loadAddonFile, loadAddonState, saveAddonFile, saveAddonState, type KeyStorage } from "./addons";
+import {
+  addonFileText, addonsFile, addonsStorageKey, loadAddonFile, loadAddonState, readAddonFolderFile, saveAddonFile, saveAddonState, updateAddonFile,
+  type KeyStorage,
+} from "./addons";
+import type { AddonFile } from "@/core/addons/settings";
 
 const memStorage = (): KeyStorage & { map: Map<string, string> } => {
   const map = new Map<string, string>();
@@ -65,5 +69,26 @@ describe("add-on settings storage", () => {
     expect(await loadAddonState(folder({ "rpg-viewer/addons.json": "{bad" }), "data", "K", s)).toEqual({ screenPictures: true, notices: false });
     expect(await loadAddonState(null, "data", "other", s)).toEqual({});
     expect(await loadAddonState(null, "data", "other", null)).toEqual({});
+  });
+});
+
+describe("shared addons.json (PC and phone viewers)", () => {
+  const turnOn = (id: "screenPictures" | "notices") => (p: AddonFile): AddonFile => ({ ...p, state: { ...p.state, [id]: true } });
+  it("applies only this change on top of what the other viewer saved", async () => {
+    const f = folder();
+    // 이 뷰어는 아직 예전 설정(모두 꺼짐)을 들고 있고, 그사이 다른 뷰어가 알림 문구를 켰다
+    await saveAddonState(f, "data", "K", { notices: true }, memStorage());
+    const r = await updateAddonFile(f, "data", "K", { state: {}, pictureRoles: {} }, turnOn("screenPictures"), memStorage());
+    expect(r.inFolder).toBe(true);
+    expect(r.file.state).toMatchObject({ screenPictures: true, notices: true });
+    expect(JSON.parse(f.files["rpg-viewer/addons.json"]).enabled).toEqual({ screenPictures: true, notices: true });
+    expect(await readAddonFolderFile(f, "data")).toEqual(r.file);
+    expect(addonFileText(r.file)).toBe(f.files["rpg-viewer/addons.json"]);
+  });
+  it("falls back to the given settings when the folder has no file or cannot be written", async () => {
+    const r = await updateAddonFile(folder(), "data", "K", { state: { screenPictures: true }, pictureRoles: {} }, turnOn("notices"), memStorage());
+    expect(r.file.state).toEqual({ screenPictures: true, notices: true });
+    const ro = await updateAddonFile(folder({}, false), "data", "K", { state: {}, pictureRoles: {} }, turnOn("notices"), memStorage());
+    expect(ro).toEqual({ file: { state: { notices: true }, pictureRoles: {} }, inFolder: false });
   });
 });

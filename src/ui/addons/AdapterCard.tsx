@@ -7,6 +7,7 @@ import {
   getAdapterInstallStatus, installAdapter, uninstallAdapter, unknownTokensNote, type AdapterInstallResult, type AdapterInstallStatus,
 } from "@/core/adapters/install";
 import { isWritableFolder } from "@/core/fs/folder";
+import { isRemoteFolder } from "@/app/serverFolder";
 import { versionAtLeast } from "@/core/live/assist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,8 @@ const MIN_BRIDGE = "1.13.0";
 /** 게임 쪽 확장(bridge.js) 설치 상태와 설치·제거 */
 function useAdapterInstall(adapter: BundledAdapter) {
   const { folder, data } = useGame();
-  const wfolder = folder && isWritableFolder(folder) ? folder : null;
+  // 휴대폰 보기에서는 게임 쪽 확장(plugins.js)을 설치·제거하지 않는다
+  const wfolder = folder && isWritableFolder(folder) && !isRemoteFolder(folder) ? folder : null;
   const dataRoot = data?.dataRoot ?? null;
   const { id, label } = adapter.manifest;
   const script = adapter.script;
@@ -48,14 +50,14 @@ function useAdapterInstall(adapter: BundledAdapter) {
     await refresh();
     return r;
   }, [wfolder, dataRoot, id, label, script, refresh]);
-  return { status, run, canInstall: wfolder !== null };
+  return { status, run, canInstall: wfolder !== null, remote: isRemoteFolder(folder) };
 }
 
 /** 이 게임에 맞는 게임 전용 어댑터 하나(게임 설정 Sheet) */
 export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
   const { isAdapterOn, setAdapterOn, isAdapterOptionOn, setAdapterOption } = useAddons();
   const { connection, live } = useLive();
-  const { status, run, canInstall } = useAdapterInstall(adapter);
+  const { status, run, canInstall, remote } = useAdapterInstall(adapter);
   const [result, setResult] = useState<AdapterInstallResult | null>(null);
   const [busy, setBusy] = useState(false);
   const { id, label, description } = adapter.manifest;
@@ -105,7 +107,9 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
           })}
           {hasScript && !canInstall && (
             <Alert>
-              <AlertDescription>게임 쪽 확장은 폴더 열기로 연 게임에서만 설치할 수 있어요.</AlertDescription>
+              <AlertDescription>
+                {remote ? "게임 쪽 확장은 PC에서 설치해 주세요." : "게임 쪽 확장은 폴더 열기로 연 게임에서만 설치할 수 있어요."}
+              </AlertDescription>
             </Alert>
           )}
           {hasScript && canInstall && status?.state === "installed" && status.outdated && (

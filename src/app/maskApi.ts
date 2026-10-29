@@ -18,7 +18,7 @@ export interface MaskTarget { folder?: unknown; path: string | null }
 const defaultFetch: FetchFn = (input, init) => fetch(input, init);
 
 async function post(fetchFn: FetchFn, route: "export" | "unmask", target: MaskTarget, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const server = target.folder instanceof ServerFolder && !target.folder.readOnly ? target.folder : null;
+  const server = target.folder instanceof ServerFolder && !target.folder.remote ? target.folder : null;
   const path = server?.root ?? target.path;
   const openId = async () => {
     if (!path) return null;

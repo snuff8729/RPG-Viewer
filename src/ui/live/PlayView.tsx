@@ -47,18 +47,20 @@ function PlayTopBar({ popup }: { popup: boolean }) {
       <ConnectionBadge />
       {mapName && <span className="min-w-0 truncate text-sm font-medium">{mapName}</span>}
       {checklist && <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>남은 것 {checklist.remaining}</Badge>}
-      {/* 휴대폰 보기는 읽기만: 실행·백업·보조·치트·설정을 숨긴다 */}
-      {!isRemoteView() && (
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {!popup && <Button variant="outline" size="sm" onClick={openWindow}><ExternalLink />새 창으로 열기</Button>}
-          <LaunchButton />
-          <ShareButton />
-          <BackupButton />
-          <AssistPanel />
-          <CheatSheet />
-          <GameSettingsSheet />
-        </div>
-      )}
+      {/* 휴대폰 보기(태블릿 너비)는 게임 보조·치트·게임 설정만: 새 창·실행·공유·백업을 숨긴다 */}
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {!isRemoteView() && (
+          <>
+            {!popup && <Button variant="outline" size="sm" onClick={openWindow}><ExternalLink />새 창으로 열기</Button>}
+            <LaunchButton />
+            <ShareButton />
+            <BackupButton />
+          </>
+        )}
+        <AssistPanel />
+        <CheatSheet />
+        <GameSettingsSheet />
+      </div>
     </header>
   );
 }
