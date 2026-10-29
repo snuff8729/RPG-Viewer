@@ -8,6 +8,7 @@ import { noticePluginsOf } from "@/core/addons/notices";
 import { enabledPluginsOf } from "@/core/adapters/manifest";
 import { pictureFolderRulesFromPlugins } from "@/core/assets/pictureFolders";
 import { afterMenuCommonEventFromPlugins, menuCommonEventIdsFromPlugins } from "@/core/live/menuScenes";
+import { detectEngine } from "./engine";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
 
 export type LoadResult =
@@ -186,10 +187,20 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const menuCommonEvents = menuCommonEventIdsFromPlugins(pluginsText);
   const afterMenuCommonEvent = afterMenuCommonEventFromPlugins(pluginsText);
   const pictureFolders = pictureFolderRulesFromPlugins(pluginsText);
+  // 엔진: js/ 의 코어 파일(rmmz_core.js / rpg_core.js)이 가장 확실하다
+  let jsFiles: unknown = [];
+  try {
+    const base = livePaths(root.data).base;
+    jsFiles = await folder.list(base ? `${base}/js` : "js");
+  } catch { jsFiles = []; }
+  const engine = detectEngine({
+    jsFiles: Array.isArray(jsFiles) ? jsFiles.filter((n): n is string => typeof n === "string") : [],
+    dataRoot: root.data, hasAdvanced: system.advanced !== undefined,
+  });
   return {
     ok: true,
     data: {
-      engine: system.advanced !== undefined ? "MZ" : "MV",
+      engine,
       dataRoot: root.data,
       imgRoot: root.img,
       system, mapInfos, maps, commonEvents, troops, actors, items, weapons, armors, skills, states, classes, errors,

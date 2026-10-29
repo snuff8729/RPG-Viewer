@@ -31,6 +31,21 @@ describe("loadGame", () => {
     expect(r.data.dataRoot).toBe("www/data");
     expect(r.data.imgRoot).toBe("www/img");
   });
+  it("labels the engine by its core js file, not by System.json's advanced key", async () => {
+    const sys = JSON.stringify({ gameTitle: "t", switches: [], variables: [], advanced: { screenWidth: 816 } });
+    const mv = await loadGame(new MemoryFolder({ "data/System.json": sys, "js/rpg_core.js": "//", "index.html": "<script src=\"js/rpg_core.js\"></script>" }));
+    if (!mv.ok) throw new Error();
+    expect(mv.data.engine).toBe("MV");
+    const mvWww = await loadGame(new MemoryFolder({ "www/data/System.json": sys }));
+    if (!mvWww.ok) throw new Error();
+    expect(mvWww.data.engine).toBe("MV");
+    const mz = await loadGame(new MemoryFolder({ "data/System.json": sys, "js/rmmz_core.js": "//" }));
+    if (!mz.ok) throw new Error();
+    expect(mz.data.engine).toBe("MZ");
+    const mzNoJs = await loadGame(new MemoryFolder({ "data/System.json": sys }));
+    if (!mzNoJs.ok) throw new Error();
+    expect(mzNoJs.data.engine).toBe("MZ");
+  });
   it("reports notFound with searched paths", async () => {
     expect(await loadGame(new MemoryFolder({ "readme.txt": "x" }))).toEqual(
       { ok: false, reason: "notFound", searched: ["www/data/System.json", "data/System.json"] });
