@@ -73,6 +73,8 @@ describe("remote (phone) ServerFolder", () => {
   it("knows the allowed files per engine", () => {
     expect(remoteWritable("MZ", "rpg-viewer/control.json")).toBe(true);
     expect(remoteWritable("MZ", "rpg-viewer/addons.json")).toBe(true);
+    expect(remoteWritable("MZ", "rpg-viewer/favorites.json")).toBe(true);
+    expect(remoteWritable("MV", "www/rpg-viewer/favorites.json")).toBe(true);
     expect(remoteWritable("MZ", "www/rpg-viewer/control.json")).toBe(false);
     expect(remoteWritable("MV", "rpg-viewer/addons.json")).toBe(false);
     expect(remoteWritable("", "rpg-viewer/control.json")).toBe(false);

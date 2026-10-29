@@ -195,10 +195,10 @@ export class ServerFolder implements WritableGameFolder {
 const READ_ONLY = "휴대폰 보기에서는 쓸 수 없어요";
 
 /**
- * 휴대폰 보기가 쓸 수 있는 파일(게임 루트 기준, MV는 앞에 `www/`): 게임 보조·치트의 control.json, 게임 설정의 addons.json.
+ * 휴대폰 보기가 쓸 수 있는 파일(게임 루트 기준, MV는 앞에 `www/`): 게임 보조·치트의 control.json, 게임 설정의 addons.json, 즐겨찾기 favorites.json.
  * scripts/fsApi.ts의 REMOTE_WRITE_FILES와 같아야 한다(서버가 다시 본다).
  */
-export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json"] as const;
+export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json", "rpg-viewer/favorites.json"] as const;
 
 /** 휴대폰 보기에서 이 경로에 쓸 수 있는가(대소문자까지 그대로). */
 export function remoteWritable(engine: string, path: string): boolean {

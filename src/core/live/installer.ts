@@ -8,6 +8,8 @@ export interface PluginEntry { name: string; status: boolean; description: strin
 export interface LivePaths { base: string; pluginsJs: string; pluginFile: string; logDir: string; logFile: string; liveFile: string; controlFile: string; backupFile: string;
   /** 게임 창 단축키의 백업·복원 요청(플러그인 1.21.0, core/live/keyRequest) */
   requestFile: string;
+  /** 보조·치트 즐겨찾기(게임 폴더별 — PC·휴대폰·따로 창이 함께 쓴다, core/live/favoritesFile) */
+  favoritesFile: string;
 }
 
 export function livePaths(dataRoot: string): LivePaths {
@@ -24,6 +26,7 @@ export function livePaths(dataRoot: string): LivePaths {
     controlFile: j("rpg-viewer/control.json"),
     backupFile: j("rpg-viewer/plugins.js.bak"),
     requestFile: j("rpg-viewer/request.json"),
+    favoritesFile: j("rpg-viewer/favorites.json"),
   };
 }
 

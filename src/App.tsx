@@ -17,6 +17,7 @@ import { SearchDialog } from "@/ui/SearchDialog";
 import { VIEW_NAMES, viewOf } from "@/ui/views";
 import { LiveProvider, useLive } from "@/app/LiveProvider";
 import { AddonsProvider } from "@/app/AddonsProvider";
+import { FavoritesProvider } from "@/app/FavoritesProvider";
 import { GameSettingsSheet } from "@/ui/addons/GameSettingsSheet";
 import { popupGameKey } from "@/app/popup";
 import { useAutoReopen } from "@/app/useAutoReopen";
@@ -192,9 +193,11 @@ export default function App() {
           <LiveProvider>
             {/* 게임 창 단축키의 백업·복원(PC만, 화면에 그리지 않음) */}
             <BackupHotkeys />
-            <DiagnosisProvider>
-              <Shell />
-            </DiagnosisProvider>
+            <FavoritesProvider>
+              <DiagnosisProvider>
+                <Shell />
+              </DiagnosisProvider>
+            </FavoritesProvider>
           </LiveProvider>
         </AddonsProvider>
       </GameProvider>

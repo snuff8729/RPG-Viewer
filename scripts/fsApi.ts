@@ -393,9 +393,10 @@ export const REMOTE_FILE_ROUTES = ["read", "range", "list", "stat", "write"] as 
  * 휴대폰 보기가 쓸 수 있는 파일(게임 루트 기준, MV는 앞에 `www/`):
  * - rpg-viewer/control.json: 게임 보조·치트(뷰어 → 게임 설정·명령)
  * - rpg-viewer/addons.json: 게임 설정(이 게임의 부가 기능·스토리 기준·숨긴 그림)
+ * - rpg-viewer/favorites.json: 보조·치트 즐겨찾기(core/live/favoritesFile)
  * 지우기(remove)는 받지 않는다. src/app/serverFolder.ts의 같은 목록과 맞출 것.
  */
-export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json"] as const;
+export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json", "rpg-viewer/favorites.json"] as const;
 
 /** 휴대폰 보기에서 이 경로에 쓸 수 있는가. 대소문자까지 그대로 맞아야 한다. */
 export function remoteWriteAllowed(engine: string | null | undefined, rel: unknown): boolean {

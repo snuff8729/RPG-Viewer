@@ -29,7 +29,8 @@ export const favoritesStorageKey = (gameKey: string) => `rpgv.cheatFavorites.${g
 
 const cleanNickname = (s: unknown): string => (typeof s === "string" ? s.trim().slice(0, NICKNAME_MAX) : "");
 
-function parseList(v: unknown): Favorite[] {
+/** 즐겨찾기 목록(배열)을 고친다: 번호만 있는 항목도 받고, 잘못된·겹친 번호는 버린다. nickKey = 별명이 든 키. */
+export function parseList(v: unknown, nickKey = "nickname"): Favorite[] {
   if (!Array.isArray(v)) return [];
   const out: Favorite[] = [];
   const seen = new Set<number>();
@@ -37,7 +38,7 @@ function parseList(v: unknown): Favorite[] {
     const id = typeof x === "number" ? x : typeof x === "object" && x !== null ? (x as { id?: unknown }).id : undefined;
     if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1 || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, nickname: typeof x === "object" && x !== null ? cleanNickname((x as { nickname?: unknown }).nickname) : "" });
+    out.push({ id, nickname: typeof x === "object" && x !== null ? cleanNickname((x as Record<string, unknown>)[nickKey]) : "" });
     if (out.length >= FAVORITES_MAX) break;
   }
   return out;
