@@ -38,8 +38,8 @@ function OwnedList({ label, list, owned, known, disabled, onAdd, onRemove, addTe
           const has = owned.has(e.id);
           return (
             <Item key={e.id} variant="outline" size="xs">
-              <ItemContent>
-                <ItemTitle>
+              <ItemContent className="min-w-32">
+                <ItemTitle className="flex-wrap gap-x-2 gap-y-0.5">
                   {e.name || `#${e.id}`}
                   {has && <Badge variant="secondary">있음</Badge>}
                 </ItemTitle>

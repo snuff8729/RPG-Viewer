@@ -1,9 +1,17 @@
-/** 휴대폰 너비 플레이 화면: 아래 탭(읽기·맵·스토리) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
+/** 휴대폰 너비 플레이 화면: 아래 탭(보조·치트·맵·읽기) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
 import type { LogRecord } from "@/core/live/types";
 
-export type PlayTab = "read" | "map" | "story";
+export type PlayTab = "assist" | "cheat" | "map" | "read";
 
-const KEY = "rpgv.play.mobileTab";
+/** 탭 순서(아래 탭 줄) */
+export const PLAY_TABS: readonly PlayTab[] = ["assist", "cheat", "map", "read"];
+
+/** 지금 탭 기억(보조·치트가 탭이 된 뒤) */
+const KEY = "rpgv.play.mobileTab2";
+/** 예전 탭 기억(읽기·맵·스토리) — 새 기억이 없을 때 한 번 옮긴다 */
+const OLD_KEY = "rpgv.play.mobileTab";
+
+const DEFAULT_TAB: PlayTab = "assist";
 
 export interface TabStore {
   getItem(key: string): string | null;
@@ -15,16 +23,25 @@ function defaultStore(): TabStore | null {
 }
 
 export function isPlayTab(v: unknown): v is PlayTab {
-  return v === "read" || v === "map" || v === "story";
+  return v === "assist" || v === "cheat" || v === "map" || v === "read";
 }
 
-/** 저장된 탭. 없거나 읽을 수 없으면 `read`(읽기). */
+/**
+ * 예전 탭 값을 새 탭으로: 맵·스토리(스토리는 이제 맵 탭 아래 목록에)는 맵으로.
+ * 읽기는 예전 기본값이라 일부러 고른 것인지 알 수 없어 새 기본값(보조)으로 시작한다.
+ */
+export function migrateOldTab(old: string | null | undefined): PlayTab {
+  return old === "map" || old === "story" ? "map" : DEFAULT_TAB;
+}
+
+/** 저장된 탭. 없으면 예전 기억을 옮기고, 그것도 없거나 읽을 수 없으면 `assist`(보조). */
 export function loadPlayTab(store: TabStore | null = defaultStore()): PlayTab {
   try {
     const raw = store?.getItem(KEY);
-    return isPlayTab(raw) ? raw : "read";
+    if (isPlayTab(raw)) return raw;
+    return migrateOldTab(store?.getItem(OLD_KEY));
   } catch {
-    return "read";
+    return DEFAULT_TAB;
   }
 }
 

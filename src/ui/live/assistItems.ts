@@ -7,20 +7,20 @@ import { battleOnly, type AssistFavoriteId } from "@/core/live/favoritesFile";
  * 백업·복원은 게임 보조가 아니라 BackupButton 쪽이라 여기 없다.
  */
 export const ASSIST_ITEMS = [
-  { id: "speed", label: "배속" },
-  { id: "skipSeen", label: "본 대사 자동 넘기기" },
-  { id: "autoFast", label: "본 이벤트 자동 배속" },
-  { id: "win", label: "이기기" },
-  { id: "lose", label: "지기" },
-  { id: "escape", label: "도망" },
-  { id: "enemyHpFull", label: "적 체력 100%" },
-  { id: "enemyHpLow", label: "적 체력 1%" },
-  { id: "hpFull", label: "체력 100%" },
-  { id: "hpLow", label: "체력 1%" },
-  { id: "quickSave", label: "퀵 세이브" },
-  { id: "quickLoad", label: "퀵 로드" },
-  { id: "saveMenu", label: "세이브 창" },
-  { id: "loadMenu", label: "로드 창" },
+  { id: "speed", label: "배속", short: "배속" },
+  { id: "skipSeen", label: "본 대사 자동 넘기기", short: "넘기기" },
+  { id: "autoFast", label: "본 이벤트 자동 배속", short: "자동 배속" },
+  { id: "win", label: "이기기", short: "이기기" },
+  { id: "lose", label: "지기", short: "지기" },
+  { id: "escape", label: "도망", short: "도망" },
+  { id: "enemyHpFull", label: "적 체력 100%", short: "적 HP 100%" },
+  { id: "enemyHpLow", label: "적 체력 1%", short: "적 HP 1%" },
+  { id: "hpFull", label: "체력 100%", short: "HP 100%" },
+  { id: "hpLow", label: "체력 1%", short: "HP 1%" },
+  { id: "quickSave", label: "퀵 세이브", short: "퀵 세이브" },
+  { id: "quickLoad", label: "퀵 로드", short: "퀵 로드" },
+  { id: "saveMenu", label: "세이브 창", short: "세이브 창" },
+  { id: "loadMenu", label: "로드 창", short: "로드 창" },
 ] as const;
 
 export type AssistItemId = (typeof ASSIST_ITEMS)[number]["id"];
@@ -32,10 +32,15 @@ export function assistItemLabel(id: AssistItemId): string {
   return ASSIST_ITEMS.find((i) => i.id === id)?.label ?? id;
 }
 
+/** 맨 위 줄(즐겨찾기 줄)에 쓰는 짧은 이름. 보조 탭은 긴 이름(assistItemLabel). */
+export function assistItemShortLabel(id: AssistItemId): string {
+  return ASSIST_ITEMS.find((i) => i.id === id)?.short ?? assistItemLabel(id);
+}
+
 /** 보조 즐겨찾기(맨 위 줄)에 올릴 수 있는 것: 게임 보조 조작 + 백업·복원(BackupControls) */
 export const BACKUP_ITEMS = [
-  { id: "backup", label: "지금 백업" },
-  { id: "restore", label: "마지막 백업으로 복원" },
+  { id: "backup", label: "지금 백업", short: "백업" },
+  { id: "restore", label: "마지막 백업으로 복원", short: "복원" },
 ] as const;
 
 export type BackupItemId = (typeof BACKUP_ITEMS)[number]["id"];
@@ -43,6 +48,11 @@ export type BackupItemId = (typeof BACKUP_ITEMS)[number]["id"];
 /** 보조 즐겨찾기 id 하나의 이름 */
 export function assistFavoriteLabel(id: AssistItemId | BackupItemId): string {
   return BACKUP_ITEMS.find((i) => i.id === id)?.label ?? assistItemLabel(id as AssistItemId);
+}
+
+/** 보조 즐겨찾기 id 하나의 짧은 이름(맨 위 줄) */
+export function assistFavoriteShortLabel(id: AssistItemId | BackupItemId): string {
+  return BACKUP_ITEMS.find((i) => i.id === id)?.short ?? assistItemShortLabel(id as AssistItemId);
 }
 
 /**

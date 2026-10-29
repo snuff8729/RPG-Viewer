@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ArchiveRestore, Ellipsis, FolderCog, Play, Settings2, Smartphone } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { isRemoteView } from "@/app/share";
@@ -18,7 +18,12 @@ import { useLauncherAvailable } from "./useGamePath";
  * 플레이 화면 `⋯` 메뉴: 게임 실행·휴대폰으로 보기·백업·게임 설정. 메뉴에서 고르면 창(Dialog·Sheet)을 연다 — 창들은 메뉴 밖에 늘 둔다
  * (백업은 자동 백업 지켜보기도 하므로). 휴대폰 보기에서는 게임 설정만(실행·공유·백업은 PC에서).
  */
-export function PlayMenu() {
+export function PlayMenu({ children, triggerSize = "icon-sm", contentClassName = "w-56" }: {
+  /** 메뉴 맨 위에 먼저 둘 것(휴대폰: 연결 상태·지금 맵·남은 것). 뒤에 구분선이 붙는다. */
+  children?: ReactNode;
+  triggerSize?: "icon-sm" | "icon";
+  contentClassName?: string;
+} = {}) {
   const remote = isRemoteView();
   const { data } = useGame();
   const launcher = useGameLauncher();
@@ -35,9 +40,15 @@ export function PlayMenu() {
       {/* 메뉴에서 창을 여는 shadcn 예시처럼 modal={false}: 메뉴가 닫히며 포커스를 뺏지 않게 */}
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="더보기"><Ellipsis /></Button>
+          <Button variant="ghost" size={triggerSize} aria-label="더보기"><Ellipsis /></Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className={contentClassName}>
+          {children && (
+            <>
+              {children}
+              <DropdownMenuSeparator />
+            </>
+          )}
           {(canLaunch || canShare || backup) && (
             <>
               <DropdownMenuGroup>

@@ -33,7 +33,11 @@ export function MapPicture() {
  * `지금 해 볼 것` 목록. 줄을 누르면 맵에서 고르고 길을 보여준다. 게임이 연결되지 않았으면 그리지 않는다.
  * header=false면 제목 줄(제목·개수·자세히)을 빼고 목록만(탭 이름에 개수가 있을 때).
  */
-export function TodoList({ className, header = true }: { className?: string; header?: boolean }) {
+export function TodoList({ className, header = true, onChoose }: {
+  className?: string; header?: boolean;
+  /** 줄을 고른 뒤(맵으로 옮긴 뒤) 부른다 — 예: 휴대폰에서 목록 Drawer를 닫아 맵을 보이기 */
+  onChoose?: (ev: ChecklistEvent) => void;
+}) {
   const { here, rows, choose, rowRefs } = usePlayMap();
   const { live, checklist, numbers, selected, routeText } = here;
   if (!live || !checklist) return null;
@@ -62,7 +66,7 @@ export function TodoList({ className, header = true }: { className?: string; hea
                 asChild
                 ref={(el: HTMLElement | null) => { if (el) rowRefs.set(ev.eventId, el); else rowRefs.delete(ev.eventId); }}
               >
-                <button type="button" aria-pressed={on} className="flex-nowrap text-left hover:bg-muted" onClick={() => choose(ev)}>
+                <button type="button" aria-pressed={on} className="flex-nowrap text-left hover:bg-muted" onClick={() => { choose(ev); onChoose?.(ev); }}>
                   <ItemMedia className="gap-1.5">
                     <Badge variant="outline" className={cn("min-w-6 justify-center tabular-nums", st.text, st.border)}>{n ?? "·"}</Badge>
                     <st.Icon className={cn("size-4", st.text)} aria-label={st.label} />
@@ -91,35 +95,4 @@ export function TodoList({ className, header = true }: { className?: string; hea
 /** 다음 스토리 카드(맵 조각과 상태를 나누지 않는다. PlayMapProvider 없이도 쓸 수 있다). */
 export function NextStory({ compact = true }: { compact?: boolean }) {
   return <NextStoryCard compact={compact} />;
-}
-
-function PlayMapLayout({ story }: { story: boolean }) {
-  const { here } = usePlayMap();
-  if (!here.live || !here.checklist) return <div className="p-3"><HereNotConnected /></div>;
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-      {story && (
-        <div className="max-h-[40%] shrink-0 overflow-y-auto">
-          <NextStory />
-        </div>
-      )}
-      <div className="min-h-32 flex-1">
-        <MapPicture />
-      </div>
-      <TodoList className="max-h-[45%] shrink-0" />
-    </div>
-  );
-}
-
-/**
- * 플레이 화면의 맵 패널: 작은 맵(내 위치를 따라감)과 지금 해 볼 것만 한 줄씩. 줄을 누르면 맵에서 고르고 길을 보여준다.
- * story=false면 다음 스토리 카드를 빼고 맵에 자리를 준다(휴대폰은 스토리 탭에 따로 둔다).
- * 조각(MapPicture · TodoList · NextStory)을 다른 칸에 나눠 둘 때는 PlayMapProvider로 감싸 직접 놓는다.
- */
-export function PlayMap({ story = true }: { story?: boolean }) {
-  return (
-    <PlayMapProvider>
-      <PlayMapLayout story={story} />
-    </PlayMapProvider>
-  );
 }

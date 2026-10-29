@@ -28,7 +28,8 @@ type Modes = Record<FavoriteKind, FinderMode | null>;
 
 export function useVariableFinder(gameKey: string | null, live: LiveSnapshot | null): VariableFinder {
   const store = useFavorites();
-  const [kind, setKind] = useState<FavoriteKind>("switch");
+  // 변수를 먼저(스위치는 잘 안 쓴다)
+  const [kind, setKind] = useState<FavoriteKind>("variable");
   const [modes, setModes] = useState<Modes>({ switch: null, variable: null });
   const [narrow, setNarrow] = useState<NarrowState | null>(null);
   const [tracker, setTracker] = useState<ChangeTracker>(emptyTracker);

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { choiceAppeared, countLines, isPlayTab, loadPlayTab, savePlayTab, unseenLines, type TabStore } from "./mobilePlay";
+import {
+  choiceAppeared, countLines, isPlayTab, loadPlayTab, migrateOldTab, PLAY_TABS, savePlayTab, unseenLines, type TabStore,
+} from "./mobilePlay";
 
 const mem = (): TabStore & { m: Map<string, string> } => {
   const m = new Map<string, string>();
@@ -8,25 +10,39 @@ const mem = (): TabStore & { m: Map<string, string> } => {
 const broken: TabStore = { getItem: () => { throw new Error("x"); }, setItem: () => { throw new Error("x"); } };
 
 describe("mobile play tab", () => {
-  it("defaults to read", () => {
-    expect(loadPlayTab(mem())).toBe("read");
-    expect(loadPlayTab(null)).toBe("read");
+  it("defaults to assist", () => {
+    expect(loadPlayTab(mem())).toBe("assist");
+    expect(loadPlayTab(null)).toBe("assist");
   });
-  it("round-trips under rpgv.play.mobileTab", () => {
+  it("tab order is assist, cheat, map, read", () => {
+    expect(PLAY_TABS).toEqual(["assist", "cheat", "map", "read"]);
+  });
+  it("round-trips under rpgv.play.mobileTab2", () => {
     const s = mem();
     savePlayTab("map", s);
-    expect(s.m.get("rpgv.play.mobileTab")).toBe("map");
+    expect(s.m.get("rpgv.play.mobileTab2")).toBe("map");
     expect(loadPlayTab(s)).toBe("map");
-    savePlayTab("story", s);
-    expect(loadPlayTab(s)).toBe("story");
+    savePlayTab("cheat", s);
+    expect(loadPlayTab(s)).toBe("cheat");
+  });
+  it("migrates the old tab once: map/story -> map, read -> assist", () => {
+    const old = (v: string) => { const s = mem(); s.setItem("rpgv.play.mobileTab", v); return s; };
+    expect(loadPlayTab(old("map"))).toBe("map");
+    expect(loadPlayTab(old("story"))).toBe("map");
+    expect(loadPlayTab(old("read"))).toBe("assist");
+    const s = old("story");
+    savePlayTab("read", s);
+    expect(loadPlayTab(s)).toBe("read");
+    expect(migrateOldTab(null)).toBe("assist");
   });
   it("ignores junk and broken storage", () => {
     const s = mem();
-    s.setItem("rpgv.play.mobileTab", "weird");
-    expect(loadPlayTab(s)).toBe("read");
-    expect(loadPlayTab(broken)).toBe("read");
+    s.setItem("rpgv.play.mobileTab2", "weird");
+    expect(loadPlayTab(s)).toBe("assist");
+    expect(loadPlayTab(broken)).toBe("assist");
     expect(() => savePlayTab("map", broken)).not.toThrow();
-    expect(isPlayTab("story")).toBe(true);
+    expect(isPlayTab("cheat")).toBe(true);
+    expect(isPlayTab("story")).toBe(false);
     expect(isPlayTab("")).toBe(false);
   });
 });

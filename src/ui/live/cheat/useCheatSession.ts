@@ -36,7 +36,8 @@ export interface CheatSession {
   backupNow(): Promise<void>;
 }
 
-export function useCheatSession(): CheatSession {
+/** initialTab = 처음 보일 치트 탭(items · actors · switches). 휴대폰은 변수(switches)부터. */
+export function useCheatSession(initialTab = "items"): CheatSession {
   const data = useLiveData();
   const { live } = useLive();
   const { sendCheat } = useAssist();
@@ -50,7 +51,7 @@ export function useCheatSession(): CheatSession {
   const [backupNote, setBackupNote] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   // 창을 닫았다 열어도 보던 탭과 변수 찾기 상태가 남는다(게임에서 값을 바꾸고 돌아오는 흐름)
-  const [tab, setTab] = useState<string>("items");
+  const [tab, setTab] = useState<string>(initialTab);
   const finder = useVariableFinder(gameKey, live);
 
   // 게임이 바뀌면 기록을 비운다

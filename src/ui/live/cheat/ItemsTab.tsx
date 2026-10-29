@@ -17,7 +17,10 @@ import { LIST_LIMIT, parseIntInput, type CheatTabProps } from "./shared";
 
 const TYPES: readonly ItemType[] = ["item", "weapon", "armor"];
 
-/** 한 항목: 지금 개수, +1/+10/+99/−1, 정확한 개수 입력 */
+/**
+ * 한 항목: 지금 개수, +1/+10/+99/−1, 정확한 개수 입력.
+ * 칸이 좁으면(이름 몫 12rem이 안 남으면) 이름이 첫 줄을 다 쓰고 버튼들은 둘째 줄로 내려간다(Item은 flex-wrap).
+ */
 function ItemRow({ hit, count, disabled, apply }: { hit: ItemHit; count: number } & Pick<CheatTabProps, "disabled" | "apply">) {
   const { type, entry } = hit;
   const [text, setText] = useState("");
@@ -25,8 +28,8 @@ function ItemRow({ hit, count, disabled, apply }: { hit: ItemHit; count: number 
   const gain = (amount: number) => apply([{ op: "gainItem", type, id: entry.id, amount }]);
   return (
     <Item variant="outline" size="xs">
-      <ItemContent>
-        <ItemTitle>
+      <ItemContent className="min-w-48">
+        <ItemTitle className="flex-wrap gap-x-2 gap-y-0.5">
           {entry.name || `#${entry.id}`}
           <Badge variant="secondary">{ITEM_TYPE_LABEL[type]}</Badge>
           <span className="text-muted-foreground">보유 {count}</span>
@@ -61,8 +64,8 @@ function GoldRow({ data, live, disabled, apply }: CheatTabProps) {
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor="cheat-gold">돈 <span className="font-normal text-muted-foreground">지금 {live ? `${live.gold} ${unit}` : "?"}</span></Label>
-      <div className="flex gap-2">
-        <InputGroup>
+      <div className="flex flex-wrap gap-2">
+        <InputGroup className="min-w-40 flex-1">
           <InputGroupAddon><Coins /></InputGroupAddon>
           <InputGroupInput id="cheat-gold" inputMode="numeric" placeholder="금액" value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} />
         </InputGroup>

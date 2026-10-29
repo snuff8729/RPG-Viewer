@@ -53,6 +53,8 @@ export interface CheatContentProps {
   onTabChange?: (tab: string) => void;
   /** 바깥 칸 여백(기본: 덮개 안 여백 "px-4 pb-4") */
   className?: string;
+  /** 변수(스위치·변수 탭)를 맨 앞 탭으로(휴대폰). 처음 보일 탭은 session(useCheatSession("switches"))이 정한다. */
+  variablesFirst?: boolean;
 }
 
 /** 치트 내용(덮개 없이 칸에 바로 둘 수 있다): 아이템·돈, 캐릭터, 스위치·변수, 바꾼 것. 바꾼 것은 실행 중인 게임에 바로 적용된다. */
@@ -65,7 +67,7 @@ function CheatContentOwn(props: CheatContentProps) {
   return <CheatBody {...props} session={session} />;
 }
 
-function CheatBody({ session, active = true, tab, onTabChange, className }: CheatContentProps & { session: CheatSession }) {
+function CheatBody({ session, active = true, tab, onTabChange, className, variablesFirst }: CheatContentProps & { session: CheatSession }) {
   const data = useLiveData();
   const { live, connection } = useLive();
   const { cheatSupported, cheatResults, holdLiveActors } = useAssist();
@@ -94,10 +96,20 @@ function CheatBody({ session, active = true, tab, onTabChange, className }: Chea
         </Alert>
       )}
       <Tabs value={tab ?? session.tab} onValueChange={onTabChange ?? session.setTab}>
+        {/* 자주 쓰는 아이템·변수가 앞, 캐릭터는 뒤. 휴대폰은 변수부터 */}
         <TabsList className="w-full">
-          <TabsTrigger value="items">아이템</TabsTrigger>
+          {variablesFirst ? (
+            <>
+              <TabsTrigger value="switches">변수·스위치</TabsTrigger>
+              <TabsTrigger value="items">아이템</TabsTrigger>
+            </>
+          ) : (
+            <>
+              <TabsTrigger value="items">아이템</TabsTrigger>
+              <TabsTrigger value="switches">변수·스위치 (고급)</TabsTrigger>
+            </>
+          )}
           <TabsTrigger value="actors">캐릭터</TabsTrigger>
-          <TabsTrigger value="switches">스위치·변수 (고급)</TabsTrigger>
         </TabsList>
         <TabsContent value="items" className="pt-2"><ItemsTab {...props} /></TabsContent>
         <TabsContent value="actors" className="pt-2"><ActorsTab {...props} /></TabsContent>
@@ -122,7 +134,7 @@ function CheatBody({ session, active = true, tab, onTabChange, className }: Chea
                 const status = entryStatus(e.keys, cheatResults);
                 return (
                   <Item key={e.n} variant="muted" size="xs">
-                    <ItemContent>
+                    <ItemContent className="min-w-40">
                       <ItemTitle>{e.label}</ItemTitle>
                       {!e.inverse && <ItemDescription>되돌릴 수 없어요</ItemDescription>}
                     </ItemContent>

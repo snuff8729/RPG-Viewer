@@ -14,7 +14,7 @@ import { BackupNowButton, RestoreLatestButton } from "./BackupControls";
 import { useAssistGuards } from "./useAssistSession";
 
 export interface AssistFavoritesBarProps {
-  /** sm = PC 맨 위 줄(작게, 줄 바꿈), lg = 휴대폰(크게) */
+  /** sm = PC 맨 위 줄(작게, 줄 바꿈), lg = 휴대폰(크게). 어느 쪽이든 짧은 이름(긴 이름은 툴팁). */
   size?: AssistControlSize;
   /** 전투 중이면 전투 기능을 맨 앞으로(휴대폰) */
   battleFirst?: boolean;
@@ -29,7 +29,7 @@ function LoseButton({ size }: { size: AssistControlSize }) {
   const { live } = useLive();
   const { inBattle, canLose } = useAssistGuards();
   const loseKey = liveHotkeys(live?.assist).lose;
-  const button = <AssistCommandButton id="lose" size={size} />;
+  const button = <AssistCommandButton id="lose" size={size} short />;
   if (!inBattle || canLose || loseKey === null) return button;
   return (
     <Tooltip>
@@ -41,19 +41,19 @@ function LoseButton({ size }: { size: AssistControlSize }) {
 
 function FavoriteControl({ id, size, idPrefix }: { id: AssistFavoriteId; size: AssistControlSize; idPrefix: string }): ReactNode {
   switch (id) {
-    case "speed": return <SpeedControl size={size} />;
-    case "skipSeen": return <SkipSeenControl id={`${idPrefix}-skip-seen`} />;
+    case "speed": return <SpeedControl size={size} short />;
+    case "skipSeen": return <SkipSeenControl id={`${idPrefix}-skip-seen`} short />;
     case "autoFast":
       return (
-        <span className="inline-flex flex-wrap items-center gap-2">
-          <AutoFastControl id={`${idPrefix}-auto-fast`} />
-          <AutoSpeedControl size={size} />
+        <span className="inline-flex items-center gap-1.5">
+          <AutoFastControl id={`${idPrefix}-auto-fast`} short />
+          <AutoSpeedControl size={size} short />
         </span>
       );
     case "lose": return <LoseButton size={size} />;
-    case "backup": return <BackupNowButton size={size} />;
-    case "restore": return <RestoreLatestButton size={size} />;
-    default: return <AssistCommandButton id={id} size={size} />;
+    case "backup": return <BackupNowButton size={size} short />;
+    case "restore": return <RestoreLatestButton size={size} short />;
+    default: return <AssistCommandButton id={id} size={size} short />;
   }
 }
 
@@ -74,7 +74,7 @@ export function AssistFavoritesBar({ size = "sm", battleFirst = false, idPrefix 
   return (
     <div
       role="group" aria-label="보조 즐겨찾기"
-      className={cn("flex flex-wrap items-center", size === "sm" ? "gap-x-3 gap-y-1.5" : "gap-2", className)}
+      className={cn("flex flex-wrap items-center", size === "sm" ? "gap-x-3 gap-y-1.5" : "gap-x-3 gap-y-2.5", className)}
     >
       {ids.map((id) => <FavoriteControl key={id} id={id} size={size} idPrefix={idPrefix} />)}
     </div>
