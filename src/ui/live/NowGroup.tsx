@@ -22,7 +22,7 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
   const { live, connection } = useLive();
   const checklist = useMapChecklist();
   const items = useMemo(() => nowItems(checklist), [checklist]);
-  const { story } = useNextStory();
+  const { story, mode } = useNextStory();
 
   if (connection !== "connected" || !live || !data) return null;
   const mapName = data.mapInfos[live.mapId]?.name || `#${live.mapId}`;
@@ -42,7 +42,7 @@ export function NowGroup({ follow, onFollowChange }: { follow: boolean; onFollow
         <p className="truncate px-2 pb-1 text-sm">{mapName} ({live.x}, {live.y})</p>
         <p className="truncate px-2 pb-1 text-xs" title={nextLine}>
           <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
-          <span className="text-muted-foreground">다음 스토리: </span>{nextLine}
+          <span className="text-muted-foreground">{mode === "side" ? "서브 미션: " : "다음 스토리: "}</span>{nextLine}
         </p>
         {items.length === 0 && <p className="px-2 pb-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>}
         <SidebarMenu>

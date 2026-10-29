@@ -229,6 +229,45 @@ export function storyCandidates(data: GameData, limit = 8): StoryCandidate[] {
   }
 }
 
+const sideCache = new WeakMap<GameData, StoryCandidate[]>();
+
+/**
+ * 서브 미션 후보: 이름이 곁가지(퀘스트·미션·조사·依頼 등) 같고, 값을 올리는 곳이 있고, 조건으로 쓰이는 변수.
+ * 본편 1순위 후보는 뺀다. 조건으로 많이 쓰이는 순. 데이터마다 기억한다. 예외를 던지지 않는다.
+ */
+export function sideCandidates(data: GameData, limit = 30): StoryCandidate[] {
+  try {
+    if (!isObj(data)) return [];
+    let all = sideCache.get(data);
+    if (!all) {
+      const g = buildDepGraph(data);
+      const scan = storyScan(data);
+      const main = storyCandidates(data, 1)[0]?.key;
+      const names = arr<unknown>(data.system?.variables);
+      const out: StoryCandidate[] = [];
+      for (let id = 1; id < names.length; id++) {
+        const raw = names[id];
+        if (typeof raw !== "string" || !SIDE_NAME.test(raw)) continue;
+        if (main?.kind === "variable" && main.id === id) continue;
+        const events = scan.varEvents.get(id)?.size ?? 0;
+        const branches = scan.varBranches.get(id) ?? 0;
+        if (events + branches === 0) continue;
+        const raises = g.writersOf({ kind: "variable", id }).some(w =>
+          (w.write.op === "set" || w.write.op === "add") && w.write.value !== undefined && w.write.value > 0);
+        if (!raises) continue;
+        const key: StoryKey = { kind: "variable", id };
+        out.push({ key, label: storyKeyLabel(data, key), score: events * 2 + branches, reasons: [`${events}개 이벤트·${branches}개 분기의 조건`] });
+      }
+      out.sort((a, b) => b.score - a.score || keyText(a.key).localeCompare(keyText(b.key), undefined, { numeric: true }));
+      all = out;
+      sideCache.set(data, all);
+    }
+    return all.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
 /** 저장·비교용 글: "v:12", "s:3,4,5" */
 export function keyText(k: StoryKey): string {
   return k.kind === "variable" ? `v:${k.id}` : `s:${k.ids.join(",")}`;

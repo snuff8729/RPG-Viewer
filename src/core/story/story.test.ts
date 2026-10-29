@@ -4,7 +4,7 @@ import type { CommonEvent, EventCommand, EventPage, GameData, MapData, MapEvent,
 import { addonsJson, parseAddonFile } from "../addons/settings";
 import { pathText, stepAction, stepTitle, storyMark } from "./format";
 import { nextStory } from "./nextStep";
-import { keyText, parseKeyText, storyCandidates, storyValue } from "./progress";
+import { keyText, parseKeyText, sideCandidates, storyCandidates, storyValue } from "./progress";
 import { mapPath, transferGraph } from "./transfer";
 
 // ---- 합성 데이터 도우미 ----
@@ -150,6 +150,37 @@ describe("storyCandidates", () => {
     expect(parseKeyText(keyText({ kind: "switches", ids: [3, 4] }))).toEqual({ kind: "switches", ids: [3, 4] });
     expect(parseKeyText("x")).toBeNull();
     expect(parseKeyText(5)).toBeNull();
+  });
+});
+
+describe("sideCandidates", () => {
+  it("lists side-named variables that are raised and used as conditions, most used first", () => {
+    const data = game([
+      [1, map([
+        ev(1, [page([...say("1장"), setVar(1, 1)])]),
+        ev(2, [page(say("1장 끝"), pv(1, 1))]),
+        // 2 クエスト: 올리고, 두 이벤트의 조건 + 분기 하나
+        ev(3, [page([...say("부탁"), setVar(2, 1)])]),
+        ev(4, [page(say("의뢰 중"), pv(1, 2))]),
+        ev(5, [page([...say("완료"), c(111, [1, 2, 0, 2, 0]), setVar(2, 2)], pv(1, 2))]),
+        // 3 調査: 올리고 조건 하나
+        ev(6, [page([...say("조사"), addVar(3, 1)])]),
+        ev(7, [page(say("조사 끝"), pv(1, 3))]),
+        // 4 ミッション: 조건으로 안 쓰임
+        ev(8, [page([setVar(4, 1)])]),
+        // 5 サブ: 올리는 곳 없음
+        ev(9, [page(say("서브"), pv(1, 5))]),
+      ])],
+    ], { variables: ["", "本編進行", "クエスト", "調査", "ミッション", "サブ"] });
+    const side = sideCandidates(data);
+    expect(side.map(x => x.key)).toEqual([{ kind: "variable", id: 2 }, { kind: "variable", id: 3 }]);
+    expect(side[0].label).toContain("クエスト");
+    expect(sideCandidates(data)).toEqual(side);
+  });
+
+  it("never throws on broken data", () => {
+    expect(sideCandidates(null as unknown as GameData)).toEqual([]);
+    expect(sideCandidates({} as GameData)).toEqual([]);
   });
 });
 
