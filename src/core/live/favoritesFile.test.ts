@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { emptyFavorites, parseFavorites, renameFavorite, serializeFavorites, toggleFavorite } from "./favorites";
 import {
   applyFavoritesOps, ASSIST_FAVORITE_IDS, battleOnly, compactFavoritesOps, DEFAULT_ASSIST_FAVORITES, favoritesNeedWrite,
-  favoritesPendingKey, isAssistFavoriteId, mergeFavorites, nextFavoritesT, OPS_COMPACT_AT, parseFavoritesFile, parseFavoritesOps,
+  favoritesPendingKey, isAssistFavoriteId, mergeFavorites, nextFavoritesT, OPS_COMPACT_AT, parseFavoritesFile, parseFavoritesOps, readFavoritesText,
   resolveFavorites, serializeFavoritesFile, type FavoritesOp,
 } from "./favoritesFile";
 import { livePaths } from "./installer";
@@ -159,5 +159,22 @@ describe("migration from localStorage cheat favorites", () => {
   it("does nothing for empty old favorites", () => {
     expect(favoritesNeedWrite(null, [], emptyFavorites())).toBe(false);
     expect(favoritesNeedWrite(null, [], null)).toBe(false);
+  });
+});
+
+describe("readFavoritesText (missing vs failed)", () => {
+  const base = { readBinary: async () => null, list: async () => [] };
+  const enc = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
+
+  it("uses the strict read: null = missing, throw = failed", async () => {
+    expect(await readFavoritesText({ ...base, readText: async () => null, readBinaryStrict: async () => enc('{"v":1}') }, "p")).toEqual({ state: "ok", text: '{"v":1}' });
+    expect(await readFavoritesText({ ...base, readText: async () => null, readBinaryStrict: async () => null }, "p")).toEqual({ state: "missing" });
+    expect(await readFavoritesText({ ...base, readText: async () => "x", readBinaryStrict: async () => { throw new Error("net"); } }, "p")).toEqual({ state: "failed" });
+  });
+
+  it("without a strict read, null is uncertain (failed), not missing", async () => {
+    expect(await readFavoritesText({ ...base, readText: async () => null }, "p")).toEqual({ state: "failed" });
+    expect(await readFavoritesText({ ...base, readText: async () => "t" }, "p")).toEqual({ state: "ok", text: "t" });
+    expect(await readFavoritesText({ ...base, readText: async () => { throw new Error("x"); } }, "p")).toEqual({ state: "failed" });
   });
 });

@@ -2,6 +2,7 @@ import {
   emptyFavorites, FAVORITES_MAX, findFavorite, NICKNAME_MAX, parseList, renameFavorite, toggleFavorite,
   type FavoriteKind, type Favorites,
 } from "./favorites";
+import type { GameFolder } from "../fs/folder";
 
 /**
  * 게임 폴더의 rpg-viewer/favorites.json — 보조 즐겨찾기(맨 위 줄에 올린 기능과 순서)와 치트 즐겨찾기(스위치·변수 id, 별명).
@@ -196,6 +197,29 @@ export function compactFavoritesOps(ops: readonly FavoritesOp[], state: Favorite
   if (ops.some(touchesAssist)) out.push({ op: "assistOrder", items: [...state.assist] });
   if (ops.some((o) => !touchesAssist(o))) out.push({ op: "cheatSet", favorites: state.cheat });
   return out;
+}
+
+/**
+ * favorites.json 읽기 결과. failed(네트워크·서버 오류, 권한 등)면 쓰지 않고 다음에 다시 읽는다 —
+ * "없음"으로 보고 쓰면 다른 뷰어가 만든 파일을 덮는다.
+ */
+export type FavoritesRead = { state: "ok"; text: string } | { state: "missing" } | { state: "failed" };
+
+/**
+ * 없음과 읽기 실패를 나눠 읽는다. readBinaryStrict(없으면 null, 못 읽으면 throw)가 있으면 그것으로,
+ * 없으면 readText로 읽되 null은 확실하지 않으므로(없음인지 실패인지 모른다) failed로 본다. 예외를 던지지 않는다.
+ */
+export async function readFavoritesText(folder: GameFolder, path: string): Promise<FavoritesRead> {
+  try {
+    if (folder.readBinaryStrict) {
+      const buf = await folder.readBinaryStrict(path);
+      return buf === null ? { state: "missing" } : { state: "ok", text: new TextDecoder().decode(buf) };
+    }
+    const text = await folder.readText(path);
+    return text === null ? { state: "failed" } : { state: "ok", text };
+  } catch {
+    return { state: "failed" };
+  }
 }
 
 /** 게임별 못 쓴 바꿈(localStorage) */

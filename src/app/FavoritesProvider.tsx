@@ -5,7 +5,7 @@ import { livePaths } from "@/core/live/installer";
 import { favoritesStorageKey, findFavorite, parseFavorites, type FavoriteKind, type Favorites } from "@/core/live/favorites";
 import {
   applyFavoritesOps, compactFavoritesOps, favoritesNeedWrite, favoritesPendingKey, isAssistFavoriteId, mergeFavorites, nextFavoritesT,
-  parseFavoritesFile, parseFavoritesOps, resolveFavorites, serializeFavoritesFile,
+  parseFavoritesFile, parseFavoritesOps, readFavoritesText, resolveFavorites, serializeFavoritesFile,
   type AssistFavoriteId, type FavoritesFile, type FavoritesOp,
 } from "@/core/live/favoritesFile";
 import { gameKeyOf } from "@/ui/live/readPosition";
@@ -95,11 +95,10 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(async (s: Session, perms: Promise<unknown>[]) => {
     if (perms.length > 0) await Promise.all(perms);
     if (!s.alive || !s.folder || !s.path) return;
-    let text: string | null;
-    try { text = await s.folder.readText(s.path); } catch { return; }
-    if (!s.alive) return;
-    // 전에 읽은 파일이 갑자기 없으면 읽기 실패(네트워크 등)로 보고 이번엔 건너뛴다 — 다른 뷰어의 값을 덮지 않게
-    if (text === null && s.diskText !== null) return;
+    // 없음과 읽기 실패(네트워크 등)를 나눈다: 실패면 쓰지 않고 다음 폴링에 다시 — 다른 뷰어가 만든 파일을 덮지 않게
+    const read = await readFavoritesText(s.folder, s.path);
+    if (!s.alive || read.state === "failed") return;
+    const text = read.state === "ok" ? read.text : null;
     const disk = parseFavoritesFile(text);
     if (text !== s.diskText) { s.disk = disk; s.diskText = text; publish(s); }
     const n = s.pending.length;
