@@ -103,6 +103,14 @@ describe("isAllowedRequest", () => {
   it("allows a missing origin only when not required", () => {
     expect(isAllowedRequest({ host: "localhost:5173" }, { requireOrigin: false })).toBe(true);
   });
+  it("allowIpHost: accepts IP-literal hosts with their own origin, never names", () => {
+    const lan = { requireOrigin: true, allowIpHost: true };
+    expect(isAllowedRequest({ host: "192.168.0.2:5173", origin: "http://192.168.0.2:5173" }, lan)).toBe(true);
+    expect(isAllowedRequest({ host: "[fe80::1]:5173", origin: "http://[fe80::1]:5173" }, lan)).toBe(true);
+    expect(isAllowedRequest({ host: "192.168.0.2:5173", origin: "http://192.168.0.3:5173" }, lan)).toBe(false);
+    expect(isAllowedRequest({ host: "evil.example:5173", origin: "http://evil.example:5173" }, lan)).toBe(false);
+    expect(isAllowedRequest({ host: "192.168.0.2.nip.io:5173", origin: "http://192.168.0.2.nip.io:5173" }, lan)).toBe(false);
+  });
 });
 
 /** spawn을 흉내 낸다: 호출을 기록하고 spawn/error 이벤트를 바로 낸다. */
@@ -147,10 +155,10 @@ interface Reply { status: number; body: Record<string, unknown> | null; next: bo
 
 async function call(
   mw: ReturnType<typeof createLauncherMiddleware>,
-  opts: { method: string; url: string; headers?: Record<string, string>; body?: string },
+  opts: { method: string; url: string; headers?: Record<string, string>; body?: string; ip?: string },
 ): Promise<Reply> {
   const req = Readable.from(opts.body === undefined ? [] : [Buffer.from(opts.body)]) as unknown as IncomingMessage;
-  Object.assign(req, { method: opts.method, url: opts.url, headers: opts.headers ?? {} });
+  Object.assign(req, { method: opts.method, url: opts.url, headers: opts.headers ?? {}, socket: { remoteAddress: opts.ip ?? "127.0.0.1" } });
   let status = 0;
   let text = "";
   const res = {
@@ -176,6 +184,17 @@ describe("launcher middleware", () => {
     expect(await call(mw, { method: "GET", url: "/api/game/ping", headers: { host: "localhost:5173" } }))
       .toEqual({ status: 200, body: { ok: true }, next: false });
     expect((await call(mw, { method: "POST", url: "/api/game/ping", headers: own })).status).toBe(405);
+  });
+
+  it("refuses every route from a non-loopback socket, even with a spoofed localhost Host", async () => {
+    touch("www/data/System.json", system("모험"));
+    touch("Game.exe");
+    const fake = fakeSpawn("spawn");
+    const mw = createLauncherMiddleware(fake);
+    expect((await call(mw, { method: "GET", url: "/api/game/ping", headers: own, ip: "192.168.0.7" })).status).toBe(403);
+    const r = await call(mw, { method: "POST", url: "/api/game/launch", headers: own, body: JSON.stringify({ path: tmp }), ip: "::ffff:192.168.0.7" });
+    expect(r.status).toBe(403);
+    expect(fake.calls).toEqual([]);
   });
 
   it("checks a game folder", async () => {

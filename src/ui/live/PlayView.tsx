@@ -15,6 +15,8 @@ import { GameSettingsSheet } from "../addons/GameSettingsSheet";
 import { BackupButton } from "./BackupButton";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { LaunchButton } from "./LaunchButton";
+import { ShareButton } from "./ShareButton";
+import { isRemoteView } from "@/app/share";
 import { PlayMap } from "./PlayMap";
 import { safeStore, type PlayLayout } from "./playLayout";
 import { ReaderView } from "./ReaderView";
@@ -43,14 +45,18 @@ function PlayTopBar({ popup }: { popup: boolean }) {
       <ConnectionBadge />
       {mapName && <span className="min-w-0 truncate text-sm font-medium">{mapName}</span>}
       {checklist && <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>남은 것 {checklist.remaining}</Badge>}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {!popup && <Button variant="outline" size="sm" onClick={openWindow}><ExternalLink />새 창으로 열기</Button>}
-        <LaunchButton />
-        <BackupButton />
-        <AssistPanel />
-        <CheatSheet />
-        <GameSettingsSheet />
-      </div>
+      {/* 휴대폰 보기는 읽기만: 실행·백업·보조·치트·설정을 숨긴다 */}
+      {!isRemoteView() && (
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {!popup && <Button variant="outline" size="sm" onClick={openWindow}><ExternalLink />새 창으로 열기</Button>}
+          <LaunchButton />
+          <ShareButton />
+          <BackupButton />
+          <AssistPanel />
+          <CheatSheet />
+          <GameSettingsSheet />
+        </div>
+      )}
     </header>
   );
 }

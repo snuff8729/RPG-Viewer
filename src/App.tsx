@@ -27,6 +27,11 @@ import { CheatSheet } from "@/ui/live/cheat/CheatSheet";
 import { LaunchButton } from "@/ui/live/LaunchButton";
 import { PinGameButton } from "@/ui/PinGameButton";
 import { BackupButton } from "@/ui/live/BackupButton";
+import { ShareButton } from "@/ui/live/ShareButton";
+import { useShareFollowsGame } from "@/ui/live/useShareFollowsGame";
+import { isRemoteView } from "@/app/share";
+import { useRemoteGame } from "@/app/useRemoteGame";
+import { RemoteScreen } from "@/ui/RemoteScreen";
 import { HistoryView } from "@/ui/live/HistoryView";
 import { ReaderView } from "@/ui/live/ReaderView";
 import { MissingView } from "@/ui/live/MissingView";
@@ -49,6 +54,15 @@ function Shell() {
   /** 따로 띄운 플레이 창이면 다시 열 게임 key */
   const [popupKey] = useState(() => popupGameKey(window.location.search));
   useAutoReopen(popupKey);
+  /** 휴대폰 보기(같은 와이파이의 휴대폰·태블릿, 읽기 전용) */
+  const remote = isRemoteView();
+  const remoteGame = useRemoteGame(remote);
+  useShareFollowsGame(!remote && ready);
+  // 휴대폰 보기는 플레이 화면으로 연다(홈 화면에 추가한 주소에 #/play가 빠져 있어도)
+  useEffect(() => {
+    const h = window.location.hash;
+    if (remote && (h === "" || h === "#" || h === "#/")) window.location.replace(formatRoute({ kind: "play" }));
+  }, [remote]);
   const isPlay = route.kind === "play";
   /** 사이드바 펼침: 플레이 화면은 따로 기억한다(처음엔 접힘) */
   const [navOpen, setNavOpen] = useState(true);
@@ -78,6 +92,11 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [ready]);
 
+  if (remote) {
+    const loadError = status === "error" ? "게임을 열지 못했어요. PC에서 게임이 열려 있는지 확인해 주세요." : null;
+    const err = remoteGame.error ?? loadError;
+    if (err !== null || status !== "ready" || !data || !index) return <RemoteScreen error={err} onRetry={remoteGame.retry} />;
+  }
   if (status !== "ready" || !data || !index) return <StartScreen />;
 
   const entry = route.kind === "page"
@@ -89,6 +108,7 @@ function Shell() {
     window.location.hash = formatRoute({ kind: "missing" });
   };
 
+  // 휴대폰 보기는 사이드바(좁으면 시트)를 그대로 써서 기록·못 본 것으로도 갈 수 있게 한다
   if (popupKey !== null && isPlay) return <PlayView popup />;
 
   return (
@@ -127,17 +147,22 @@ function Shell() {
               )}
             </BreadcrumbList>
           </Breadcrumb>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <PinGameButton />
-            <LaunchButton />
-            <BackupButton />
-            <AssistPanel />
-            <CheatSheet />
-            <GameSettingsSheet />
-          </div>
+          {/* 휴대폰 보기는 읽기만: 고정·실행·백업·보조·치트·설정을 숨긴다 */}
+          {!remote && (
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <PinGameButton />
+              <LaunchButton />
+              <ShareButton />
+              <BackupButton />
+              <AssistPanel />
+              <CheatSheet />
+              <GameSettingsSheet />
+            </div>
+          )}
         </header>
         <main className="flex-1 p-4">
-          {route.kind !== "diagnose" && <DiagnoseBanner />}
+          {/* 진단 안내는 설정을 바꾸러 가는 것이라 휴대폰 보기에서는 띄우지 않는다 */}
+          {route.kind !== "diagnose" && !remote && <DiagnoseBanner />}
           {route.kind === "home" && <ExplorerView state={explorer} onStateChange={setExplorer} />}
           {route.kind === "page" && <EventView route={route} />}
           {route.kind === "read" && <ReaderView />}

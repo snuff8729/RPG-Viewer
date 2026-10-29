@@ -7,6 +7,8 @@
  * - POST /api/fs/{read,range,list,stat,write,remove} { id, path, … } → 열린 게임 루트 안에서만
  *
  * 세션 id는 서버 메모리 안의 루트 경로를 가리키는 불투명 값이고, URL에는 아무것도 싣지 않는다.
+ * 세션 목록(FsSessions)은 휴대폰 보기(scripts/lanShare.ts)와 함께 쓴다.
+ * 휴대폰 보기로 들어온 요청은 공유한 게임 하나의 read·range·list·stat만 받는다.
  * 경로는 `/` 구분 상대 경로만 받고 `..`·절대 경로·드라이브·역슬래시를 거부하며,
  * 실제 경로(realpath)가 루트 밖이면(심볼릭 링크 탈출) 거부한다.
  */
@@ -17,6 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { Plugin } from "vite";
 import { ERR_NOT_FOUND, findGameRoot, isAllowedRequest } from "./launcher.ts";
+import { clientIp, isLoopbackIp } from "./netAddress.ts";
 
 const MAX_BODY = 64 * 1024;
 const MAX_WRITE_BODY = 32 * 1024 * 1024;
@@ -382,35 +385,78 @@ function readBody(req: IncomingMessage, max: number): Promise<string | null> {
 
 const FILE_ROUTES = ["read", "range", "list", "stat", "write", "remove"] as const;
 type FileRoute = (typeof FILE_ROUTES)[number];
+/** 휴대폰 보기에서 쓸 수 있는 파일 작업(읽기만) */
+export const REMOTE_FILE_ROUTES = ["read", "range", "list", "stat"] as const;
 
 type Next = (err?: unknown) => void;
 
-export interface FsApiDeps {
-  /** 없으면 기본 폴더 선택 창을 쓰지 않는다(ping의 pick=false). */
-  pick?: PickFolder | null;
-}
+export type OpenedSession =
+  | { ok: true; id: string; root: string; title: string; engine: "MV" | "MZ"; name: string }
+  | { ok: false; error: string };
 
-export function createFsMiddleware(deps: FsApiDeps = {}) {
-  const sessions = new Map<string, string>();
-  let picking = false;
-  const pick = deps.pick ?? null;
+/** 열린 게임 폴더 세션(id → 실제 루트 경로). 폴더 API와 휴대폰 보기가 같은 것을 쓴다. */
+export class FsSessions {
+  private map = new Map<string, string>();
+  /** 오래돼도 지우지 않을 세션(휴대폰에 공유 중인 게임) */
+  keep: () => string | null = () => null;
 
-  function openSession(raw: string): Record<string, unknown> {
+  /** 게임 루트를 찾아 새 세션을 연다. reuse면 같은 루트의 세션이 있을 때 그 id를 그대로 돌려준다. */
+  open(raw: string, opts: { reuse?: boolean } = {}): OpenedSession {
     const game = findGameRoot(raw);
     if (!game.ok) return game;
     const real = realpath(game.root);
     if (real === null) return { ok: false, error: ERR_NOT_FOUND };
-    if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value as string);
+    const info = { root: game.root, title: game.title, engine: game.engine, name: path.basename(game.root) };
+    if (opts.reuse) {
+      for (const [id, r] of this.map) if (r === real) return { ok: true, id, ...info };
+    }
+    if (this.map.size >= MAX_SESSIONS) {
+      const kept = this.keep();
+      const old = [...this.map.keys()].find((k) => k !== kept);
+      if (old !== undefined) this.map.delete(old);
+    }
     const id = randomUUID();
-    sessions.set(id, real);
-    return { ok: true, id, root: game.root, title: game.title, engine: game.engine, name: path.basename(game.root) };
+    this.map.set(id, real);
+    return { ok: true, id, ...info };
   }
+
+  get(id: unknown): string | undefined {
+    return typeof id === "string" ? this.map.get(id) : undefined;
+  }
+}
+
+/** 휴대폰 보기(scripts/lanShare.ts)가 알려 주는 것. */
+export interface RemoteAccess {
+  /** 휴대폰 보기로 들어와 확인을 마친 요청인지 */
+  isRemote(req: IncomingMessage): boolean;
+  /** 휴대폰에 공유 중인 세션 id(없으면 null) */
+  sharedId(): string | null;
+}
+
+export interface FsApiDeps {
+  /** 없으면 기본 폴더 선택 창을 쓰지 않는다(ping의 pick=false). */
+  pick?: PickFolder | null;
+  /** 세션 목록(휴대폰 보기와 함께 쓴다). 없으면 새로 만든다. */
+  sessions?: FsSessions;
+  /** 없으면 휴대폰 보기 요청을 하나도 받지 않는다. */
+  remote?: RemoteAccess;
+}
+
+export function createFsMiddleware(deps: FsApiDeps = {}) {
+  const sessions = deps.sessions ?? new FsSessions();
+  let picking = false;
+  const pick = deps.pick ?? null;
+  const openSession = (raw: string) => sessions.open(raw);
 
   async function handle(req: IncomingMessage, res: ServerResponse, next: Next): Promise<void> {
     const url = (req.url ?? "").split("?")[0];
     if (!url.startsWith("/api/fs/")) { next(); return; }
     const route = url.slice("/api/fs/".length);
     const headers = { host: req.headers.host, origin: req.headers.origin };
+    // 누가 보냈는지는 소켓 주소로 본다: 이 PC이거나, 휴대폰 보기 확인을 마친 요청만.
+    const remote = deps.remote?.isRemote(req) === true;
+    if (!remote && !isLoopbackIp(clientIp(req))) { sendJson(res, 403, { ok: false, error: "forbidden" }); return; }
+    if (remote && !(REMOTE_FILE_ROUTES as readonly string[]).includes(route)) { sendJson(res, 403, { ok: false, error: "forbidden" }); return; }
 
     if (route === "ping") {
       if (req.method !== "GET") { sendJson(res, 405, { ok: false, error: "GET only" }); return; }
@@ -421,7 +467,7 @@ export function createFsMiddleware(deps: FsApiDeps = {}) {
     const isFile = (FILE_ROUTES as readonly string[]).includes(route);
     if (!isFile && route !== "pick" && route !== "open") { sendJson(res, 404, { ok: false, error: "not found" }); return; }
     if (req.method !== "POST") { sendJson(res, 405, { ok: false, error: "POST only" }); return; }
-    if (!isAllowedRequest(headers, { requireOrigin: true })) { sendJson(res, 403, { ok: false, error: "forbidden" }); return; }
+    if (!isAllowedRequest(headers, { requireOrigin: true, allowIpHost: remote })) { sendJson(res, 403, { ok: false, error: "forbidden" }); return; }
 
     const raw = await readBody(req, route === "write" ? MAX_WRITE_BODY : MAX_BODY);
     if (raw === null) { sendJson(res, 413, { ok: false, error: "too large" }); return; }
@@ -449,7 +495,12 @@ export function createFsMiddleware(deps: FsApiDeps = {}) {
       return;
     }
 
-    const root = typeof input.id === "string" ? sessions.get(input.id) : undefined;
+    // 휴대폰은 공유한 게임 하나만 읽는다.
+    if (remote && (typeof input.id !== "string" || input.id !== deps.remote?.sharedId())) {
+      sendJson(res, 403, { ok: false, error: "forbidden" });
+      return;
+    }
+    const root = sessions.get(input.id);
     if (root === undefined) { sendJson(res, 410, { ok: false, error: ERR_SESSION }); return; }
     handleFile(route as FileRoute, root, input, res);
   }
@@ -508,7 +559,7 @@ export function createFsMiddleware(deps: FsApiDeps = {}) {
 /** vite.config.ts에 등록. Windows에서만 기본 폴더 선택 창을 쓴다. */
 export function fsApiPlugin(deps: FsApiDeps = {}): Plugin {
   const pick = deps.pick !== undefined ? deps.pick : process.platform === "win32" ? createWindowsPicker(nodeExec) : null;
-  const middleware = createFsMiddleware({ pick });
+  const middleware = createFsMiddleware({ ...deps, pick });
   return {
     name: "rpg-viewer-fs",
     configureServer(server) { server.middlewares.use((req, res, next) => { void middleware(req, res, next); }); },

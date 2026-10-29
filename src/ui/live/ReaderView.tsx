@@ -38,6 +38,7 @@ import { useBattlesShown } from "./battleDisplay";
 import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
 import { NoticeKindsMenu } from "./NoticeKindsMenu";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
+import { isRemoteView } from "@/app/share";
 
 const PAGE = 300;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
@@ -507,8 +508,11 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center justify-center gap-2">
-        <Button size="sm" onClick={next} disabled={total === 0}>↓ 다음 (Space)</Button>
+      {/* 좁은 화면(휴대폰)에서는 줄을 바꾼다 */}
+      <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
+        <Button size="sm" onClick={next} disabled={total === 0}>
+          ↓ 다음{!isRemoteView() && <span className="pointer-coarse:hidden"> (Space)</span>}
+        </Button>
         <Button variant="outline" size="sm" onClick={goBottom} disabled={atBottom && atEnd && unread === 0}>맨 아래로</Button>
         {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
         <div className="flex items-center gap-2">

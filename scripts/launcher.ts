@@ -10,15 +10,17 @@
  * - POST /api/game/backups/{list,create,restore,delete,state} { path, … } → scripts/backups.ts
  *
  * 셸을 쓰지 않고, 찾은 게임 폴더 안의 실행 파일 하나만 실행한다.
- * 요청은 자기 localhost 출처에서 온 것만 받는다.
+ * 요청은 이 PC(루프백)의 자기 localhost 출처에서 온 것만 받는다. 휴대폰 보기로 들어온 요청은 받지 않는다.
  */
 import { spawn as nodeSpawn } from "node:child_process";
 import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import path from "node:path";
 import type { Plugin } from "vite";
 import { BACKUP_ROUTES, ERR_BAD_ID, handleBackupRoute, isValidBackupId, restoreBackup } from "./backups.ts";
 import { GameProcesses, nodeProcessOps, type ProcessOps } from "./gameProcess.ts";
+import { clientIp, isLoopbackIp } from "./netAddress.ts";
 
 export const ERR_NOT_FOUND = "폴더를 찾을 수 없어요";
 export const ERR_NOT_GAME = "RPG Maker 게임 폴더가 아니에요";
@@ -117,10 +119,14 @@ export function findGameRoot(raw: string): GameRoot {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** Host가 루프백이고, Origin이 있으면(POST는 필수) 바로 그 Host의 http 출처인지. */
+/**
+ * Host가 루프백이고, Origin이 있으면(POST는 필수) 바로 그 Host의 http 출처인지.
+ * allowIpHost: 휴대폰 보기로 들어온 요청은 Host가 PC의 IP 주소다. 그때도 이름(도메인)은 받지 않는다
+ * — 남의 도메인을 PC 주소로 돌려 들어오는 공격(DNS 리바인딩)을 막는다.
+ */
 export function isAllowedRequest(
   headers: { host?: string; origin?: string },
-  opts: { requireOrigin: boolean },
+  opts: { requireOrigin: boolean; allowIpHost?: boolean },
 ): boolean {
   const host = headers.host;
   if (!host) return false;
@@ -130,7 +136,9 @@ export function isAllowedRequest(
   } catch {
     return false;
   }
-  if (!LOOPBACK_HOSTS.has(hostname)) return false;
+  const ipHost = opts.allowIpHost === true
+    && (isIP(hostname) === 4 || (hostname.startsWith("[") && isIP(hostname.slice(1, -1)) === 6));
+  if (!LOOPBACK_HOSTS.has(hostname) && !ipHost) return false;
   const origin = headers.origin;
   if (origin === undefined) return !opts.requireOrigin;
   return origin === `http://${host}`;
@@ -245,6 +253,8 @@ export function createLauncherMiddleware(deps: { spawn: SpawnFn; procs?: Process
     if (!url.startsWith("/api/game/")) { next(); return; }
     const route = url.slice("/api/game/".length);
     const headers = { host: req.headers.host, origin: req.headers.origin };
+    // 실행·백업은 이 PC에서만(Host 헤더는 꾸밀 수 있으니 소켓 주소로 본다).
+    if (!isLoopbackIp(clientIp(req))) { send(res, 403, { ok: false, error: "forbidden" }); return; }
 
     if (route === "ping") {
       if (req.method !== "GET") { send(res, 405, { ok: false, error: "GET only" }); return; }

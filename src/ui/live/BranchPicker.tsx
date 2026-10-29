@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import type { DeleteRequest } from "@/app/logEdit";
+import { isRemoteView } from "@/app/share";
 import { DeleteBranchesDialog, UndoDeleteDialog } from "./BranchDeleteDialogs";
 import { useBranchPrefs } from "./branchPrefs";
 import { branchName, firstPickText, lastLineText } from "./branchText";
@@ -114,7 +115,7 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="w-72 justify-between font-normal">
+          <Button variant="outline" className="w-72 max-w-full justify-between font-normal">
             <span className="truncate">{prefs.branches[String(current)]?.pinned ? "★ " : ""}{nameOf(current)}</span>
             <ChevronsUpDown className="opacity-50" />
           </Button>
@@ -132,7 +133,8 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
               >
                 오래된 갈래 정리
               </Button>
-              <DropdownMenu>
+              {/* 휴대폰 보기에서는 기록 파일을 고치지 않는다 */}
+              {!isRemoteView() && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon-sm" aria-label="갈래 영구 삭제 메뉴"><EllipsisVertical /></Button>
                 </DropdownMenuTrigger>
@@ -147,7 +149,7 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
                     마지막 삭제 되돌리기…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>}
             </div>
           </div>
           <div className="max-h-[60svh] overflow-y-auto">
@@ -246,8 +248,10 @@ function Row({ s, row, name, selected, latest, line, choice, onPick, onRename, o
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onHide}>{row.hidden ? "다시 보이기" : "숨기기"}</DropdownMenuItem>
             <DropdownMenuItem onSelect={onHideUpTo}>이 갈래와 이전 갈래 모두 숨기기</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={onDelete}>영구 삭제…</DropdownMenuItem>
+            {!isRemoteView() && (<>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={onDelete}>영구 삭제…</DropdownMenuItem>
+            </>)}
           </DropdownMenuContent>
         </DropdownMenu>
       </ItemActions>

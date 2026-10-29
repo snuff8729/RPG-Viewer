@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLive, useLiveStatus } from "@/app/LiveProvider";
 import { branchLabel } from "@/core/live/history";
+import { isRemoteView } from "@/app/share";
 import { Badge } from "@/components/ui/badge";
 import { InstallDialog } from "./InstallDialog";
 
@@ -41,13 +42,17 @@ export function ConnectionBadge() {
   } else if (connection === "waiting") {
     text = "○ 게임 꺼짐";
   } else {
-    text = "플러그인 미설치";
+    // 휴대폰 보기에서는 설치할 수 없으니 설치 안내 대신 꺼짐으로만 보여 준다
+    text = isRemoteView() ? "○ 게임 꺼짐" : "플러그인 미설치";
   }
 
+  const badge = <Badge variant={variant} className={muted ? "text-muted-foreground" : undefined}>{text}</Badge>;
+  // 휴대폰 보기에서는 플러그인을 설치·제거하지 않는다
+  if (isRemoteView()) return badge;
   return (
     <>
       <button type="button" className="rounded-full" onClick={() => setOpen(true)}>
-        <Badge variant={variant} className={muted ? "text-muted-foreground" : undefined}>{text}</Badge>
+        {badge}
       </button>
       <InstallDialog open={open} onOpenChange={setOpen} />
     </>

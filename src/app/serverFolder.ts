@@ -88,16 +88,20 @@ export class ServerFolder implements WritableGameFolder {
   private id: string;
   private fetchFn: FetchFn;
   private reopening: Promise<boolean> | null = null;
+  /** 휴대폰 보기: 읽기만 한다(쓰기는 시도하지 않고, 서버도 막는다). 세션을 다시 열지도 않는다. */
+  readonly readOnly: boolean;
 
-  constructor(session: ServerSession, fetchFn: FetchFn = defaultFetch) {
+  constructor(session: ServerSession, fetchFn: FetchFn = defaultFetch, opts: { readOnly?: boolean } = {}) {
     this.session = session;
     this.id = session.id;
     this.fetchFn = fetchFn;
+    this.readOnly = opts.readOnly === true;
   }
 
   get root(): string { return this.session.root; }
 
   private reopen(staleId: string): Promise<boolean> {
+    if (this.readOnly) return Promise.resolve(false);
     if (this.id !== staleId) return Promise.resolve(true);
     this.reopening ??= openFolderOnServer(this.session.root, this.fetchFn).then((r) => {
       this.reopening = null;
@@ -169,13 +173,22 @@ export class ServerFolder implements WritableGameFolder {
   }
 
   async writeText(path: string, text: string): Promise<boolean> {
+    if (this.readOnly) throw new Error(READ_ONLY);
     return (await this.json("write", { path, text }))?.ok === true;
   }
 
   async remove(path: string): Promise<boolean> {
+    if (this.readOnly) throw new Error(READ_ONLY);
     return (await this.json("remove", { path }))?.ok === true;
   }
 
-  async canWrite(): Promise<boolean> { return true; }
-  async requestWrite(): Promise<boolean> { return true; }
+  async canWrite(): Promise<boolean> { return !this.readOnly; }
+  async requestWrite(): Promise<boolean> { return !this.readOnly; }
+}
+
+const READ_ONLY = "휴대폰 보기에서는 쓸 수 없어요";
+
+/** 읽기 전용 폴더(휴대폰 보기)인지 */
+export function isReadOnlyFolder(f: unknown): boolean {
+  return f instanceof ServerFolder && f.readOnly;
 }

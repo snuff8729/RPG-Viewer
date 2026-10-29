@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { formatRoute, type Route } from "@/app/route";
+import { isRemoteView } from "@/app/share";
 import { reachableCount } from "@/core/live/missingGroups";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
 import { attentionCount } from "@/core/diagnose";
@@ -70,7 +71,8 @@ export function AppSidebar({ route, follow, onFollowChange, onOpenMissing, onSea
           <SidebarGroupLabel>보기</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map(({ view, route: r, icon: Icon }) => {
+              {/* 게임 진단은 설정을 바꾸는 화면이라 휴대폰 보기에서는 뺀다 */}
+              {NAV.filter((n) => !(isRemoteView() && n.view === "diagnose")).map(({ view, route: r, icon: Icon }) => {
                 const n = badge(view);
                 return (
                   <SidebarMenuItem key={view}>
@@ -103,7 +105,8 @@ export function AppSidebar({ route, follow, onFollowChange, onOpenMissing, onSea
         </Button>
         <div className="flex items-center gap-2">
           <ErrorsBadge />
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={onClose}><FolderOpen />다른 게임 열기</Button>
+          {/* 휴대폰 보기는 PC가 연 게임만 본다 */}
+          {!isRemoteView() && <Button variant="ghost" size="sm" className="ml-auto" onClick={onClose}><FolderOpen />다른 게임 열기</Button>}
         </div>
       </SidebarFooter>
     </Sidebar>
