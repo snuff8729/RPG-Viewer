@@ -20,8 +20,11 @@ function rowHint(ev: ChecklistEvent): string {
   return ev.exit ? `→ ${ev.exit.mapName}` : ev.describe;
 }
 
-/** 플레이 화면의 맵 패널: 작은 맵(내 위치를 따라감)과 지금 해 볼 것만 한 줄씩. 줄을 누르면 맵에서 고르고 길을 보여준다. */
-export function PlayMap() {
+/**
+ * 플레이 화면의 맵 패널: 작은 맵(내 위치를 따라감)과 지금 해 볼 것만 한 줄씩. 줄을 누르면 맵에서 고르고 길을 보여준다.
+ * story=false면 다음 스토리 카드를 빼고 맵에 자리를 준다(휴대폰은 스토리 탭에 따로 둔다).
+ */
+export function PlayMap({ story = true }: { story?: boolean }) {
   const here = useHereMap();
   const { live, checklist, listed, numbers, selected, select, routeText } = here;
   const [focus, setFocus] = useState<{ x: number; y: number; n: number } | null>(null);
@@ -44,9 +47,11 @@ export function PlayMap() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <div className="max-h-[40%] shrink-0 overflow-y-auto">
-        <NextStoryCard compact />
-      </div>
+      {story && (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto">
+          <NextStoryCard compact />
+        </div>
+      )}
       <div className="min-h-32 flex-1">
         <HereMapArea here={here} focus={focus} onPick={onPick} compact />
       </div>

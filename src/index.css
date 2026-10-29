@@ -166,12 +166,15 @@
   [data-slot="sidebar-trigger"],
   [data-slot="popover-trigger"],
   [data-slot="dropdown-menu-trigger"],
+  [data-slot="collapsible-trigger"],
+  [data-slot="sheet-trigger"][data-size],
+  [data-slot="sheet-close"][data-size],
   [data-slot="tooltip-trigger"][data-size],
   [data-slot="select-trigger"],
   [data-slot="input"] {
     min-height: 2.5rem;
   }
-  [data-size^="icon"]:is([data-slot="button"], [data-slot="dropdown-menu-trigger"], [data-slot="popover-trigger"], [data-slot="tooltip-trigger"]),
+  [data-size^="icon"]:is([data-slot="button"], [data-slot="dropdown-menu-trigger"], [data-slot="popover-trigger"], [data-slot="tooltip-trigger"], [data-slot="sheet-trigger"], [data-slot="sheet-close"]),
   [data-slot="sidebar-trigger"] {
     min-width: 2.5rem;
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
@@ -9,7 +9,7 @@ import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
 import { hasLayeredPictures } from "@/core/live/pictureStack";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
-import { Info, X } from "lucide-react";
+import { ChevronsDown, Info, Settings2, X } from "lucide-react";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
@@ -39,6 +39,8 @@ import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
 import { NoticeKindsMenu } from "./NoticeKindsMenu";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 import { isRemoteView } from "@/app/share";
+import { cn } from "@/lib/utils";
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 
 const PAGE = 300;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
@@ -82,7 +84,16 @@ function syncView(v: View | null, total: number, stats: ReadStats, readSeq: numb
  * 기록을 끝까지 한 번 읽기 전(caughtUp 전)에는 경로가 앞부분뿐이라 읽은 위치·구간을 정하지 않고 로딩만 보여준다.
  * 갈래·게임·기록 초기화(logEpoch)가 바뀌면 본문을 새로 마운트해 읽은 위치·구간·대기 중 스크롤을 모두 처음부터 정한다.
  */
-function FullReader({ branch, withLive }: { branch: number | null; withLive: boolean }) {
+/** 읽기 본문 공용 설정: 자동으로 맨 아래로(ReaderView가 갖고, 휴대폰에서는 보기 설정 서랍에서 바꾼다)와 휴대폰 배치 */
+interface BodyOpts {
+  autoFollow: boolean;
+  onAutoFollow: (on: boolean) => void;
+  /** 본문이 걸어 두는 손잡이: 자동으로 맨 아래로를 켠 순간 맨 아래로(떼면 null) */
+  onFollowOn: (fn: (() => void) | null) => void;
+  mobile: boolean;
+}
+
+function FullReader({ branch, withLive, ...opts }: { branch: number | null; withLive: boolean } & BodyOpts) {
   const { data } = useGame();
   const { caughtUp, logEpoch } = useLive();
   if (!data) return null;
@@ -98,11 +109,11 @@ function FullReader({ branch, withLive }: { branch: number | null; withLive: boo
     );
   }
   const gameKey = gameKeyOf(data);
-  return <FullReaderBody key={`${gameKey}.${branch}.${logEpoch}`} gameKey={gameKey} branch={branch} withLive={withLive} />;
+  return <FullReaderBody key={`${gameKey}.${branch}.${logEpoch}`} gameKey={gameKey} branch={branch} withLive={withLive} {...opts} />;
 }
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
-function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch: number | null; withLive: boolean }) {
+function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
   const { data } = useGame();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
   const live = withLive ? liveNow : null;
@@ -177,7 +188,6 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
   const follow = useRef(false);
   const positioned = useRef(false);
   // 자동으로 맨 아래로: 켜면 새 항목이 올 때마다 위치·창 포커스·양과 상관없이 끝으로 간다
-  const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
   const autoRef = useRef(autoFollow);
   useLayoutEffect(() => { autoRef.current = autoFollow; }, [autoFollow]);
   const prevLen = useRef(0);
@@ -382,13 +392,11 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
     applyRange(tailRange(total, PAGE), { kind: "bottom" });
   }, [arm, total, items, markRead, applyRange]);
 
-  /** 자동으로 맨 아래로 켜고 끄기. 켜는 순간 바로 맨 아래로 간다(읽음 처리는 하지 않음). */
-  const onAutoFollow = (on: boolean) => {
-    setAutoFollow(on);
-    autoRef.current = on;
-    saveAutoFollow(on);
-    if (on) applyRange(tailRange(total, PAGE), { kind: "bottom" });
-  };
+  /** 자동으로 맨 아래로를 켜는 순간 바로 맨 아래로 간다(읽음 처리는 하지 않음). ReaderView가 켤 때 부른다. */
+  useLayoutEffect(() => {
+    onFollowOn(() => { autoRef.current = true; applyRange(tailRange(total, PAGE), { kind: "bottom" }); });
+    return () => onFollowOn(null);
+  }, [onFollowOn, applyRange, total]);
 
   /** 다음 안 읽은 항목을 위로 올리고 그 앞까지 읽음 처리 */
   const next = useCallback(() => {
@@ -464,8 +472,10 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
           </AlertAction>
         </Alert>
       )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scroller} onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
+        {/* 휴대폰: 아래에 떠 있는 버튼에 마지막 줄이 가리지 않게 아래 여백을 둔다 */}
+        <div ref={content} className={cn("mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed", mobile && "pb-20")}>
           {empty ? (
             <p className="text-center text-sm text-muted-foreground">게임을 진행하면 지나간 대사가 여기에 쌓여요</p>
           ) : (
@@ -508,8 +518,20 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
           )}
         </div>
       </div>
+      {/* 휴대폰: 맨 아래가 아닐 때만 떠 있는 다음·맨 아래로(나머지 설정은 보기 설정 서랍) */}
+      {mobile && total > 0 && !(atBottom && atEnd && unread === 0) && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center gap-2">
+          <Button className="pointer-events-auto h-10 shadow-md" onClick={next}>
+            ↓ 다음{unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
+          </Button>
+          <Button variant="outline" size="icon" className="pointer-events-auto size-10 bg-background shadow-md" aria-label="맨 아래로" onClick={goBottom}>
+            <ChevronsDown />
+          </Button>
+        </div>
+      )}
+      </div>
       {/* 좁은 화면(휴대폰)에서는 줄을 바꾼다 */}
-      <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
+      {!mobile && <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
         <Button size="sm" onClick={next} disabled={total === 0}>
           ↓ 다음{!isRemoteView() && <span className="pointer-coarse:hidden"> (Space)</span>}
         </Button>
@@ -525,13 +547,29 @@ function FullReaderBody({ gameKey, branch, withLive }: { gameKey: string; branch
             <Label htmlFor="reader-screen-pictures">그림 보기</Label>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
 
-/** 읽기 탭 — 회차·갈래 고르기와 보기 방식(전체 읽기 / 선택 흐름). */
-export function ReaderView() {
+/** 스위치 한 줄(휴대폰 보기 설정 서랍): 이름 왼쪽, 스위치 오른쪽 */
+function SettingRow({ id, label, checked, onChange, children }: {
+  id: string; label: string; checked: boolean; onChange: (on: boolean) => void; children?: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-10 items-center gap-3">
+      <Label htmlFor={id} className="min-w-0 flex-1">{label}</Label>
+      {children}
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+/**
+ * 읽기 탭 — 회차·갈래 고르기와 보기 방식(전체 읽기 / 선택 흐름).
+ * mobile(휴대폰 너비 플레이 화면)이면 위 도구 줄 대신 `보기 설정` 서랍에 모으고 본문이 화면을 거의 다 쓴다.
+ */
+export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const { data } = useGame();
   const { records, model, latestBranch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
@@ -542,6 +580,20 @@ export function ReaderView() {
   const [showAllPlugins, setShowAllPlugins] = usePluginShowAll();
   const [battlesShown, setBattlesShown] = useBattlesShown();
   const [noticesShown, setNoticesShown] = useNoticesShown();
+  // 자동으로 맨 아래로(본문과 휴대폰 보기 설정 서랍이 함께 쓴다)
+  const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
+  const followOn = useRef<(() => void) | null>(null);
+  const onFollowOn = useCallback((fn: (() => void) | null) => { followOn.current = fn; }, []);
+  const onAutoFollow = useCallback((on: boolean) => {
+    setAutoFollow(on);
+    saveAutoFollow(on);
+    if (on) followOn.current?.();
+  }, []);
+  // 휴대폰 보기 설정 서랍의 `그림 보기`(본문 아래 줄과 같은 조건: 그림 따라 그리기를 켰거나 그림 표시 기록이 있을 때)
+  const [screenShown, setScreenShown] = useScreenPicturesShown();
+  const picturesOn = useAddons().isOn("screenPictures");
+  const hasPictureRecords = useMemo(() => mobile && records.some(r => r.type === "picture" && r.op === undefined && !!r.name), [mobile, records]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // `알림 문구 보기`는 알림 문구 기록을 켰거나 기록에 알림 문구가 있을 때만
   const noticesOn = useAddons().isOn("notices");
   const hasNotices = useMemo(() => noticesOn || records.some(r => r.type === "notice"), [noticesOn, records]);
@@ -553,6 +605,61 @@ export function ReaderView() {
 
   if (!data) return null;
   const hasBranch = records.length > 0 && selected !== null;
+  const body = hasBranch && mode === "flow"
+    ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
+    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} />;
+
+  if (mobile) {
+    return (
+      <div className="relative flex h-full min-h-0 flex-col">
+        {body}
+        <Button
+          variant="outline"
+          size="icon"
+          className="absolute right-3 bottom-3 size-10 bg-background shadow-md"
+          aria-label="보기 설정"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings2 />
+        </Button>
+        <Drawer open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DrawerContent>
+            <DrawerHeader>
+              <DrawerTitle>보기 설정</DrawerTitle>
+              <DrawerDescription>읽기 화면에 무엇을 어떻게 보일지 골라요.</DrawerDescription>
+            </DrawerHeader>
+            <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-6">
+              {hasBranch && (
+                <>
+                  <BranchPicker selected={selected} onSelect={setPicked} />
+                  <ToggleGroup type="single" variant="outline" value={mode} onValueChange={onMode} className="w-full">
+                    <ToggleGroupItem value="full" className="flex-1">전체 읽기</ToggleGroupItem>
+                    <ToggleGroupItem value="flow" className="flex-1">선택 흐름</ToggleGroupItem>
+                  </ToggleGroup>
+                  <Separator />
+                </>
+              )}
+              <SettingRow id="reader-m-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
+              {hasBranch && (
+                <>
+                  <SettingRow id="reader-m-plugin-all" label="플러그인 명령 모두 보기" checked={showAllPlugins} onChange={setShowAllPlugins} />
+                  <SettingRow id="reader-m-battles" label="전투 기록 보기" checked={battlesShown} onChange={setBattlesShown} />
+                  {hasNotices && (
+                    <SettingRow id="reader-m-notices" label="알림 문구 보기" checked={noticesShown} onChange={setNoticesShown}>
+                      <NoticeKindsMenu disabled={!noticesShown} />
+                    </SettingRow>
+                  )}
+                </>
+              )}
+              {(picturesOn || hasPictureRecords) && (
+                <SettingRow id="reader-m-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
+              )}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      </div>
+    );
+  }
 
   return (
     // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
@@ -581,9 +688,7 @@ export function ReaderView() {
           )}
         </div>
       )}
-      {hasBranch && mode === "flow"
-        ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
-        : <FullReader branch={selected} withLive={selected === latestBranch} />}
+      {body}
     </div>
   );
 }

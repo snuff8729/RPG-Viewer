@@ -22,6 +22,8 @@ import { safeStore, type PlayLayout } from "./playLayout";
 import { ReaderView } from "./ReaderView";
 import { useMapChecklist } from "./useMapChecklist";
 import { usePlayLayout } from "./usePlayLayout";
+import { MobilePlayView } from "./MobilePlayView";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const layoutStore = safeStore();
 
@@ -87,8 +89,17 @@ function PlayPanels({ layout }: { layout: PlayLayout }) {
   );
 }
 
-/** 플레이 화면: 게임 옆에 두고 보는 읽기 + 맵. 따로 띄운 창(popup)에서는 사이드바·새 창 버튼이 없다. */
+/**
+ * 플레이 화면: 게임 옆에 두고 보는 읽기 + 맵. 따로 띄운 창(popup)에서는 사이드바·새 창 버튼이 없다.
+ * 휴대폰 너비(따로 띄운 창 제외)는 한 번에 한 패널 + 아래 탭(MobilePlayView).
+ */
 export function PlayView({ popup = false }: { popup?: boolean }) {
+  const isMobile = useIsMobile();
+  if (isMobile && !popup) return <MobilePlayView />;
+  return <DesktopPlayView popup={popup} />;
+}
+
+function DesktopPlayView({ popup }: { popup: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const layout = usePlayLayout(ref);
   return (
