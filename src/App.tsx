@@ -123,24 +123,29 @@ function Shell() {
       />
       <SidebarInset className="min-w-0">
         {isPlay ? <PlayView /> : (<>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-4 py-1.5">
           <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4" />
-          <Breadcrumb className="min-w-0">
-            <BreadcrumbList className="flex-nowrap">
+          <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
+          {/* 그래도 넘치면 오른쪽 버튼 아래로 번지지 않게 자른다. 목록을 오른쪽에 붙여 잘리는 쪽은 왼쪽(찾아보기)이 된다 */}
+          <Breadcrumb className="min-w-0 overflow-hidden">
+            <BreadcrumbList className="flex-nowrap justify-end">
               {route.kind === "page" ? (
                 <>
                   <BreadcrumbItem className="shrink-0">
                     <BreadcrumbLink href={formatRoute({ kind: "home" })}>{VIEW_NAMES.explore}</BreadcrumbLink>
                   </BreadcrumbItem>
-                  {crumbs.map((c, i) => (
-                    <Fragment key={i}>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem className="min-w-0">
-                        <BreadcrumbPage className={`truncate ${i === crumbs.length - 1 ? "" : "font-normal text-muted-foreground"}`}>{c}</BreadcrumbPage>
-                      </BreadcrumbItem>
-                    </Fragment>
-                  ))}
+                  {/* 자리가 모자라면 가운데 항목이 먼저 줄고(최소 한두 글자는 남김), 마지막 항목은 그다음에 줄어든다 */}
+                  {crumbs.map((c, i) => {
+                    const last = i === crumbs.length - 1;
+                    return (
+                      <Fragment key={i}>
+                        <BreadcrumbSeparator className="shrink-0" />
+                        <BreadcrumbItem className={last ? "min-w-10" : "min-w-10 shrink-[1000]"} title={c}>
+                          <BreadcrumbPage className={`truncate ${last ? "" : "font-normal text-muted-foreground"}`}>{c}</BreadcrumbPage>
+                        </BreadcrumbItem>
+                      </Fragment>
+                    );
+                  })}
                 </>
               ) : (
                 <BreadcrumbItem><BreadcrumbPage>{VIEW_NAMES[viewOf(route)]}</BreadcrumbPage></BreadcrumbItem>
@@ -149,7 +154,7 @@ function Shell() {
           </Breadcrumb>
           {/* 휴대폰 보기는 읽기만: 고정·실행·백업·보조·치트·설정을 숨긴다 */}
           {!remote && (
-            <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
               <PinGameButton />
               <LaunchButton />
               <ShareButton />
