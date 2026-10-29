@@ -8,12 +8,13 @@ import { buildHistory } from "@/core/live/history";
 import { createAccumulator, type LiveAccumulator } from "@/core/live/accumulator";
 import { conditionsKey } from "@/core/live/interactable";
 import { computeMissing } from "@/core/live/missing";
+import { withActorNames } from "@/core/live/actorNames";
 import { getInstallStatus, install as installPlugin, livePaths, pluginVersionOf, uninstall as uninstallPlugin, type InstallResult, type InstallStatus } from "@/core/live/installer";
 import { LogTail, readLive } from "@/core/live/tail";
 import { mergeSeenArchive, parseSeenArchive, type SeenArchive } from "@/core/live/seenArchive";
 import { logEditPaths } from "./logEdit";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
-import type { GameIndex } from "@/core/types";
+import type { GameData, GameIndex } from "@/core/types";
 import {
   adoptLiveAssist, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, mergeAssist,
   normalizeAssist, parseControlFile, resyncDue, seenSets, versionAtLeast,
@@ -206,6 +207,8 @@ function saveAssist(gameKey: string | null, s: AssistSettings): void {
 const LiveContext = createContext<LiveContextValue | null>(null);
 const LiveStatusContext = createContext<LiveStatusValue | null>(null);
 const AssistContext = createContext<AssistValue | null>(null);
+/** 게임 중에 바뀐 캐릭터 이름을 넣은 GameData(useLiveData). LiveProvider 밖이면 null. */
+const LiveDataContext = createContext<{ data: GameData | undefined } | null>(null);
 
 /** t만 다른 live.json(하트비트)이면 같은 키 → 판정·못 본 것 재계산을 건너뛴다. */
 function stateKey(s: LiveSnapshot): string {
@@ -415,6 +418,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => (data && index ? computeMissing(index, data, coverage, condLive) : []),
     [index, data, coverage, condLive],
   );
+
+  // 게임 중에 바뀐 캐릭터 이름(live.json actorNames): 연결이 끊겨도 마지막으로 읽은 상태의 이름을 쓴다.
+  // withActorNames는 이름이 같으면 같은 객체라 하트비트·다른 상태 변화로는 참조가 바뀌지 않는다.
+  const liveData = data ? withActorNames(data, liveState?.actorNames) : undefined;
+  const liveDataValue = useMemo(() => ({ data: liveData }), [liveData]);
 
   const logStats = useMemo(
     () => (tailInfo.bytes === null ? null : { bytes: tailInfo.bytes, lines: tailInfo.count + tailInfo.badLines }),
@@ -768,7 +776,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   return (
     <LiveContext.Provider value={value}>
       <LiveStatusContext.Provider value={statusValue}>
-        <AssistContext.Provider value={assistValue}>{children}</AssistContext.Provider>
+        <AssistContext.Provider value={assistValue}>
+          <LiveDataContext.Provider value={liveDataValue}>{children}</LiveDataContext.Provider>
+        </AssistContext.Provider>
       </LiveStatusContext.Provider>
     </LiveContext.Provider>
   );
@@ -787,6 +797,18 @@ export function useAssist(): AssistValue {
   const v = useContext(AssistContext);
   if (!v) throw new Error("useAssist must be used within LiveProvider");
   return v;
+}
+
+/**
+ * 실행 중 화면(읽기·기록·선택지·치트 등)이 글을 풀 때 쓰는 GameData: useGame().data에 게임 중에 바뀐 캐릭터 이름
+ * (live.json actorNames, 플러그인 1.19.1+)을 넣은 것. 바뀐 이름이 없으면 useGame().data 그대로.
+ * 스크립트 보기 등 원본 데이터 화면은 useGame().data를 쓴다.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLiveData(): GameData | undefined {
+  const v = useContext(LiveDataContext);
+  if (!v) throw new Error("useLiveData must be used within LiveProvider");
+  return v.data;
 }
 
 /** 자주 바뀌는 연결 상태값(lastSeenT·lastLive·logStats). 이 값이 필요한 작은 컴포넌트만 쓴다. */

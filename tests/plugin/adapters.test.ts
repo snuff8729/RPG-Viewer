@@ -100,7 +100,7 @@ describe("extension API (bridge 1.13.0)", () => {
     expect(h.bridge.registerExtension(ext)).toBe(true);
     expect(h.bridge.registerExtension(ext)).toBe(false);
     expect(h.bridge.registerExtension({})).toBe(false);
-    expect(calls).toEqual(["install:1.19.0"]);
+    expect(calls).toEqual(["install:1.19.1"]);
     expect(h.bridge.extensions()).toEqual(["test-ext"]);
     h.bridge._snapshotNow();
     expect(h.readLive().assist.extensions).toEqual(["test-ext"]);

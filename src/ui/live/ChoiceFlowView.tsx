@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { choiceFlow, type FlowItem } from "@/core/live/choiceFlow";
 import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
 import { readerItems } from "@/core/live/reader";
@@ -87,7 +86,7 @@ function Fork({ item, model, branch, onSelect }: {
  * 읽음 표시·자동 따라가기·Space 처리는 하지 않는다.
  */
 export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onSelectBranch: (id: number) => void }) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, coverage } = useLive();
   const { overrides } = usePluginOverrides();
   const [battlesShown] = useBattlesShown();

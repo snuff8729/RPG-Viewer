@@ -169,7 +169,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Actor.prototype.constructor = Game_Actor;
   Object.defineProperty(Game_Actor.prototype, "level", { get() { return this._level; } });
   Object.defineProperty(Game_Actor.prototype, "mp", { get() { return this._mp; } });
-  Game_Actor.prototype.name = function () { return g.$dataActors[this._actorId].name; };
+  Game_Actor.prototype.name = function () { return this._name !== undefined ? this._name : g.$dataActors[this._actorId].name; };
+  Game_Actor.prototype.setName = function (name: string) { this._name = name; };
   Game_Actor.prototype.maxLevel = function () { return 99; };
   Game_Actor.prototype.currentExp = function () { return this._exp; };
   Game_Actor.prototype.changeExp = function (exp: number, show: boolean) {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useGame } from "@/app/GameProvider";
 import { locationKey, pageLocation } from "@/core/index/locations";
 import { walkAt } from "@/core/interpret/interpret";
@@ -17,7 +17,8 @@ const CANCEL = -2;
 /** 지금 떠 있는 선택지와, 어느 갈래에서 어떤 걸 골랐었는지. 항목당 한 줄, 누르면 미리보기. */
 export function ChoiceNowCard() {
   const { live, coverage, model } = useLive();
-  const { data, index } = useGame();
+  const { index } = useGame();
+  const data = useLiveData();
   const [expanded, setExpanded] = useState<{ key: string; row: number } | null>(null);
   const choice = live?.choice;
   const choiceKey = choice ? `${choice.src ? locationKey(choice.src) : ""}#${choice.cmd}` : null;

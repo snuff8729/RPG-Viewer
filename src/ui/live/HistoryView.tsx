@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { branchPath, foldTimeline } from "@/core/live/history";
 import { locationKey, pageLocation } from "@/core/index/locations";
 import { findNodePathByCmd } from "@/core/interpret/interpret";
@@ -42,7 +42,8 @@ function useStableByKey<T>(value: T, key: string): T {
 
 /** 기록 탭 — 회차·갈래·종류 선택, 스크롤되는 타임라인, 하단 고정 카드. */
 export function HistoryView() {
-  const { data, index } = useGame();
+  const { index } = useGame();
+  const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, latestBranch, connection, install } = useLive();
   const [picked, setPicked] = useState<number | null>(null);
   const [shown, setShown] = useState(PAGE);

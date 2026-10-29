@@ -1,6 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import { picturesBySeq, scenesBySeq, withoutMenuScreens } from "@/core/addons/screenPictures";
 import { usePictureContext } from "../addons/pictureContext";
@@ -94,7 +93,7 @@ interface BodyOpts {
 }
 
 function FullReader({ branch, withLive, ...opts }: { branch: number | null; withLive: boolean } & BodyOpts) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { caughtUp, logEpoch } = useLive();
   if (!data) return null;
   if (!caughtUp) {
@@ -114,7 +113,7 @@ function FullReader({ branch, withLive, ...opts }: { branch: number | null; with
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
 function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
   const live = withLive ? liveNow : null;
 
@@ -570,7 +569,7 @@ function SettingRow({ id, label, checked, onChange, children }: {
  * mobile(휴대폰 너비 플레이 화면)이면 위 도구 줄 대신 `보기 설정` 서랍에 모으고 본문이 화면을 거의 다 쓴다.
  */
 export function ReaderView({ mobile = false }: { mobile?: boolean }) {
-  const { data } = useGame();
+  const data = useLiveData();
   const { records, model, latestBranch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
   const [picked, setPicked] = useState<number | null>(null);

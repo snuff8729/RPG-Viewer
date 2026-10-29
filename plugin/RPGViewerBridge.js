@@ -36,6 +36,7 @@
  * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
  * 화면 그림은 맵과 전투 화면에서만 기록합니다(메뉴 화면은 RPG Viewer에서 따로 켠 경우만).
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
+ * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -48,7 +49,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.19.0",
+    VERSION: "1.19.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -693,6 +694,8 @@
       }
     };
     if (liveActors) snap.actors = actorDetails();
+    var names = renamedActors();
+    if (names) snap.actorNames = names; // 1.19.1: names changed in play (Change Name / Name Input)
     var sz = screenSize();
     if (sz) snap.screen = sz; // 1.18.2: the game's real screen size
     return snap;
@@ -938,6 +941,30 @@
         });
       } catch (e) { reportError(e); }
     }
+    return out;
+  }
+
+  // 1.19.1: actors whose name was changed in play (Change Name / Name Input), { "<id>": name }; null when none.
+  // Message text is recorded raw, so the viewer expands \N[n] with these instead of the database name.
+  var ACTOR_NAMES_MAX = 200, ACTOR_NAME_MAX = 100;
+  function renamedActors() {
+    var out = null, count = 0;
+    try {
+      var A = G.$gameActors, db = G.$dataActors;
+      var list = A && A._data;
+      if (!list || typeof list.length !== "number" || !db) return null;
+      for (var id = 1; id < list.length && count < ACTOR_NAMES_MAX; id++) {
+        try {
+          var a = list[id];
+          if (!a || typeof a.name !== "function" || !db[id]) continue;
+          var name = a.name();
+          if (typeof name !== "string" || name === db[id].name) continue;
+          if (!out) out = {};
+          out[id] = name.slice(0, ACTOR_NAME_MAX);
+          count++;
+        } catch (e) { reportError(e); }
+      }
+    } catch (e2) { reportError(e2); }
     return out;
   }
 
