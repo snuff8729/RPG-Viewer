@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, Heart, HeartCrack, History, Save, type LucideIcon } from "lucide-react";
 import { useAssist } from "@/app/LiveProvider";
 import {
@@ -234,8 +234,11 @@ export function QuickSlotInput({ id = "assist-quick-slot" }: { id?: string }) {
   );
 }
 
-/** 단축키 설정. 동작을 고르면 다음 keydown을 Ctrl·Shift·Alt 조합과 함께 잡는다(Escape는 취소). 사라지면 잡기도 멈춘다. */
-export function HotkeySettings({ showMismatch, active = true }: {
+/**
+ * 단축키 설정. 동작을 고르면 다음 keydown을 Ctrl·Shift·Alt 조합과 함께 잡는다(Escape는 취소). 사라지면 잡기도 멈춘다.
+ * memo: 게임 상태가 바뀔 때마다 보조 화면이 다시 그려져도 단축키 줄들은 설정이 바뀔 때만 다시 그린다.
+ */
+export const HotkeySettings = memo(function HotkeySettings({ showMismatch, active = true }: {
   showMismatch: boolean;
   /** false가 되면(창을 닫으면) 잡기와 오류 글을 지운다 */
   active?: boolean;
@@ -327,4 +330,4 @@ export function HotkeySettings({ showMismatch, active = true }: {
       )}
     </div>
   );
-}
+});

@@ -6,7 +6,7 @@ import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
 import { branchPath, foldTimeline, representative } from "@/core/live/history";
 import { lastSeqOf, readerItems } from "@/core/live/reader";
-import { hasLayeredPictures } from "@/core/live/pictureStack";
+import { hasLayeredPictures, pictureVarIds } from "@/core/live/pictureStack";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { ChevronsDown, Info, Settings2, X } from "lucide-react";
 import { openGameSettings } from "../addons/gameSettingsOpen";
@@ -137,9 +137,13 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const pictureCtx = usePictureContext(records, picturesOn, hasPictureRecords);
   // 대사마다 보이는 이벤트 그림·스탠딩(화면 장식·숨김·가려진 그림 제외)
   const pictures = useMemo(() => (picturesOn && pictureCtx ? scenesBySeq(picturesBySeq(path), pictureCtx) : null), [picturesOn, pictureCtx, path]);
-  // 변수로 정한 그림 위치: 지금 게임의 같은 갈래 기록이면 지금 변수 값으로(변수가 바뀔 때만 다시 만든다)
+  // 변수로 정한 그림 위치: 지금 게임의 같은 갈래 기록이면 지금 변수 값으로.
+  // 그 그림 명령이 읽는 변수가 바뀔 때만 다시 만든다(다른 변수는 매초 바뀌어도 항목 전체를 다시 만들지 않는다).
   const liveBranch = liveNow?.branch ?? null;
-  const varsKey = liveNow ? JSON.stringify(liveNow.variables ?? {}) : "";
+  const varIds = useMemo(() => (data ? pictureVarIds(path, data) : []), [data, path]);
+  const varsKey = liveNow && varIds.length > 0
+    ? JSON.stringify(Object.fromEntries(varIds.map((id) => [String(id), liveNow.variables?.[String(id)]])))
+    : "";
   const vars = useMemo(() => {
     if (liveBranch === null || !varsKey) return null;
     try { return { branch: liveBranch, values: JSON.parse(varsKey) as Record<string, number> }; } catch { return null; }
@@ -177,7 +181,6 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   if (cur !== view) setView(cur);
   const range = cur?.range ?? EMPTY_RANGE;
   const armed = cur?.armed ?? false;
-  const visible = items.slice(range.start, range.end);
   const atEnd = range.end >= total;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -454,6 +457,24 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [next]);
 
+  // 본문 줄: 항목·구간·읽음 줄이 바뀔 때만 다시 만든다(게임 상태가 매초 바뀌어도 수백 줄을 다시 그리지 않게)
+  const rangeStart = range.start, rangeEnd = range.end;
+  const lines = useMemo(() => items.slice(rangeStart, rangeEnd).map((item, i) => {
+    const seq = lastSeqOf(item);
+    return (
+      <div key={item.key}>
+        <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode}><ReaderItemView item={item} /></div>
+        {rangeStart + i === lastReadIdx && unread > 0 && (
+          <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
+            <Separator className="flex-1" />
+            <span className="shrink-0">여기까지 읽음 · 새 대사 {unread}</span>
+            <Separator className="flex-1" />
+          </div>
+        )}
+      </div>
+    );
+  }), [items, rangeStart, rangeEnd, lastReadIdx, unread, observeNode]);
+
   if (!data) return null;
   const empty = total === 0 && !live?.choice;
 
@@ -484,21 +505,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
                   <Button variant="outline" size="sm" onClick={showEarlier}>이전 대사 더 보기</Button>
                 </div>
               )}
-              {visible.map((item, i) => {
-                const seq = lastSeqOf(item);
-                return (
-                  <div key={item.key}>
-                    <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode}><ReaderItemView item={item} /></div>
-                    {range.start + i === lastReadIdx && unread > 0 && (
-                      <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-                        <Separator className="flex-1" />
-                        <span className="shrink-0">여기까지 읽음 · 새 대사 {unread}</span>
-                        <Separator className="flex-1" />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {lines}
               {!atEnd && (
                 <div className="flex justify-center">
                   <Button variant="outline" size="sm" onClick={showLater}>다음 대사 더 보기</Button>
