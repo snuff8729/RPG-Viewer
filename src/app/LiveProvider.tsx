@@ -22,6 +22,7 @@ import {
 import {
   batchResults, CHEAT_MIN_VERSION, makeBatch, splitOps, validCheatOp, type CheatBatch, type CheatOp, type CheatStatus,
 } from "@/core/live/cheat";
+import { KEY_REPLY_TTL_MS, type KeyReply } from "@/core/live/keyRequest";
 import { clearReadPositions, gameKeyOf } from "@/ui/live/readPosition";
 
 export type Connection = "noPlugin" | "waiting" | "connected" | "stale";
@@ -153,6 +154,11 @@ export interface AssistValue {
   cheatResults: ReadonlyMap<string, CheatStatus>;
   /** 치트 창이 열려 있는 동안 true: 게임이 live.json에 파티 캐릭터 정보를 싣는다(control.json `liveActors`). */
   setLiveActors(on: boolean): void;
+  /**
+   * 게임 창 단축키로 온 백업·복원 요청(core/live/keyRequest)에 답한다: control.json `keyReply`에 실어 게임 화면에 잠깐 띄운다.
+   * 같은 요청에 여러 번 답해도 된다(답마다 번호가 다르다). 연결이 끊긴 때(타이틀 화면 등)도 쓴다.
+   */
+  replyKeyRequest(id: string, text: string): void;
 }
 
 /** 본 것 묶음은 진행도가 바뀐 뒤 이 시간 동안 조용하면 쓴다. */
@@ -176,7 +182,8 @@ function loadAssist(gameKey: string | null): AssistSettings {
   }
 }
 const dirtyStorageKey = (gameKey: string) => `rpgv.assistDirty.${gameKey}`;
-const ASSIST_KEY_SET: ReadonlySet<string> = new Set<AssistKey>(["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys"]);
+const ASSIST_KEY_SET: ReadonlySet<string> = new Set<AssistKey>(["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot"]);
+let keyReplySeq = 0;
 /** 아직 control.json에 쓰지 못한 설정 키(게임별) */
 function loadDirty(gameKey: string | null): Set<AssistKey> {
   if (gameKey === null) return new Set();
@@ -469,6 +476,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   /** 마지막으로 성공한 쓰기: 본문(t 제외, 같으면 다시 쓰지 않는다)·t·설정 */
   const lastWritten = useRef<(WrittenControl & { body: string }) | null>(null);
   const lastCommand = useRef<AssistCommand | null>(null);
+  /** 단축키 백업·복원 요청에 보낼 마지막 답(at = 답한 시각) */
+  const keyReply = useRef<(KeyReply & { at: number }) | null>(null);
   /** 쓰기에 성공한 마지막 명령 id */
   const commandWritten = useRef<string | null>(null);
   const setsCache = useRef<{ coverage: Coverage; index: GameIndex; sets: SeenSets } | null>(null);
@@ -517,6 +526,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     writeGen.current++;
     lastWritten.current = null;
     lastCommand.current = null;
+    keyReply.current = null;
     commandWritten.current = null;
     setsCache.current = null;
     queued.current = null;
@@ -575,6 +585,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     let flags = assistLatest.current.flags;
     const offNow = liveActorsOff.current;
     if (flags.liveActors !== true && disk?.flags.liveActors === true && !offNow) flags = { ...flags, liveActors: true };
+    // 단축키 백업·복원의 답은 잠깐만 싣는다(게임은 같은 답을 한 번만 띄운다)
+    const reply = keyReply.current;
+    if (reply && now - reply.at < KEY_REPLY_TTL_MS) flags = { ...flags, keyReply: { id: reply.id, n: reply.n, text: reply.text } };
     const settings = assistLatest.current.settings;
     const dirtyNow = [...dirtyKeys.current];
     const clearDirty = () => {
@@ -646,6 +659,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     lastCommand.current = command;
     setSentCommand(command);
     requestControlWrite({ gesture: true });
+  }, [requestControlWrite]);
+
+  const replyKeyRequest = useCallback((id: string, text: string) => {
+    keyReply.current = { id, n: ++keyReplySeq, text, at: Date.now() };
+    requestControlWrite();
   }, [requestControlWrite]);
 
   /** 기다리는 치트를 명령 하나로 묶어 보낸다(응답을 기다리는 묶음이 없을 때만). */
@@ -760,9 +778,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const assistValue = useMemo<AssistValue>(
     () => ({
       settings: assistSettings, setSettings, sendCommand, sentCommand, supported: assistSupported,
-      cheatSupported, sendCheat, cheatResults, setLiveActors,
+      cheatSupported, sendCheat, cheatResults, setLiveActors, replyKeyRequest,
     }),
-    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported, cheatSupported, sendCheat, cheatResults],
+    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported, cheatSupported, sendCheat, cheatResults, replyKeyRequest],
   );
 
   return (

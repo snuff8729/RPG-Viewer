@@ -4,6 +4,9 @@ import { noisyVariables } from "../../src/core/live/history";
 import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
 
 let h: Harness;
+/** 1.21.0 기본 단축키: F1 백업, ` 복원, [ 퀵 세이브, ] 퀵 로드, 세이브 창·로드 창 끔 */
+const SAVE_KEYS = { backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null };
+const SAVE_OFF = { backup: null, restore: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null };
 afterEach(() => { h?.bridge?._flushNow(); });
 
 // emits one story (message) record on the current branch
@@ -1008,7 +1011,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.20.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.21.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1017,7 +1020,8 @@ describe("RPGViewerBridge", () => {
       assist: {
         speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
         lastCommand: null, controlT: null, capturePictures: false, captureMenuScenes: false, captureNotices: false, notices: [], htmlNotices: false, extensions: [],
-        hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 },
+        hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS },
+        quickSlot: 20,
       },
     });
   });
@@ -1519,10 +1523,13 @@ describe("RPGViewerBridge", () => {
       h = newGame();
       const km2: Record<number, string> = { 13: "ok", 117: "otherPlugin" };
       h.g.Input.keyMapper = km2;
-      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null, ...SAVE_OFF });
       poll(h);
-      expect(km2).toEqual({ 13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose", 36: "rpgvHpFull", 35: "rpgvHpLow" });
-      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 });
+      expect(km2).toEqual({
+        13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose", 36: "rpgvHpFull", 35: "rpgvHpLow",
+        112: "rpgvBackup", 192: "rpgvRestore", 219: "rpgvQuickSave", 221: "rpgvQuickLoad",
+      });
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS });
     });
 
     it("never auto-advances a message added without a text 101 (stale seen key is dropped)", () => {
@@ -1649,7 +1656,7 @@ describe("RPGViewerBridge", () => {
       expect(km[121]).toBe("rpgvWin");
       expect(km[66]).toBe("otherPlugin"); // never overwritten
       expect(km[13]).toBe("ok");
-      expect(assistOf(h).hotkeys).toEqual({ speed: 65, skip: null, win: 121, lose: null, hpFull: 36, hpLow: 35 });
+      expect(assistOf(h).hotkeys).toEqual({ speed: 65, skip: null, win: 121, lose: null, hpFull: 36, hpLow: 35, ...SAVE_KEYS });
       onMap(h);
       h.g.Input.press(117);
       h.bridge._frame();
@@ -1658,7 +1665,7 @@ describe("RPGViewerBridge", () => {
       poll(h);
       expect(km[65]).toBeUndefined();
       expect([km[117], km[118], km[121], km[122]]).toEqual(["rpgvSpeed", "rpgvSkip", "rpgvWin", "rpgvLose"]);
-      expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 });
+      expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS });
     });
 
     describe("party HP commands (1.12.0)", () => {
@@ -1763,7 +1770,7 @@ describe("RPGViewerBridge", () => {
         writeControl(h, { hotkeys: { hpFull: 72, hpLow: 76 } });
         h.bridge._tick();
         expect([km[72], km[76]]).toEqual(["rpgvHpFull", "rpgvHpLow"]);
-        expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: 72, hpLow: 76 });
+        expect(assistOf(h).hotkeys).toEqual({ speed: 117, skip: 118, win: 121, lose: 122, hpFull: 72, hpLow: 76, ...SAVE_KEYS });
         const press = (code: number) => { h.g.Input.press(code); h.bridge._frame(); h.g.Input.update(); };
         press(76);
         expect(hpOf(ms)).toEqual([[1, true], [2, true], [0, false]]);
@@ -1801,13 +1808,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.20\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.21\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.20.0");
+    expect(h.bridge.VERSION).toBe("1.21.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

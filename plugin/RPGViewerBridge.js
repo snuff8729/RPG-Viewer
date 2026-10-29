@@ -11,7 +11,10 @@
  * 바꾸기)는 RPG Viewer에서 누를 때만, 실행 중인 게임에 바로 적용합니다.
  * 플러그인 명령이나 파라미터는 없습니다.
  * 게임 창 단축키: F6 배속(×1→×2→×4→×8), F7 본 대사 자동 넘기기,
- * 전투 중 F10 이기기, F11 지기, Home 내 체력 100%, End 내 체력 1%(맵·전투).
+ * 전투 중 F10 이기기, F11 지기, Home 내 체력 100%, End 내 체력 1%(맵·전투),
+ * F1 세이브 폴더 백업, 숫자 1 왼쪽 키(백틱) 두 번 마지막 백업으로 복원(RPG Viewer가 처리),
+ * [ 퀵 세이브, ] 두 번 퀵 로드(기본은 마지막 세이브 칸). 세이브 창·로드 창 열기는 기본 키가 없습니다.
+ * 퀵 세이브·세이브 창은 맵에서 이벤트가 없을 때만 하고, 게임이 저장을 막아 두었으면 하지 않습니다.
  * 선택지는 자동으로 고르지 않습니다.
  * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
  * 같은 명령이 매 프레임 바꾸는 값은 0.25초마다 마지막 값만 남깁니다.
@@ -49,7 +52,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.20.0",
+    VERSION: "1.21.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -83,6 +86,7 @@
   var LIVE_TMP = path.join(DIR, "live.json.tmp");
   var META = path.join(DIR, "meta.json");
   var CONTROL = path.join(DIR, "control.json");
+  var REQUEST = path.join(DIR, "request.json"); // 1.21.0: backup / restore asked by a game window hotkey (the viewer does it)
   var MAX_BUFFER = 5000;
 
   // ---------------------------------------------------------------- state
@@ -107,15 +111,30 @@
   // game assist (control.json from the viewer, hotkeys in game)
   var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
   var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
-  var COMMAND_KINDS = { win: true, lose: true, escape: true, hpFull: true, hpLow: true, cheat: true };
+  var COMMAND_KINDS = {
+    win: true, lose: true, escape: true, hpFull: true, hpLow: true, cheat: true,
+    saveMenu: true, loadMenu: true, quickSave: true, quickLoad: true
+  };
+  // save / load commands (1.21.0): on the map (loading also on the title), never tied to a battle
+  var SCENE_COMMANDS = { saveMenu: true, loadMenu: true, quickSave: true, quickLoad: true };
   // party HP commands (1.12.0): work on the map and in battle
   var PARTY_COMMANDS = { hpFull: true, hpLow: true };
   var CONTROL_POLL_MS = 1000, COMMAND_MAX_AGE_MS = 10000, AUTO_ADVANCE_UPDATES = 6, MAX_SPEED = 8;
   var KEY_SPEED = "rpgvSpeed", KEY_SKIP = "rpgvSkip", KEY_WIN = "rpgvWin", KEY_LOSE = "rpgvLose";
   var KEY_HP_FULL = "rpgvHpFull", KEY_HP_LOW = "rpgvHpLow";
-  var HOTKEY_NAMES = ["speed", "skip", "win", "lose", "hpFull", "hpLow"];
-  var HOTKEY_BUTTONS = { speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW };
-  var HOTKEY_DEFAULTS = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 }; // F6 F7 F10 F11, Home End (HP keys on by default since 1.20.0)
+  var KEY_BACKUP = "rpgvBackup", KEY_RESTORE = "rpgvRestore", KEY_QUICK_SAVE = "rpgvQuickSave", KEY_QUICK_LOAD = "rpgvQuickLoad";
+  var KEY_SAVE_MENU = "rpgvSaveMenu", KEY_LOAD_MENU = "rpgvLoadMenu";
+  var HOTKEY_NAMES = ["speed", "skip", "win", "lose", "hpFull", "hpLow", "backup", "restore", "quickSave", "quickLoad", "saveMenu", "loadMenu"];
+  var HOTKEY_BUTTONS = {
+    speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
+    backup: KEY_BACKUP, restore: KEY_RESTORE, quickSave: KEY_QUICK_SAVE, quickLoad: KEY_QUICK_LOAD,
+    saveMenu: KEY_SAVE_MENU, loadMenu: KEY_LOAD_MENU
+  };
+  // F6 F7 F10 F11, Home End (HP keys since 1.20.0); 1.21.0: F1 backup, backquote (192) restore, [ quick save, ] quick load, menus off
+  var HOTKEY_DEFAULTS = {
+    speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35,
+    backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null
+  };
   // keyCodes the engine itself uses (default Input.keyMapper, F2-F5, F8, F9): never offered as hotkeys
   var RESERVED_KEYS = {
     9: true, 13: true, 16: true, 17: true, 18: true, 27: true, 32: true, 33: true, 34: true,
@@ -123,7 +142,17 @@
     96: true, 98: true, 100: true, 102: true, 104: true,
     113: true, 114: true, 115: true, 116: true, 119: true, 120: true
   };
-  var hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 }; // wanted bindings (null = disabled)
+  var hotkeys = {}; // wanted bindings (null = disabled)
+  for (var hki = 0; hki < HOTKEY_NAMES.length; hki++) hotkeys[HOTKEY_NAMES[hki]] = HOTKEY_DEFAULTS[HOTKEY_NAMES[hki]];
+  // 1.21.0 save / load / backup: in-game messages, confirm presses, the request to the viewer
+  var CONFIRM_MS = 2000, REPLY_WAIT_MS = 5000, SCENE_WAIT_MS = 1000, LOAD_WAIT_MS = 5000, MESSAGE_MS = 2500, MESSAGE_MAX = 120;
+  var armed = { kind: null, t: -Infinity }; // first press of a key that needs a second one (restore, quick load)
+  var keyRequest = null;      // { id, kind, at, replied, timedOut } last backup / restore request written to request.json
+  var requestSeq = 0;
+  var quickSlot = null;       // control.json "quickSlot" (null = the last save slot)
+  var sceneAction = null;     // { id (command id or null for a key), kind, t } waiting for a safe moment
+  var pendingLoad = null;     // { scene (the Scene_Load pushed), slot, id, t } quick load waiting for its load scene
+  var messageEl = null, messageTimer = null;
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
   var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
   var seenMessages = Object.create(null), seenPages = Object.create(null);
@@ -690,7 +719,8 @@
         notices: noticeHooked.slice(),
         htmlNotices: htmlWatch !== null,
         extensions: bridge.extensions(),
-        hotkeys: effectiveHotkeys()
+        hotkeys: effectiveHotkeys(),
+        quickSlot: safeQuickSlot()
       }
     };
     if (liveActors) snap.actors = actorDetails();
@@ -1046,6 +1076,15 @@
       hotkeys = hk;
       applyKeyMap();
     }
+    quickSlot = isInt(c.quickSlot, 1, 999) ? c.quickSlot : null;
+    // 1.21.0: the viewer's answers to our backup / restore request { id, n, text } (each n shown once)
+    var kr = c.keyReply;
+    if (kr && typeof kr === "object" && keyRequest && kr.id === keyRequest.id && typeof kr.text === "string" &&
+        typeof kr.n === "number" && kr.n !== keyRequest.replyN) {
+      keyRequest.replied = true;
+      keyRequest.replyN = kr.n;
+      showMessage(kr.text);
+    }
     var cmd = c.command;
     if (cmd && typeof cmd === "object" && typeof cmd.id === "string" && cmd.id && cmd.id !== lastCommandId && COMMAND_KINDS[cmd.kind] === true) {
       lastCommandId = cmd.id; // at most once, even when stale
@@ -1062,7 +1101,7 @@
   // Issued within the last 10 s and (battle commands) not before the current battle started.
   function commandFresh(at, kind) {
     if (typeof at !== "number" || !isFinite(at) || now() - at > COMMAND_MAX_AGE_MS) return false;
-    return PARTY_COMMANDS[kind] === true || kind === "cheat" || at >= battleStartT;
+    return PARTY_COMMANDS[kind] === true || SCENE_COMMANDS[kind] === true || kind === "cheat" || at >= battleStartT;
   }
 
   // mtime:size of control.json (null when stat gives no usable mtime).
@@ -1274,6 +1313,12 @@
     var c = pendingCommand;
     if (!c) return;
     if (PARTY_COMMANDS[c.kind] === true) { runPendingPartyCommand(c); return; }
+    if (SCENE_COMMANDS[c.kind] === true) {
+      pendingCommand = null;
+      if (!commandFresh(c.t, c.kind) || sceneAction || pendingLoad) { lastCommand = c.id + ":ignored"; return; }
+      sceneAction = { id: c.id, kind: c.kind, t: now() };
+      return;
+    }
     if (c.kind === "cheat") { runCheatCommand(c); return; }
     var BM = G.BattleManager;
     if (!commandFresh(c.t, c.kind) || !inBattleNow() || !BM || battleEnding(BM) || (c.kind === "escape" && !canEscapeNow())) {
@@ -1309,6 +1354,246 @@
     if (I.isTriggered(KEY_LOSE)) hotkeyCommand("lose");
     if (I.isTriggered(KEY_HP_FULL)) hotkeyCommand("hpFull");
     if (I.isTriggered(KEY_HP_LOW)) hotkeyCommand("hpLow");
+    if (I.isTriggered(KEY_BACKUP)) requestViewer("backup");
+    if (I.isTriggered(KEY_RESTORE) && confirmPress("restore", "한 번 더 누르면 마지막 백업으로 되돌려요")) requestViewer("restore");
+    if (I.isTriggered(KEY_QUICK_SAVE)) hotkeyScene("quickSave");
+    if (I.isTriggered(KEY_QUICK_LOAD)) {
+      var slot = quickSlotId();
+      if (slot !== null && !slotExists(slot)) { armed.kind = null; showMessage("퀵 세이브(" + slot + "번 칸)가 아직 없어요"); }
+      else if (confirmPress("quickLoad", "한 번 더 누르면 퀵 세이브" + (slot !== null ? "(" + slot + "번 칸)" : "") + "를 불러와요")) hotkeyScene("quickLoad");
+    }
+    if (I.isTriggered(KEY_SAVE_MENU)) hotkeyScene("saveMenu");
+    if (I.isTriggered(KEY_LOAD_MENU)) hotkeyScene("loadMenu");
+  }
+
+  // ---------------------------------------------------------------- save / load / backup (1.21.0)
+  // A short text over the game screen (an HTML box; the HTML notice watcher skips it). Tests read bridge._lastMessage.
+  function showMessage(text) {
+    text = String(text).slice(0, MESSAGE_MAX);
+    bridge._lastMessage = text;
+    var doc = G.document;
+    if (!doc || !doc.body || typeof doc.createElement !== "function") return;
+    if (!messageEl || !messageEl.parentNode) {
+      messageEl = doc.createElement("div");
+      messageEl.id = "rpgvBridgeMessage";
+      messageEl.__rpgvNotice = true;
+      messageEl.style.cssText = "position:fixed;left:50%;top:24px;transform:translateX(-50%);z-index:1000;" +
+        "padding:8px 16px;border-radius:6px;background:rgba(0,0,0,0.75);color:#fff;font:18px sans-serif;" +
+        "white-space:nowrap;pointer-events:none;";
+      doc.body.appendChild(messageEl);
+    }
+    messageEl.textContent = text;
+    messageEl.style.display = "block";
+    if (typeof setTimeout !== "function") return;
+    if (messageTimer !== null && typeof clearTimeout === "function") clearTimeout(messageTimer);
+    messageTimer = setTimeout(function () {
+      messageTimer = null;
+      if (messageEl) messageEl.style.display = "none";
+    }, MESSAGE_MS);
+  }
+
+  // Keys that change saves for good need a second press within CONFIRM_MS; the first one shows the prompt.
+  function confirmPress(kind, prompt) {
+    var t = now();
+    if (armed.kind === kind && t - armed.t <= CONFIRM_MS) {
+      armed.kind = null;
+      return true;
+    }
+    armed.kind = kind;
+    armed.t = t;
+    showMessage(prompt);
+    return false;
+  }
+
+  // Backup / restore run in the viewer (it owns the backups and restarts the game): write rpg-viewer/request.json
+  // { v, id, kind, at }; the viewer does it once per id (fresh requests only) and answers in control.json keyReply.
+  function requestViewer(kind) {
+    var t = now();
+    var id = "k-" + t + "-" + (++requestSeq);
+    keyRequest = { id: id, kind: kind, at: t, replied: false, replyN: null, timedOut: false };
+    try {
+      ensureDir();
+      fs.writeFileSync(REQUEST, JSON.stringify({ v: 1, id: id, kind: kind, at: t }));
+    } catch (e) {
+      keyRequest = null;
+      reportError(e);
+      showMessage("RPG Viewer에 요청하지 못했어요");
+      return;
+    }
+    showMessage(kind === "backup" ? "백업 요청했어요…" : "마지막 백업으로 되돌리는 중…");
+  }
+
+  function checkKeyRequest() {
+    var r = keyRequest;
+    if (!r || r.replied || r.timedOut || now() - r.at < REPLY_WAIT_MS) return;
+    r.timedOut = true;
+    showMessage("RPG Viewer가 응답하지 않아요 (뷰어가 켜져 있는지 확인해 주세요)");
+  }
+
+  function isMZ() {
+    var U = G.Utils;
+    if (U && typeof U.RPGMAKER_NAME === "string") return U.RPGMAKER_NAME === "MZ";
+    return !!(G.DataManager && typeof G.DataManager.savefileExists === "function");
+  }
+
+  // The quick save slot: control.json quickSlot when it is a real slot, else the last one (MV 1..max, MZ 1..max-1; 0 = MZ autosave).
+  function quickSlotId() {
+    var DM = G.DataManager;
+    var max = DM && typeof DM.maxSavefiles === "function" ? DM.maxSavefiles() : 20;
+    var last = isMZ() ? max - 1 : max;
+    if (!isInt(last, 1, 9999)) return null;
+    return quickSlot !== null && quickSlot <= last ? quickSlot : last;
+  }
+
+  function safeQuickSlot() {
+    try { return quickSlotId(); } catch (e) { reportError(e); return null; }
+  }
+
+  function slotExists(id) {
+    var DM = G.DataManager;
+    try {
+      if (DM && typeof DM.savefileExists === "function") return !!DM.savefileExists(id);
+      if (DM && typeof DM.isThisGameFile === "function") return !!DM.isThisGameFile(id);
+    } catch (e) { reportError(e); }
+    return true; // cannot tell: let the load itself fail
+  }
+
+  function hotkeyScene(kind) {
+    if (sceneAction || pendingLoad) return;
+    sceneAction = { id: null, kind: kind, t: now() };
+  }
+
+  function isLoadKind(kind) { return kind === "loadMenu" || kind === "quickLoad"; }
+
+  // Why this save / load can't run now: null = go, "wait" = a moment (scene changing, player mid-step), else the text to show.
+  function sceneBlock(kind) {
+    var SM = G.SceneManager;
+    var s = SM && SM._scene;
+    if (!s || SM._nextScene || (typeof SM.isSceneChanging === "function" && SM.isSceneChanging())) return "wait";
+    var onMap = !!(G.Scene_Map && s instanceof G.Scene_Map);
+    var onTitle = !!(G.Scene_Title && s instanceof G.Scene_Title);
+    var load = isLoadKind(kind);
+    if (onTitle && load) return null;
+    if (!onMap) return load ? "맵이나 타이틀 화면에서만 불러올 수 있어요" : "맵에서만 저장할 수 있어요";
+    if (inBattleNow()) return "전투 중에는 할 수 없어요";
+    var map = G.$gameMap;
+    if ((map && typeof map.isEventRunning === "function" && map.isEventRunning()) || messageBusy()) {
+      return "이벤트가 끝난 뒤에 다시 눌러 주세요";
+    }
+    if (typeof s.isBusy === "function" && s.isBusy()) return "wait";
+    var pl = G.$gamePlayer;
+    if (pl && typeof pl.isMoving === "function" && pl.isMoving()) return "wait";
+    var sys = G.$gameSystem;
+    if (!load && sys && typeof sys.isSaveEnabled === "function" && !sys.isSaveEnabled()) return "이 게임이 지금은 저장을 막아 두었어요";
+    return null;
+  }
+
+  function sceneDone(a, result) {
+    if (a.id) lastCommand = a.id + (result ? ":" + result : "");
+  }
+
+  // Runs a waiting save / load once it is safe (waits up to SCENE_WAIT_MS for a scene change / a step to finish).
+  function runSceneAction() {
+    var a = sceneAction;
+    if (!a) return;
+    var why = sceneBlock(a.kind);
+    if (why === "wait") {
+      if (now() - a.t < SCENE_WAIT_MS) return;
+      why = "지금은 할 수 없어요. 잠시 뒤에 다시 눌러 주세요";
+    }
+    sceneAction = null;
+    if (why !== null) { showMessage(why); sceneDone(a, "ignored"); return; }
+    try {
+      doSceneAction(a);
+    } catch (e) {
+      reportError(e);
+      showMessage(a.kind === "quickSave" ? "퀵 세이브하지 못했어요" : "하지 못했어요");
+      sceneDone(a, "failed");
+    }
+  }
+
+  function doSceneAction(a) {
+    var SM = G.SceneManager, DM = G.DataManager;
+    if (a.kind === "saveMenu" || a.kind === "loadMenu") {
+      var cls = a.kind === "saveMenu" ? G.Scene_Save : G.Scene_Load;
+      if (typeof cls !== "function" || typeof SM.push !== "function") throw new Error("no " + a.kind + " scene");
+      SM.push(cls);
+      sceneDone(a, null);
+      return;
+    }
+    var slot = quickSlotId();
+    if (slot === null) throw new Error("no save slot");
+    if (a.kind === "quickSave") {
+      // like Scene_Save: MZ executeSave (setSavefileId, onBeforeSave, promise) / MV onSavefileOk (onBeforeSave, boolean)
+      var sys = G.$gameSystem;
+      if (sys && typeof sys.setSavefileId === "function") sys.setSavefileId(slot);
+      if (sys && typeof sys.onBeforeSave === "function") sys.onBeforeSave();
+      var done = function (ok) {
+        if (ok) {
+          try {
+            if (G.SoundManager && typeof G.SoundManager.playSave === "function") G.SoundManager.playSave();
+            var SMg = G.StorageManager;
+            if (!isMZ() && SMg && typeof SMg.cleanBackup === "function") SMg.cleanBackup(slot);
+          } catch (e) { reportError(e); }
+        }
+        showMessage(ok ? "퀵 세이브했어요 (" + slot + "번 칸)" : "퀵 세이브하지 못했어요");
+        sceneDone(a, ok ? null : "failed");
+      };
+      var r = DM.saveGame(slot);
+      if (r && typeof r.then === "function") r.then(function () { done(true); }, function (e) { reportError(e); done(false); });
+      else done(!!r);
+      return;
+    }
+    // quickLoad: through the engine's own load scene (Scene_Load), so the map scene never runs on loaded objects
+    if (!slotExists(slot)) { showMessage("퀵 세이브(" + slot + "번 칸)가 아직 없어요"); sceneDone(a, "ignored"); return; }
+    if (typeof G.Scene_Load !== "function" || typeof SM.push !== "function") throw new Error("no load scene");
+    SM.push(G.Scene_Load);
+    pendingLoad = { scene: SM._nextScene || null, slot: slot, id: a.id, t: now() };
+  }
+
+  // The pushed Scene_Load is up: load the slot like Scene_Load does (MZ executeLoad / MV onSavefileOk).
+  function runPendingLoad() {
+    var p = pendingLoad;
+    if (!p) return;
+    var SM = G.SceneManager;
+    var s = SM && SM._scene;
+    var ready = s && (p.scene ? s === p.scene : (G.Scene_Load && s instanceof G.Scene_Load)) && !SM._nextScene &&
+      (typeof s.isActive !== "function" || s.isActive()) && (typeof s.isBusy !== "function" || !s.isBusy());
+    if (!ready) {
+      if (now() - p.t >= LOAD_WAIT_MS) {
+        pendingLoad = null;
+        showMessage("퀵 로드하지 못했어요");
+        sceneDone(p, "failed");
+      }
+      return;
+    }
+    pendingLoad = null;
+    var ok = function () {
+      try {
+        s.onLoadSuccess();
+      } catch (e) {
+        reportError(e);
+        showMessage("퀵 로드하지 못했어요");
+        sceneDone(p, "failed");
+        return;
+      }
+      showMessage("퀵 로드했어요 (" + p.slot + "번 칸)");
+      sceneDone(p, null);
+    };
+    var fail = function (e) {
+      if (e) reportError(e);
+      try { if (typeof s.onLoadFailure === "function") s.onLoadFailure(); } catch (e2) { reportError(e2); }
+      showMessage("퀵 로드하지 못했어요");
+      sceneDone(p, "failed");
+    };
+    var r = G.DataManager.loadGame(p.slot);
+    if (r && typeof r.then === "function") {
+      r.then(ok, fail);
+    } else if (r) {
+      ok();
+    } else {
+      fail(null);
+    }
   }
 
   // Extra scene updates only on the map / in battle (menus stay at normal speed) and never
@@ -1323,6 +1608,9 @@
   function frameStart(sm) {
     try { pollHotkeys(); } catch (e) { reportError(e); }
     try { runPendingCommand(); } catch (e2) { pendingCommand = null; reportError(e2); }
+    try { runSceneAction(); } catch (e5) { sceneAction = null; reportError(e5); }
+    try { runPendingLoad(); } catch (e6) { pendingLoad = null; reportError(e6); }
+    try { checkKeyRequest(); } catch (e7) { reportError(e7); }
     try { effectiveSpeed = computeSpeed(); } catch (e3) { effectiveSpeed = assist.speed; reportError(e3); }
     var again = false;
     try { again = repeatable(sm); } catch (e4) { reportError(e4); }
@@ -2408,7 +2696,7 @@
   var HTML_DUP_MS = 2000, HTML_RATE_MAX = 10, HTML_RATE_MS = 1000, HTML_REPEAT_MS = 300000, HTML_KEYS_MAX = 300;
   var HTML_MARKUP_MAX = 5000, HTML_TEXT_MAX = 300, HTML_DEPTH_MAX = 40;
   var HTML_SKIP_TAGS = { CANVAS: true, VIDEO: true, AUDIO: true, SCRIPT: true, STYLE: true, IFRAME: true, LINK: true, META: true, TEXTAREA: true, INPUT: true, SELECT: true };
-  var HTML_SKIP_ID_RE = /^(ErrorPrinter|errorPrinter|fpsCounterBox|FPSMeter|fpsmeter|loadingSpinner|modeTextBox|GameCanvas|GameVideo|UpperCanvas)/;
+  var HTML_SKIP_ID_RE = /^(rpgvBridgeMessage|ErrorPrinter|errorPrinter|fpsCounterBox|FPSMeter|fpsmeter|loadingSpinner|modeTextBox|GameCanvas|GameVideo|UpperCanvas)/;
   var HTML_LETTER_RE = /[A-Za-zÀ-῿぀-ヿ㐀-鿿가-힯豈-﫿]/;
 
   // env: { body, observe(callback) -> stop function, now(), isVisible(el), record(text) } (injectable for tests)

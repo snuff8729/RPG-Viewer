@@ -27,6 +27,7 @@ import { CheatSheet } from "@/ui/live/cheat/CheatSheet";
 import { LaunchButton } from "@/ui/live/LaunchButton";
 import { PinGameButton } from "@/ui/PinGameButton";
 import { BackupButton } from "@/ui/live/BackupButton";
+import { BackupHotkeys } from "@/ui/live/BackupHotkeys";
 import { ShareButton } from "@/ui/live/ShareButton";
 import { useShareFollowsGame } from "@/ui/live/useShareFollowsGame";
 import { isRemoteView } from "@/app/share";
@@ -189,6 +190,8 @@ export default function App() {
       <GameProvider>
         <AddonsProvider>
           <LiveProvider>
+            {/* 게임 창 단축키의 백업·복원(PC만, 화면에 그리지 않음) */}
+            <BackupHotkeys />
             <DiagnosisProvider>
               <Shell />
             </DiagnosisProvider>

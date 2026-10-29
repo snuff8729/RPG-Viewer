@@ -9,28 +9,53 @@ import { cheatOpsForControl, type CheatOp } from "./cheat";
  * 게임 보조 설정(뷰어 → 게임, rpg-viewer/control.json).
  * autoFast·autoSpeed: 모든 대사·선택지를 본 이벤트가 도는 동안의 자동 배속(전투는 자동 배속하지 않는다).
  */
-export interface AssistSettings { speed: 1 | 2 | 4 | 8; skipSeen: boolean; autoFast: boolean; autoSpeed: 2 | 4 | 8; hotkeys: Hotkeys }
-/** 게임 창 단축키 동작 */
-export type HotkeyAction = "speed" | "skip" | "win" | "lose" | "hpFull" | "hpLow";
+export interface AssistSettings {
+  speed: 1 | 2 | 4 | 8; skipSeen: boolean; autoFast: boolean; autoSpeed: 2 | 4 | 8; hotkeys: Hotkeys;
+  /** 퀵 세이브·퀵 로드 칸(1~). null = 게임의 마지막 세이브 칸(플러그인 1.21.0) */
+  quickSlot: number | null;
+}
+/**
+ * 게임 창 단축키 동작. backup·restore(플러그인 1.21.0)는 뷰어가 처리한다(게임 → rpg-viewer/request.json).
+ * quickSave·quickLoad·saveMenu·loadMenu(1.21.0)는 게임 안에서 처리한다.
+ */
+export type HotkeyAction =
+  | "speed" | "skip" | "win" | "lose" | "hpFull" | "hpLow"
+  | "backup" | "restore" | "quickSave" | "quickLoad" | "saveMenu" | "loadMenu";
 /** 동작별 DOM keyCode. null = 끔. */
 export type Hotkeys = Record<HotkeyAction, number | null>;
 /** win·lose·escape: 전투 중만. hpFull·hpLow(플러그인 1.12.0): 파티 체력 100%(쓰러진 동료도 살림)·1%, 맵과 전투 모두. */
 /** cheat(플러그인 1.14.0): ops를 실은 치트 명령(core/live/cheat) */
-export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow" | "cheat";
+/** saveMenu·loadMenu·quickSave·quickLoad(플러그인 1.21.0): 세이브 창·로드 창 열기, 퀵 세이브·퀵 로드(맵, 불러오기는 타이틀에서도) */
+export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow" | "cheat" | "saveMenu" | "loadMenu" | "quickSave" | "quickLoad";
 /** at = 사용자가 누른 시각(ms), ops: kind가 cheat일 때만 */
 export interface AssistCommand { id: string; kind: AssistCommandKind; at: number; ops?: CheatOp[] }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
 
-/** F6 배속, F7 본 대사 넘기기, F10·F11 전투 이기기·지기, Home·End 내 체력 100%·1%(체력 키는 플러그인 1.20.0부터 기본) */
-export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 };
-/** 1.20.0 전의 기본값(체력 단축키 없음). 단축키를 보고하지 않거나 체력 단축키를 보고하지 않는 플러그인은 이것이 고정이다. */
-export const LEGACY_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null };
 /**
- * 저장하는 단축키 묶음(localStorage·control.json)의 판 표시 `v`. 이 표시가 없는 묶음은 예전 뷰어가 쓴 것이라,
- * 체력 단축키 둘 다 null이면 예전 기본값(끔)을 그대로 둔 것으로 보고 새 기본값을 준다. 플러그인은 `v`를 무시한다.
+ * F6 배속, F7 본 대사 넘기기, F10·F11 전투 이기기·지기, Home·End 내 체력 100%·1%(플러그인 1.20.0부터 기본),
+ * F1 백업, `(숫자 1 왼쪽) 마지막 백업으로 복원, [ 퀵 세이브, ] 퀵 로드(1.21.0부터 기본). 세이브 창·로드 창 열기는 기본 키 없음.
  */
-export const HOTKEYS_VERSION = 2;
-export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS };
+export const DEFAULT_HOTKEYS: Hotkeys = {
+  speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35,
+  backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null,
+};
+/**
+ * 1.20.0 전의 기본값(체력·세이브 단축키 없음). 단축키를 보고하지 않는 플러그인은 이것이 고정이고,
+ * 어떤 동작을 보고하지 않는 플러그인에는 그 단축키가 없다.
+ */
+export const LEGACY_HOTKEYS: Hotkeys = {
+  speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null,
+  backup: null, restore: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null,
+};
+/**
+ * 저장하는 단축키 묶음(localStorage·control.json)의 판 표시 `v`. 플러그인은 `v`를 무시한다.
+ * - 표시가 없는 묶음(2 전)은 예전 뷰어가 쓴 것이라, 체력 단축키 둘 다 null이면 예전 기본값(끔)을 그대로 둔 것으로 보고 새 기본값을 준다.
+ * - 3(1.21.0): 백업·복원·퀵 세이브·퀵 로드·세이브 창·로드 창. 예전 묶음에는 이 필드가 없어서 기본값을 받는다(겹치는 키는 끔).
+ */
+export const HOTKEYS_VERSION = 3;
+/** 체력 단축키 옮기기는 이 판 전의 묶음에만 */
+const HP_KEYS_VERSION = 2;
+export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null };
 /** 단축키 동작(표시 순서)과 이름. short는 하단 안내 줄에 쓴다. */
 export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; label: string; short: string }[] = [
   { action: "speed", label: "배속 바꾸기", short: "배속" },
@@ -39,6 +64,12 @@ export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; label: string; sho
   { action: "lose", label: "전투 지기", short: "전투 중 지기" },
   { action: "hpFull", label: "내 체력 100%", short: "체력 100%" },
   { action: "hpLow", label: "내 체력 1%", short: "체력 1%" },
+  { action: "backup", label: "세이브 백업", short: "백업" },
+  { action: "restore", label: "마지막 백업으로 복원(두 번)", short: "두 번 마지막 백업으로 복원" },
+  { action: "quickSave", label: "퀵 세이브", short: "퀵 세이브" },
+  { action: "quickLoad", label: "퀵 로드(두 번)", short: "두 번 퀵 로드" },
+  { action: "saveMenu", label: "세이브 창 열기", short: "세이브 창" },
+  { action: "loadMenu", label: "로드 창 열기", short: "로드 창" },
 ];
 /** 게임이 이미 쓰는 keyCode(Tab·Enter·Shift·Ctrl·Alt·Esc·Space·PgUp/Dn·방향키·Ins·Q·W·X·Z·숫자패드 방향·F2~F5·F8·F9) */
 export const RESERVED_KEYCODES: ReadonlySet<number> = new Set([
@@ -50,7 +81,15 @@ export const AUTO_SPEEDS = [2, 4, 8] as const;
 export const ASSIST_MIN_VERSION = "1.1.0";
 /** 체력 명령(hpFull·hpLow) 지원 플러그인 최소 버전 */
 export const HP_COMMAND_MIN_VERSION = "1.12.0";
-const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>(["win", "lose", "escape", "hpFull", "hpLow", "cheat"]);
+/** 세이브·로드 명령(saveMenu·loadMenu·quickSave·quickLoad)과 그 단축키, 백업·복원 단축키를 지원하는 플러그인 최소 버전 */
+export const SAVE_COMMAND_MIN_VERSION = "1.21.0";
+const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>([
+  "win", "lose", "escape", "hpFull", "hpLow", "cheat", "saveMenu", "loadMenu", "quickSave", "quickLoad",
+]);
+/** 세이브·로드 명령인가 */
+export const isSaveCommand = (kind: unknown): boolean => kind === "saveMenu" || kind === "loadMenu" || kind === "quickSave" || kind === "quickLoad";
+/** 퀵 세이브 칸으로 받을 수 있는 수(플러그인도 1~999만 받고, 게임의 칸 수보다 크면 마지막 칸을 쓴다) */
+export const isQuickSlot = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 999;
 /** 파티 체력 명령인가(맵·전투 모두에서 쓴다) */
 export const isHpCommand = (kind: unknown): boolean => kind === "hpFull" || kind === "hpLow";
 
@@ -65,6 +104,11 @@ const isKeyCode = (v: unknown): v is number => typeof v === "number" && Number.i
 /** 단축키로 쓸 수 없는 잠금 키(NumLock·ScrollLock) — 플러그인도 거절한다 */
 const LOCK_KEYCODES: ReadonlySet<number> = new Set([144, 145]);
 
+/** 문장 부호 키(US·한국어 배열) */
+const PUNCT_LABELS: Readonly<Record<number, string>> = {
+  186: ";", 187: "=", 188: ",", 189: "-", 190: ".", 191: "/", 192: "`(숫자 1 왼쪽)", 219: "[", 220: "\\", 221: "]", 222: "'",
+};
+
 /** keyCode → 사람이 읽는 이름(F1~F12, 글자, 숫자, Num 0~9, 그 밖에는 `키 {code}`). */
 export function keyLabel(code: number): string {
   if (code >= 112 && code <= 123) return `F${code - 111}`;
@@ -73,6 +117,8 @@ export function keyLabel(code: number): string {
   if (code === 36) return "Home";
   if (code === 35) return "End";
   if (code === 46) return "Delete";
+  const punct = PUNCT_LABELS[code];
+  if (punct !== undefined) return punct;
   return `키 ${code}`;
 }
 
@@ -97,7 +143,7 @@ export function validateHotkey(code: number | null, action: HotkeyAction, hotkey
 export function migrateSavedAssist(v: unknown): unknown {
   if (!isObj(v) || !isObj(v.hotkeys)) return v;
   const h = v.hotkeys;
-  if (typeof h.v === "number" && h.v >= HOTKEYS_VERSION) return v;
+  if (typeof h.v === "number" && h.v >= HP_KEYS_VERSION) return v;
   if (h.hpFull !== null || h.hpLow !== null) return v;
   const { hpFull: _f, hpLow: _l, ...rest } = h;
   return { ...v, hotkeys: rest };
@@ -106,7 +152,8 @@ export function migrateSavedAssist(v: unknown): unknown {
 /** 저장된 단축키(무엇이든) → 올바른 단축키. 없는 필드는 기본값, 잘못됐거나 겹치는 키는 기본값(그것도 겹치면 끔). */
 export function normalizeHotkeys(v: unknown): Hotkeys {
   const o = isObj(v) ? v : {};
-  const out: Hotkeys = { speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null };
+  const out: Hotkeys = { ...LEGACY_HOTKEYS };
+  for (const { action } of HOTKEY_ACTIONS) out[action] = null;
   for (const { action } of HOTKEY_ACTIONS) {
     const raw: unknown = o[action];
     const want = raw === null ? null : isKeyCode(raw) ? raw : DEFAULT_HOTKEYS[action];
@@ -128,7 +175,9 @@ export function liveHotkeys(assist: unknown): Hotkeys {
   const h = isObj(assist) && isObj(assist.hotkeys) ? assist.hotkeys : null;
   if (!h) return LEGACY_HOTKEYS;
   const pick = (a: HotkeyAction): number | null => (h[a] === null ? null : isKeyCode(h[a]) ? h[a] : LEGACY_HOTKEYS[a]);
-  return { speed: pick("speed"), skip: pick("skip"), win: pick("win"), lose: pick("lose"), hpFull: pick("hpFull"), hpLow: pick("hpLow") };
+  const out: Hotkeys = { ...LEGACY_HOTKEYS };
+  for (const { action } of HOTKEY_ACTIONS) out[action] = pick(action);
+  return out;
 }
 
 /** 하단 안내 줄: "게임 창 단축키: F6 배속, F7 본 대사 넘기기, …". 모두 끄면 그렇게 말한다. */
@@ -152,6 +201,7 @@ export function normalizeAssist(v: unknown): AssistSettings {
     autoFast: typeof o.autoFast === "boolean" ? o.autoFast : DEFAULT_ASSIST.autoFast,
     autoSpeed: isAutoSpeed(o.autoSpeed) ? o.autoSpeed : DEFAULT_ASSIST.autoSpeed,
     hotkeys: normalizeHotkeys(o.hotkeys),
+    quickSlot: isQuickSlot(o.quickSlot) ? o.quickSlot : null,
   };
 }
 
@@ -222,12 +272,13 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
     ...(isObj(flags) ? flags : {}),
     v: 1, t: Number.isFinite(now) ? now : 0,
     speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: hotkeysForSave(n.hotkeys),
+    quickSlot: n.quickSlot,
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
     command: cmd,
   });
 }
 
-const CONTROL_KEYS = new Set(["v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "seenMessages", "seenPages", "command"]);
+const CONTROL_KEYS = new Set(["v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "seenMessages", "seenPages", "command"]);
 
 /**
  * 디스크의 control.json(다른 뷰어가 썼을 수도 있다: PC와 휴대폰이 같은 파일을 쓴다).
@@ -257,7 +308,7 @@ export function parseControlFile(text: string | null | undefined): ControlFile |
 
 /** 설정 하나하나(배속·본 대사 넘기기·자동 배속·자동 배속 값·단축키) */
 export type AssistKey = keyof AssistSettings;
-const ASSIST_KEYS: readonly AssistKey[] = ["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys"];
+const ASSIST_KEYS: readonly AssistKey[] = ["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot"];
 
 /** a와 b에서 값이 다른 설정 키들 */
 export function changedAssistKeys(a: AssistSettings, b: AssistSettings): AssistKey[] {
@@ -337,6 +388,7 @@ export const COMMAND_STATUS_TEXT: Record<CommandStatus, string> = {
 /** 명령 종류에 맞춘 상태 문구: 체력 명령의 무시는 전투와 상관없다. */
 export function commandStatusText(status: CommandStatus, kind: unknown): string {
   if (status === "ignored" && isHpCommand(kind)) return "게임에서 무시했어요 (파티가 없어요)";
+  if (status === "ignored" && isSaveCommand(kind)) return "지금은 할 수 없어요 (게임 화면의 안내를 보세요)";
   return COMMAND_STATUS_TEXT[status];
 }
 
