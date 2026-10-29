@@ -121,6 +121,19 @@ export function nextWatch(state: WatchState, signature: string, now: number, min
 
 export const KIND_LABEL: Record<BackupKind, string> = { manual: "수동", auto: "자동", safety: "복원 전" };
 
+/**
+ * 단축키 복원이 되돌릴 "마지막 백업": 가장 최근의 직접·자동 백업(빈 백업과 「복원 전」 백업은 뺀다 —
+ * 「복원 전」을 넣으면 복원을 두 번 누를 때 방금 한 복원을 되돌리게 된다). 없으면 null.
+ */
+export function latestRestorable(backups: readonly BackupMeta[]): BackupMeta | null {
+  let best: BackupMeta | null = null;
+  for (const b of backups) {
+    if (b.kind === "safety" || isEmptyBackup(b)) continue;
+    if (!best || b.createdAt > best.createdAt) best = b;
+  }
+  return best;
+}
+
 /** 파일이 하나도 없는 백업(세이브 폴더를 못 찾던 때 만든 것 등). */
 export function isEmptyBackup(b: Pick<BackupMeta, "fileCount">): boolean {
   return b.fileCount === 0;

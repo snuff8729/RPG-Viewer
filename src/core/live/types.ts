@@ -140,6 +140,8 @@ export interface LiveAssist {
   canEscape?: boolean;
   /** 지금 전투에서 져도 게임 오버가 아닌가(전투 중일 때만 의미) */
   canLose?: boolean;
+  /** 퀵 세이브·퀵 로드가 쓰는 세이브 칸(플러그인 1.21.0+, 정할 수 없으면 null) */
+  quickSlot?: number | null;
 }
 
 export interface BranchInfo {

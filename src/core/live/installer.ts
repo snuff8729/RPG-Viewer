@@ -5,7 +5,10 @@ const UNSUPPORTED = "이 게임은 자동 설치를 지원하지 않아요";
 const NO_WRITE = "쓰기 권한이 필요해요";
 
 export interface PluginEntry { name: string; status: boolean; description: string; parameters: Record<string, string> }
-export interface LivePaths { base: string; pluginsJs: string; pluginFile: string; logDir: string; logFile: string; liveFile: string; controlFile: string; backupFile: string }
+export interface LivePaths { base: string; pluginsJs: string; pluginFile: string; logDir: string; logFile: string; liveFile: string; controlFile: string; backupFile: string;
+  /** 게임 창 단축키의 백업·복원 요청(플러그인 1.21.0, core/live/keyRequest) */
+  requestFile: string;
+}
 
 export function livePaths(dataRoot: string): LivePaths {
   const parts = dataRoot.split("/").filter((s) => s !== "" && s !== ".");
@@ -20,6 +23,7 @@ export function livePaths(dataRoot: string): LivePaths {
     liveFile: j("rpg-viewer/live.json"),
     controlFile: j("rpg-viewer/control.json"),
     backupFile: j("rpg-viewer/plugins.js.bak"),
+    requestFile: j("rpg-viewer/request.json"),
   };
 }
 

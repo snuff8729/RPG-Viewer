@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { autoBackupKey, initialWatch, isEmptyBackup, loadAutoBackup, MIN_GAP_MS, nextWatch, saveAutoBackup, type WatchState } from "./backups";
+import {
+  autoBackupKey, initialWatch, isEmptyBackup, latestRestorable, loadAutoBackup, MIN_GAP_MS, nextWatch, saveAutoBackup, type BackupMeta, type WatchState,
+} from "./backups";
 
 function memoryStorage() {
   const m = new Map<string, string>();
@@ -74,5 +76,20 @@ describe("isEmptyBackup", () => {
   it("marks backups without files", () => {
     expect(isEmptyBackup({ fileCount: 0 })).toBe(true);
     expect(isEmptyBackup({ fileCount: 3 })).toBe(false);
+  });
+});
+
+describe("latestRestorable", () => {
+  const b = (id: string, kind: BackupMeta["kind"], createdAt: string, fileCount = 2): BackupMeta =>
+    ({ id, kind, reason: "", createdAt, fileCount, bytes: 1, hash: id });
+  it("picks the newest manual / auto backup; skips 「복원 전」 and empty ones", () => {
+    expect(latestRestorable([])).toBeNull();
+    expect(latestRestorable([
+      b("a", "auto", "2026-10-29T01:00:00.000Z"),
+      b("m", "manual", "2026-10-29T02:00:00.000Z"),
+      b("s", "safety", "2026-10-29T03:00:00.000Z"),
+      b("e", "manual", "2026-10-29T04:00:00.000Z", 0),
+    ])?.id).toBe("m");
+    expect(latestRestorable([b("s", "safety", "2026-10-29T03:00:00.000Z")])).toBeNull();
   });
 });
