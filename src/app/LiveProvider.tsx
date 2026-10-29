@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import pluginSource from "../../plugin/RPGViewerBridge.js?raw";
 import { useGame } from "./GameProvider";
 import { useAddons } from "./AddonsProvider";
@@ -822,6 +822,20 @@ export function useLive(): LiveContextValue {
   const v = useContext(LiveContext);
   if (!v) throw new Error("useLive must be used within LiveProvider");
   return v;
+}
+
+/**
+ * 숨겨 둔 채 살려 두는 화면(휴대폰에서 다른 탭을 보는 동안의 읽기): active가 false인 동안 안쪽 useLive()는
+ * 마지막으로 보이던 때의 값을 그대로 받아 다시 그리지 않는다(새 기록·게임 상태마다 긴 기록 전체를 다시 계산하지 않게).
+ * 다시 보이면 최신 값으로 맞추는데, 낮은 우선순위(useDeferredValue)로 해서 탭은 먼저 바뀌어 보이고 내용은 뒤따라 바뀐다.
+ * children은 부모가 다시 그려도 같은 요소여야(useMemo 등) 효과가 있다.
+ */
+export function LiveFreeze({ active, children }: { active: boolean; children: ReactNode }) {
+  const value = useLive();
+  const [held, setHeld] = useState(value);
+  if (active && held !== value) setHeld(value);
+  const shown = useDeferredValue(active ? value : held);
+  return <LiveContext.Provider value={shown}>{children}</LiveContext.Provider>;
 }
 
 /** 게임 보조 설정·전투 조작. */

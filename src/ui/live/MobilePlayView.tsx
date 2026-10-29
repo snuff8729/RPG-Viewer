@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, ChevronUp, ExternalLink, Gauge, ListChecks, Map as MapIcon, Radio, WandSparkles } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
+import { LiveFreeze, useLive } from "@/app/LiveProvider";
 import { PLAY_WINDOW_FEATURES, PLAY_WINDOW_NAME, playPopupUrl } from "@/app/popup";
 import { isRemoteView } from "@/app/share";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +175,9 @@ export function MobilePlayView() {
     prevChoice.current = choiceKey;
   }, [choiceKey]);
 
+  // 같은 요소를 계속 넘겨 이 화면이 다시 그려져도(기록·게임 상태마다) 읽기는 LiveFreeze가 정할 때만 다시 그린다
+  const reader = useMemo(() => <ReaderView mobile />, []);
+
   return (
     <div className="flex h-svh min-h-0 flex-col overflow-hidden">
       <MobileTopBar onTab={setTab} />
@@ -194,9 +197,9 @@ export function MobilePlayView() {
             <MobileMapTab />
           </PlayMapProvider>
         </TabsContent>
-        {/* 읽기는 늘 살려 두고 숨기기만 한다 */}
+        {/* 읽기는 늘 살려 두고 숨기기만 한다. 숨긴 동안은 기록·게임 상태를 멈춰 두어 다시 그리지 않는다(긴 기록에서 휴대폰이 버벅이지 않게) */}
         <TabsContent value="read" forceMount className="min-h-0 px-2 data-[state=inactive]:hidden">
-          <ReaderView mobile />
+          <LiveFreeze active={tab === "read"}>{reader}</LiveFreeze>
         </TabsContent>
         <TabsList className="h-14 w-full shrink-0 rounded-none border-t group-data-horizontal/tabs:h-14">
           <TabsTrigger value="assist" className="flex-col gap-0.5 text-xs"><Gauge />보조</TabsTrigger>

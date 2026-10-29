@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EventCommand, GameData } from "../types";
 import type { HistoryItem, HistoryModel, LogRecord } from "./types";
-import { applyPictureOp, composedScene, hasLayeredPictures, pictureOp, stackPictures, type StackPicture } from "./pictureStack";
+import { applyPictureOp, composedScene, hasLayeredPictures, pictureOp, pictureVarIds, stackPictures, type StackPicture } from "./pictureStack";
 import { PICTURE_RUN_GAP_MS, readerItems } from "./reader";
 
 const SCREEN = { width: 816, height: 624 };
@@ -55,6 +55,18 @@ describe("pictureStack (rebuilding layered pictures from commands)", () => {
     // another branch's record never uses the live variables
     const other = pictureOp({ ...pic(1, 3, 11, "Reiri_Mouth3"), branch: 2 } as LogRecord, data, SCREEN, { branch: 1, values: { 5: 1, 6: 1 } });
     expect(other?.op === "show" && other.pic?.posUnknown).toBe(true);
+  });
+
+  it("pictureVarIds: only variables a variable-designated Show Picture can read", () => {
+    expect(pictureVarIds([pic(1, 0, 2, "Reiri_Base"), msg(2)], data)).toEqual([]);
+    expect(pictureVarIds([pic(1, 3, 11, "Reiri_Mouth3"), pic(2, 0, 2, "Reiri_Base")], data)).toEqual([5, 6]);
+    // resolved values in the record (1.15.0+), erase/move, or no name: the variables are never read
+    expect(pictureVarIds([
+      pic(1, 3, 11, "Reiri_Mouth3", { x: 1, y: 2 }), pic(2, 3, 11, "", {}), pic(3, 3, 11, "", { op: "erase" }),
+    ], data)).toEqual([]);
+    // when it is empty, live variables make no difference to the stack
+    const recs = [pic(1, 0, 2, "Reiri_Base"), pic(2, 1, 3, "Reiri_Arm")];
+    expect(build(recs, { 5: 1, 6: 2 })).toEqual(build(recs));
   });
 
   it("new logs (1.15.0) carry the resolved values; no lookup", () => {

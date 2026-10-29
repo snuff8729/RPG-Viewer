@@ -50,6 +50,25 @@ function varValue(vars: PictureVars | null, r: LogRecord, id: unknown): number |
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
+/**
+ * pictureOp가 vars에서 읽을 수 있는 변수 번호(오름차순): 실제 위치가 없는 예전 그림 표시 기록 중 게임 데이터의 명령이
+ * 변수로 위치를 정한 것. 비었으면 vars는 결과에 아무 영향이 없다(지금 변수가 바뀌어도 다시 계산할 필요 없음).
+ */
+export function pictureVarIds(records: readonly LogRecord[], data: GameData): number[] {
+  const ids = new Set<number>();
+  for (const r of records) {
+    try {
+      if (r.type !== "picture" || r.op !== undefined || typeof r.name !== "string" || !r.name) continue;
+      const id = idOf(r);
+      if (id === null || (num(r.x) !== null && num(r.y) !== null)) continue;
+      const p = commandParams(r, data, 231);
+      if (!p || !(p[0] === id || p[0] === undefined) || p[3] !== 1) continue;
+      for (const v of [p[4], p[5]]) if (typeof v === "number") ids.add(v);
+    } catch { /* pictureOp처럼 넘긴다 */ }
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
 /** 기록 하나 → 그림 바꾸기. 그림 기록이 아니거나 모르면 null. */
 export function pictureOp(r: LogRecord, data: GameData, screen: ScreenSize, vars: PictureVars | null = null): PictureOp | null {
   try {
