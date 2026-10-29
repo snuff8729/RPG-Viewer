@@ -1,98 +1,61 @@
 import { useRef } from "react";
-import { ExternalLink } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useGame } from "@/app/GameProvider";
-import { useLive } from "@/app/LiveProvider";
-import { PLAY_WINDOW_FEATURES, PLAY_WINDOW_NAME, playPopupUrl } from "@/app/popup";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { AssistPanel } from "./AssistPanel";
-import { CheatSheet } from "./cheat/CheatSheet";
-import { GameSettingsSheet } from "../addons/GameSettingsSheet";
-import { BackupButton } from "./BackupButton";
+import { AssistFavoritesBar } from "./AssistFavoritesBar";
 import { ConnectionBadge } from "./ConnectionBadge";
-import { LaunchButton } from "./LaunchButton";
-import { ShareButton } from "./ShareButton";
-import { isRemoteView } from "@/app/share";
-import { PlayMap } from "./PlayMap";
+import { MapColumn } from "./PlayMapColumn";
+import { PlayMenu } from "./PlayMenu";
 import { safeStore, type PlayLayout } from "./playLayout";
-import { ReaderView } from "./ReaderView";
-import { useMapChecklist } from "./useMapChecklist";
+import { PlayTopBarMapName } from "./PlayTopBarMapName";
+import { PopoutButton, PoppedOutNotice, useModulePoppedOut } from "./PopoutControls";
+import { ToolsColumn } from "./PlayTools";
 import { usePlayLayout } from "./usePlayLayout";
 import { MobilePlayView } from "./MobilePlayView";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const layoutStore = safeStore();
 
-/** 위쪽 얇은 줄: 연결 상태·지금 맵·남은 것, 새 창으로 열기와 실행·백업·게임 보조. */
+/** 맨 위 줄: 연결 상태·지금 맵·남은 것, 보조 즐겨찾기, `⋯` 메뉴(실행·휴대폰으로 보기·백업·게임 설정). */
 function PlayTopBar({ popup }: { popup: boolean }) {
-  const { data, recentKey } = useGame();
-  const { live, connection } = useLive();
-  const checklist = useMapChecklist();
-  const mapName = connection === "connected" && live && data ? (data.mapInfos[live.mapId]?.name || `#${live.mapId}`) : null;
-  const openWindow = () => {
-    window.open(playPopupUrl(window.location.pathname, recentKey), PLAY_WINDOW_NAME, PLAY_WINDOW_FEATURES)?.focus();
-  };
   return (
-    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5">
+    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3 py-1.5">
       {!popup && (
         <>
           <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4" />
+          <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
         </>
       )}
       <ConnectionBadge />
-      {mapName && <span className="min-w-0 truncate text-sm font-medium">{mapName}</span>}
-      {checklist && <Badge variant={checklist.remaining > 0 ? "default" : "secondary"}>남은 것 {checklist.remaining}</Badge>}
-      {/* 휴대폰 보기(태블릿 너비)는 게임 보조·치트·게임 설정만: 새 창·실행·공유·백업을 숨긴다 */}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {!isRemoteView() && (
-          <>
-            {!popup && <Button variant="outline" size="sm" onClick={openWindow}><ExternalLink />새 창으로 열기</Button>}
-            <LaunchButton />
-            <ShareButton />
-            <BackupButton />
-          </>
-        )}
-        <AssistPanel />
-        <CheatSheet />
-        <GameSettingsSheet />
+      <PlayTopBarMapName />
+      <AssistFavoritesBar size="sm" className="min-w-0 flex-1" />
+      <div className="ml-auto flex items-center gap-2">
+        <PlayMenu />
       </div>
     </header>
   );
 }
 
-/** 읽기·맵 패널. 넓으면 나란히(읽기 왼쪽), 좁으면 맵 위·읽기 아래. 크기는 배치마다 따로 기억한다. */
+/** 맵 칸 + 도구 칸. 넓으면 나란히(맵 왼쪽), 좁으면 맵 위·도구 아래. 크기는 배치마다 따로 기억한다. */
 function PlayPanels({ layout }: { layout: PlayLayout }) {
   const side = layout === "side";
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: side ? "rpgv.play.side" : "rpgv.play.stacked", storage: layoutStore });
-  const reader = (
-    <ResizablePanel id="reader" defaultSize="55%" minSize="20%">
-      {/* 읽기 화면은 자기 높이를 창 높이로 정한다 — 패널 높이에 맞춘다 */}
-      <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3 *:h-full! *:min-h-0">
-        <ReaderView />
-      </div>
-    </ResizablePanel>
-  );
-  const map = (
-    <ResizablePanel id="map" defaultSize="45%" minSize={side ? "25%" : 160}>
-      <PlayMap />
-    </ResizablePanel>
-  );
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: side ? "rpgv.play2.side" : "rpgv.play2.stacked", storage: layoutStore });
   return (
     <ResizablePanelGroup orientation={side ? "horizontal" : "vertical"} defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      {side ? reader : map}
+      <ResizablePanel id="map" defaultSize={side ? "50%" : "45%"} minSize={side ? "25%" : 240}>
+        <MapColumn actions={<PopoutButton module="map" />} layoutId={side ? "rpgv.play2.map.side" : "rpgv.play2.map.stacked"} />
+      </ResizablePanel>
       <ResizableHandle withHandle />
-      {side ? map : reader}
+      <ResizablePanel id="tools" defaultSize={side ? "50%" : "55%"} minSize={side ? 320 : 200}>
+        <ToolsColumn />
+      </ResizablePanel>
     </ResizablePanelGroup>
   );
 }
 
 /**
- * 플레이 화면: 게임 옆에 두고 보는 읽기 + 맵. 따로 띄운 창(popup)에서는 사이드바·새 창 버튼이 없다.
+ * 플레이 화면: 게임 옆에 두고 보는 맵 + 도구(치트·보조·읽기). 따로 띄운 창(popup)에서는 사이드바가 없다.
  * 휴대폰 너비(따로 띄운 창 제외)는 한 번에 한 패널 + 아래 탭(MobilePlayView).
  */
 export function PlayView({ popup = false }: { popup?: boolean }) {
@@ -104,11 +67,14 @@ export function PlayView({ popup = false }: { popup?: boolean }) {
 function DesktopPlayView({ popup }: { popup: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const layout = usePlayLayout(ref);
+  // 맵을 따로 창으로 뗐으면 도구 칸이 다 쓴다
+  const mapOut = useModulePoppedOut("map");
   return (
     <div className="flex h-svh min-h-0 flex-col">
       <PlayTopBar popup={popup} />
+      {mapOut && <PoppedOutNotice module="map" variant="strip" />}
       <div ref={ref} className="min-h-0 flex-1">
-        <PlayPanels key={layout} layout={layout} />
+        {mapOut ? <ToolsColumn /> : <PlayPanels key={layout} layout={layout} />}
       </div>
     </div>
   );

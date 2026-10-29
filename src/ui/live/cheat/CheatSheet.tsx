@@ -22,6 +22,13 @@ export function openCheatSheet(): void {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
+/** 치트를 열어 달라는 요청을 듣는다(PC 플레이 화면은 치트 탭으로 바꾼다). 그만 듣는 함수를 돌려준다. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function onOpenCheatRequest(cb: () => void): () => void {
+  window.addEventListener(OPEN_EVENT, cb);
+  return () => window.removeEventListener(OPEN_EVENT, cb);
+}
+
 /** 기록 하나의 상태: 묶음들 중 가장 나쁜 것 */
 function entryStatus(keys: string[], results: ReadonlyMap<string, CheatStatus>): CheatStatus {
   const all = keys.map((k) => results.get(k) ?? "queued");
@@ -61,14 +68,15 @@ function CheatContentOwn(props: CheatContentProps) {
 function CheatBody({ session, active = true, tab, onTabChange, className }: CheatContentProps & { session: CheatSession }) {
   const data = useLiveData();
   const { live, connection } = useLive();
-  const { cheatSupported, cheatResults, setLiveActors } = useAssist();
+  const { cheatSupported, cheatResults, holdLiveActors } = useAssist();
   const { history, apply, undo, finder, canBackup, backupNote, backingUp, backupNow } = session;
 
   // 보이는 동안 게임이 캐릭터 정보를 보낸다
+  // 여러 곳(탭·덮개)에 있어도 LiveProvider가 세어서 하나라도 보이면 켜 둔다
   useEffect(() => {
-    setLiveActors(active && cheatSupported);
-    return () => setLiveActors(false);
-  }, [active, cheatSupported, setLiveActors]);
+    if (!active || !cheatSupported) return;
+    return holdLiveActors();
+  }, [active, cheatSupported, holdLiveActors]);
 
   if (!data) return null;
   const disabled = !cheatSupported;

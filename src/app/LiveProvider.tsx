@@ -153,8 +153,11 @@ export interface AssistValue {
   sendCheat(ops: CheatOp[]): string[];
   /** 기록 키 → 상태 */
   cheatResults: ReadonlyMap<string, CheatStatus>;
-  /** 치트 창이 열려 있는 동안 true: 게임이 live.json에 파티 캐릭터 정보를 싣는다(control.json `liveActors`). */
-  setLiveActors(on: boolean): void;
+  /**
+   * 치트 내용이 보이는 동안 잡아 둔다: 하나라도 잡고 있으면 게임이 live.json에 파티 캐릭터 정보를 싣는다(control.json `liveActors`).
+   * 놓기 함수를 돌려준다(여러 번 불러도 한 번만 놓는다). 치트 내용이 여러 곳에 있어도 하나가 사라지며 끄지 않게 센다.
+   */
+  holdLiveActors(): () => void;
   /**
    * 게임 창 단축키로 온 백업·복원 요청(core/live/keyRequest)에 답한다: control.json `keyReply`에 실어 게임 화면에 잠깐 띄운다.
    * 같은 요청에 여러 번 답해도 된다(답마다 번호가 다르다). 연결이 끊긴 때(타이틀 화면 등)도 쓴다.
@@ -473,6 +476,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) + 치트 창이 열렸을 때 liveActors */
   const { controlFlags: addonFlags } = useAddons();
   const [liveActors, setLiveActors] = useState(false);
+  const liveActorsHolds = useRef(0);
+  const holdLiveActors = useCallback(() => {
+    liveActorsHolds.current += 1;
+    setLiveActors(true);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      liveActorsHolds.current = Math.max(0, liveActorsHolds.current - 1);
+      if (liveActorsHolds.current === 0) setLiveActors(false);
+    };
+  }, []);
   const controlFlags = useMemo(() => (liveActors ? { ...addonFlags, liveActors: true } : addonFlags), [addonFlags, liveActors]);
   const cheatSupported = assistSupported && versionAtLeast(live?.pluginVersion, CHEAT_MIN_VERSION);
 
@@ -786,9 +801,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const assistValue = useMemo<AssistValue>(
     () => ({
       settings: assistSettings, setSettings, sendCommand, sentCommand, supported: assistSupported,
-      cheatSupported, sendCheat, cheatResults, setLiveActors, replyKeyRequest,
+      cheatSupported, sendCheat, cheatResults, holdLiveActors, replyKeyRequest,
     }),
-    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported, cheatSupported, sendCheat, cheatResults, replyKeyRequest],
+    [assistSettings, setSettings, sendCommand, sentCommand, assistSupported, cheatSupported, sendCheat, cheatResults, holdLiveActors, replyKeyRequest],
   );
 
   return (

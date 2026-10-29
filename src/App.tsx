@@ -20,6 +20,8 @@ import { AddonsProvider } from "@/app/AddonsProvider";
 import { FavoritesProvider } from "@/app/FavoritesProvider";
 import { GameSettingsSheet } from "@/ui/addons/GameSettingsSheet";
 import { popupGameKey } from "@/app/popup";
+import { parseModuleWindow } from "@/app/popout";
+import { ModuleWindow } from "@/ui/live/ModuleWindow";
 import { useAutoReopen } from "@/app/useAutoReopen";
 import { PlayView } from "@/ui/live/PlayView";
 import { loadPlaySidebar, savePlaySidebar } from "@/ui/live/playLayout";
@@ -55,7 +57,9 @@ function Shell() {
   const { connection } = useLive();
   /** 따로 띄운 플레이 창이면 다시 열 게임 key */
   const [popupKey] = useState(() => popupGameKey(window.location.search));
-  useAutoReopen(popupKey);
+  /** 기능 하나만 따로 띄운 창(맵·치트·보조·읽기)이면 그 모듈과 게임 key */
+  const [moduleWin] = useState(() => parseModuleWindow(window.location.search));
+  useAutoReopen(popupKey ?? moduleWin?.game ?? null);
   /** 휴대폰 보기(같은 와이파이의 휴대폰·태블릿, 게임 보조·치트·게임 설정만 바꿀 수 있다) */
   const remote = isRemoteView();
   const remoteGame = useRemoteGame(remote);
@@ -99,6 +103,8 @@ function Shell() {
     const err = remoteGame.error ?? loadError;
     if (err !== null || status !== "ready" || !data || !index) return <RemoteScreen error={err} onRetry={remoteGame.retry} />;
   }
+  // 따로 띄운 모듈 창: 게임을 열기 전에도 원래 창에 알리도록 시작 화면 대신 모듈 창이 맡는다
+  if (moduleWin && !remote) return <ModuleWindow {...moduleWin} />;
   if (status !== "ready" || !data || !index) return <StartScreen />;
 
   const entry = route.kind === "page"

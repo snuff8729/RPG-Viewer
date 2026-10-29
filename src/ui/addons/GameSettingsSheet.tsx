@@ -60,16 +60,21 @@ function availableHere(addon: AddonDef, data: GameData | null | undefined): bool
   return false;
 }
 
-/** 상단 `게임 설정` Sheet: 이 게임에서만 켜는 부가 기능(애드온) 목록. */
-export function GameSettingsSheet() {
+/**
+ * 상단 `게임 설정` Sheet: 이 게임에서만 켜는 부가 기능(애드온) 목록.
+ * trigger=false면 버튼 없이 창만 둔다(⋯ 메뉴에서 openGameSettings()로 연다).
+ */
+export function GameSettingsSheet({ trigger = true }: { trigger?: boolean } = {}) {
   const { isOn, setOn, savedInFolder, adapters } = useAddons();
   const { data } = useGame();
   const [open, setOpen] = useGameSettingsOpen();
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant="outline" size="sm"><Settings2 />게임 설정</Button>
-      </SheetTrigger>
+      {trigger && (
+        <SheetTrigger asChild>
+          <Button variant="outline" size="sm"><Settings2 />게임 설정</Button>
+        </SheetTrigger>
+      )}
       <SheetContent side="right" className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>게임 설정</SheetTitle>

@@ -29,20 +29,23 @@ export function MapPicture() {
   return <HereMapArea here={here} focus={focus} onPick={pick} compact />;
 }
 
-/** `지금 해 볼 것` 목록. 줄을 누르면 맵에서 고르고 길을 보여준다. 게임이 연결되지 않았으면 그리지 않는다. */
-export function TodoList({ className }: { className?: string }) {
+/**
+ * `지금 해 볼 것` 목록. 줄을 누르면 맵에서 고르고 길을 보여준다. 게임이 연결되지 않았으면 그리지 않는다.
+ * header=false면 제목 줄(제목·개수·자세히)을 빼고 목록만(탭 이름에 개수가 있을 때).
+ */
+export function TodoList({ className, header = true }: { className?: string; header?: boolean }) {
   const { here, rows, choose, rowRefs } = usePlayMap();
   const { live, checklist, numbers, selected, routeText } = here;
   if (!live || !checklist) return null;
   return (
     <div className={cn("flex min-h-0 flex-col gap-1", className)}>
-      <div className="flex items-center gap-2 px-1">
+      {header && <div className="flex items-center gap-2 px-1">
         <span className="text-sm font-semibold">지금 해 볼 것</span>
         <Badge variant="secondary">{rows.length}</Badge>
         <Button variant="link" size="sm" className="ml-auto h-auto p-0" asChild>
           <a href={formatRoute({ kind: "here" })}>자세히</a>
         </Button>
-      </div>
+      </div>}
       {rows.length === 0 ? (
         <p className="px-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>
       ) : (

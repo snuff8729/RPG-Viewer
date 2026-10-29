@@ -10,13 +10,9 @@ import {
   AutoFastControl, AutoSpeedControl, BattleControls, EnemyHpControls, HotkeySettings, HpControls, QuickSlotInput, SaveControls,
   SkipSeenControl, SpeedControl,
 } from "./AssistControls";
-import type { AssistFavoriteSlot } from "./assistItems";
+import { withObjectParticle, type AssistFavoriteSlot } from "./assistItems";
 import { useAssistGuards, useAssistSession, type AssistSession } from "./useAssistSession";
 
-/** 키 이름 + 을/를(끝 글자를 한국어로 읽은 받침 기준: 0·1·3·6·7·8, L·M·N·R은 받침 있음). */
-function withObjectParticle(label: string): string {
-  return `${label}${/[013678LMNR]$/.test(label) ? "을" : "를"}`;
-}
 
 export interface AssistContentProps {
   /**

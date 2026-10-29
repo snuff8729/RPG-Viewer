@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { loadPlaySidebar, PLAY_BREAKPOINT, playLayout, safeStore, savePlaySidebar, type KeyValueStore } from "./playLayout";
+import {
+  loadMapBelowTab, loadPlaySidebar, loadToolTab, PLAY_BREAKPOINT, playLayout, safeStore, saveMapBelowTab, savePlaySidebar, saveToolTab,
+  type KeyValueStore,
+} from "./playLayout";
 
 const memory = (): KeyValueStore => {
   const m = new Map<string, string>();
@@ -37,5 +40,25 @@ describe("play sidebar flag", () => {
     expect(() => savePlaySidebar(true, s)).not.toThrow();
     expect(loadPlaySidebar(s)).toBe(false);
     expect(safeStore(null).getItem("x")).toBeNull();
+  });
+});
+
+describe("remembered tabs", () => {
+  it("tool tab defaults to assist, remembers, ignores junk and broken storage", () => {
+    const s = memory();
+    expect(loadToolTab(s)).toBe("assist");
+    saveToolTab("cheat", s);
+    expect(loadToolTab(s)).toBe("cheat");
+    s.setItem("rpgv.play.toolTab", "nope");
+    expect(loadToolTab(s)).toBe("assist");
+    expect(loadToolTab(safeStore(broken))).toBe("assist");
+    expect(() => saveToolTab("read", safeStore(broken))).not.toThrow();
+  });
+  it("map below tab defaults to todo and remembers", () => {
+    const s = memory();
+    expect(loadMapBelowTab(s)).toBe("todo");
+    saveMapBelowTab("story", s);
+    expect(loadMapBelowTab(s)).toBe("story");
+    expect(loadMapBelowTab(safeStore(broken))).toBe("todo");
   });
 });
