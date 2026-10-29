@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import {
   adoptLiveAssist, commandStatus, commandStatusText, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, LEGACY_HOTKEYS, liveHotkeys,
-  HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isHpCommand, isSaveCommand, normalizeAssist, sameHotkeys, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
+  ENEMY_HP_COMMAND_MIN_VERSION, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isEnemyHpCommand, isHpCommand, isSaveCommand, normalizeAssist, sameHotkeys, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
   carryCommand, changedAssistKeys, mergeAssist, migrateSavedAssist, parseControlFile,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
@@ -24,12 +24,12 @@ const HP_OFF = { hpFull: null, hpLow: null };
 const CTRL = 256, SHIFT = 512, ALT = 1024;
 /** 1.22.0 조합 기본 단축키(Ctrl+F6·Ctrl+F7·Ctrl+F10, Ctrl+S·Ctrl+L·Ctrl+Shift+S·Ctrl+Shift+L, Ctrl+B·Ctrl+Shift+B) */
 const SAVE = {
-  autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL,
+  autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL, enemyHpFull: 36 | CTRL, enemyHpLow: 35 | CTRL,
   quickSave: 83 | CTRL, quickLoad: 76 | CTRL, saveMenu: 83 | CTRL | SHIFT, loadMenu: 76 | CTRL | SHIFT, backup: 66 | CTRL, restore: 66 | CTRL | SHIFT,
 };
 /** 그 단축키 끔(예전 플러그인) */
 const SAVE_OFF = {
-  autoSpeed: null, autoFast: null, escape: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null, backup: null, restore: null,
+  autoSpeed: null, autoFast: null, escape: null, enemyHpFull: null, enemyHpLow: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null, backup: null, restore: null,
 };
 
 const M: Location = { source: "map", mapId: 3, eventId: 5, page: 0 };
@@ -88,7 +88,7 @@ describe("controlJson", () => {
     const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win", at: 100 }, 123));
     expect(j).toEqual({
       v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
-      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP, ...SAVE, v: 4 }, quickSlot: null,
+      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP, ...SAVE, v: 5 }, quickSlot: null,
       seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win", at: 100 },
     });
   });
@@ -217,7 +217,7 @@ describe("hotkeys", () => {
     for (const { action } of HOTKEY_ACTIONS) expect(validateHotkey(DEFAULT_HOTKEYS[action], action, DEFAULT_HOTKEYS)).toBeNull();
     expect(normalizeHotkeys(DEFAULT_HOTKEYS)).toEqual(DEFAULT_HOTKEYS);
     expect(HOTKEY_ACTIONS.map((a) => keyLabel(DEFAULT_HOTKEYS[a.action]!))).toEqual([
-      "F6", "Ctrl+F6", "F7", "Ctrl+F7", "F10", "F11", "Ctrl+F10", "Home", "End",
+      "F6", "Ctrl+F6", "F7", "Ctrl+F7", "F10", "F11", "Ctrl+F10", "Ctrl+Home", "Ctrl+End", "Home", "End",
       "Ctrl+S", "Ctrl+L", "Ctrl+Shift+S", "Ctrl+Shift+L", "Ctrl+B", "Ctrl+Shift+B",
     ]);
     expect(HOTKEY_GROUPS.every((g) => HOTKEY_ACTIONS.some((a) => a.group === g))).toBe(true);
@@ -258,7 +258,7 @@ describe("hotkeys", () => {
     // 1.21.0 플러그인: 조합 키를 받지 못해 예전 기본 키를 보고하고, 새 동작(자동 배속 빠르기·자동 배속·도망)은 없다
     const v121 = { speed: 117, skip: 118, win: 121, lose: 122, ...HP, backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null };
     const eff = liveHotkeys({ hotkeys: v121 });
-    expect(eff).toEqual({ ...v121, autoSpeed: null, autoFast: null, escape: null });
+    expect(eff).toEqual({ ...v121, autoSpeed: null, autoFast: null, escape: null, enemyHpFull: null, enemyHpLow: null });
     expect(sameHotkeys(eff, DEFAULT_HOTKEYS)).toBe(false); // → 플러그인 업데이트 안내
     expect(liveHotkeys({ hotkeys: DEFAULT_HOTKEYS })).toEqual(DEFAULT_HOTKEYS);
     expect(liveHotkeys({ hotkeys: { ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null } })).toEqual({ ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null });
@@ -266,7 +266,7 @@ describe("hotkeys", () => {
   it("hotkeySummary lists bound keys by group", () => {
     expect(hotkeySummary(DEFAULT_HOTKEYS)).toBe(
       "게임 창 단축키 — 진행: F6 배속, Ctrl+F6 자동 배속 빠르기, F7 본 대사 넘기기, Ctrl+F7 자동 배속"
-      + " · 전투: F10 이기기, F11 지기, Ctrl+F10 도망 · 체력: Home 100%, End 1%"
+      + " · 전투: F10 이기기, F11 지기, Ctrl+F10 도망, Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1% · 체력: Home 100%, End 1%"
       + " · 세이브: Ctrl+S 퀵 세이브, Ctrl+L 퀵 로드(두 번), Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창"
       + " · 백업: Ctrl+B 백업, Ctrl+Shift+B 복원(두 번)",
     );
@@ -277,7 +277,7 @@ describe("hotkeys", () => {
   });
   it("controlJson writes custom hotkeys", () => {
     const hotkeys = { ...DEFAULT_HOTKEYS, speed: 65, skip: null, hpFull: 72, hpLow: null, restore: null };
-    expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual({ ...hotkeys, v: 4 });
+    expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual({ ...hotkeys, v: 5 });
   });
   it("migrateSavedAssist: old untouched HP default (both null, no v) gets the new keys; v2 or set keys stay", () => {
     const old = { ...DEFAULT_ASSIST, speed: 4 as const, hotkeys: { speed: 65, skip: 118, win: 121, lose: 122, ...HP_OFF } };
@@ -315,6 +315,30 @@ describe("hotkeys", () => {
     expect(migrateSavedAssist(once)).toEqual(once);
     // 디스크 control.json(1.21.0 뷰어가 쓴 v3)도
     expect(parseControlFile(JSON.stringify({ v: 1, t: 9, hotkeys: { ...V3, v: 3 } }))?.settings.hotkeys).toEqual(DEFAULT_HOTKEYS);
+  });
+  it("migrateSavedAssist v4 → v5: 적 체력 keys are added (Ctrl+Home·Ctrl+End), everything else stays; off when already taken", () => {
+    const { enemyHpFull: _f, enemyHpLow: _l, ...V4 } = DEFAULT_HOTKEYS;
+    expect(normalizeAssist(migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: { ...V4, v: 4 } })).hotkeys).toEqual(DEFAULT_HOTKEYS);
+    // 4에서 바꾼 키는 그대로(예전 기본값과 같아도 바꾼 것으로 본다: 백업 F1)
+    const custom = { ...V4, backup: 112, hpFull: null, v: 4 };
+    expect(normalizeAssist(migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: custom })).hotkeys)
+      .toEqual({ ...DEFAULT_HOTKEYS, backup: 112, hpFull: null });
+    // 사용자가 이미 Ctrl+Home을 쓰면 그 키는 그대로, 적 체력 100%는 끔
+    const taken = { ...V4, win: 36 | CTRL, v: 4 };
+    const migrated = migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: taken });
+    expect(normalizeAssist(migrated).hotkeys).toEqual({ ...DEFAULT_HOTKEYS, win: 36 | CTRL, enemyHpFull: null });
+    expect(migrateSavedAssist(migrated)).toEqual(migrated);
+    expect((migrated as { hotkeys: { v: number } }).hotkeys.v).toBe(5);
+    // 4 묶음에 이미 적 체력 필드가 있으면(다른 뷰어가 쓴 것) 그대로
+    expect(normalizeAssist(migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: { ...V4, enemyHpLow: 76, v: 4 } })).hotkeys)
+      .toEqual({ ...DEFAULT_HOTKEYS, enemyHpLow: 76 });
+  });
+  it("validateHotkey: 적 체력 defaults Ctrl+Home·Ctrl+End are allowed and distinct from 내 체력 Home·End", () => {
+    expect(validateHotkey(36 | CTRL, "enemyHpFull", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(35 | CTRL, "enemyHpLow", DEFAULT_HOTKEYS)).toBeNull();
+    expect(validateHotkey(36 | CTRL, "speed", DEFAULT_HOTKEYS)).toBe("Ctrl+Home은(는) 이미 '적 체력 100%'에 쓰고 있어요");
+    expect(validateHotkey(36, "enemyHpFull", DEFAULT_HOTKEYS)).toBe("Home은(는) 이미 '내 체력 100%'에 쓰고 있어요");
+    expect(HOTKEY_ACTIONS.filter((a) => a.group === "전투").map((a) => a.action)).toEqual(["win", "lose", "escape", "enemyHpFull", "enemyHpLow"]);
   });
 });
 
@@ -384,6 +408,19 @@ describe("game sync", () => {
     expect(commandStatusText("ignored", "win")).toMatch(/전투 중이 아니거나/);
     expect(commandStatusText("applied", "hpLow")).toBe("적용됐어요");
     expect(commandStatusText("failed", "hpFull")).toBe("실행하지 못했어요");
+  });
+  it("enemy HP commands (1.23.0) round-trip through control.json and read as battle commands", () => {
+    for (const kind of ["enemyHpFull", "enemyHpLow"] as const) {
+      const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: [], seenPages: [] }, { id: "e-1", kind, at: 5 }, 1));
+      expect(j.command).toEqual({ id: "e-1", kind, at: 5 });
+      expect(parseControlFile(JSON.stringify(j))?.command?.kind).toBe(kind);
+      expect(isEnemyHpCommand(kind)).toBe(true);
+      expect(isHpCommand(kind)).toBe(false);
+      expect(commandStatusText("ignored", kind)).toMatch(/전투 중이 아니거나/);
+    }
+    expect(isEnemyHpCommand("hpFull")).toBe(false);
+    expect(versionAtLeast("1.22.0", ENEMY_HP_COMMAND_MIN_VERSION)).toBe(false);
+    expect(versionAtLeast("1.23.0", ENEMY_HP_COMMAND_MIN_VERSION)).toBe(true);
   });
 });
 

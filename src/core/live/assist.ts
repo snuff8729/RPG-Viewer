@@ -18,9 +18,10 @@ export interface AssistSettings {
  * 게임 창 단축키 동작. backup·restore(플러그인 1.21.0)는 뷰어가 처리한다(게임 → rpg-viewer/request.json).
  * quickSave·quickLoad·saveMenu·loadMenu(1.21.0)는 게임 안에서 처리한다.
  * autoSpeed(자동 배속 빠르기 ×2→×4→×8)·autoFast(본 이벤트 자동 배속 켜고 끄기)·escape(전투 도망)는 1.22.0.
+ * enemyHpFull·enemyHpLow(전투 중 적 체력 100%·1%)는 1.23.0.
  */
 export type HotkeyAction =
-  | "speed" | "autoSpeed" | "skip" | "autoFast" | "win" | "lose" | "escape" | "hpFull" | "hpLow"
+  | "speed" | "autoSpeed" | "skip" | "autoFast" | "win" | "lose" | "escape" | "enemyHpFull" | "enemyHpLow" | "hpFull" | "hpLow"
   | "quickSave" | "quickLoad" | "saveMenu" | "loadMenu" | "backup" | "restore";
 /**
  * 동작별 단축키. null = 끔. 값 = DOM keyCode | Ctrl 256 | Shift 512 | Alt 1024(조합 키, 플러그인 1.22.0).
@@ -28,9 +29,10 @@ export type HotkeyAction =
  */
 export type Hotkeys = Record<HotkeyAction, number | null>;
 /** win·lose·escape: 전투 중만. hpFull·hpLow(플러그인 1.12.0): 파티 체력 100%(쓰러진 동료도 살림)·1%, 맵과 전투 모두. */
+/** enemyHpFull·enemyHpLow(플러그인 1.23.0): 전투 중 살아 있는 적 전원의 체력 100%·1%(적어도 1, 쓰러뜨리지 않는다). */
 /** cheat(플러그인 1.14.0): ops를 실은 치트 명령(core/live/cheat) */
 /** saveMenu·loadMenu·quickSave·quickLoad(플러그인 1.21.0): 세이브 창·로드 창 열기, 퀵 세이브·퀵 로드(맵, 불러오기는 타이틀에서도) */
-export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow" | "cheat" | "saveMenu" | "loadMenu" | "quickSave" | "quickLoad";
+export type AssistCommandKind = "win" | "lose" | "escape" | "enemyHpFull" | "enemyHpLow" | "hpFull" | "hpLow" | "cheat" | "saveMenu" | "loadMenu" | "quickSave" | "quickLoad";
 /** at = 사용자가 누른 시각(ms), ops: kind가 cheat일 때만 */
 export interface AssistCommand { id: string; kind: AssistCommandKind; at: number; ops?: CheatOp[] }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
@@ -48,13 +50,13 @@ const ctrlShift = (k: number) => k | MOD_CTRL | MOD_SHIFT;
 
 /**
  * 1.22.0부터의 기본값. 진행: F6 배속, Ctrl+F6 자동 배속 빠르기, F7 본 대사 넘기기, Ctrl+F7 본 이벤트 자동 배속.
- * 전투: F10 이기기, F11 지기, Ctrl+F10 도망. 체력: Home 100%, End 1%.
+ * 전투: F10 이기기, F11 지기, Ctrl+F10 도망, Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1%(1.23.0). 체력: Home 100%, End 1%.
  * 세이브: Ctrl+S 퀵 세이브, Ctrl+L 퀵 로드(두 번), Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창.
  * 백업: Ctrl+B 백업, Ctrl+Shift+B 마지막 백업으로 복원(두 번).
  */
 export const DEFAULT_HOTKEYS: Hotkeys = {
   speed: 117, autoSpeed: ctrl(117), skip: 118, autoFast: ctrl(118),
-  win: 121, lose: 122, escape: ctrl(121),
+  win: 121, lose: 122, escape: ctrl(121), enemyHpFull: ctrl(36), enemyHpLow: ctrl(35),
   hpFull: 36, hpLow: 35,
   quickSave: ctrl(83), quickLoad: ctrl(76), saveMenu: ctrlShift(83), loadMenu: ctrlShift(76),
   backup: ctrl(66), restore: ctrlShift(66),
@@ -69,7 +71,7 @@ const V3_DEFAULT_HOTKEYS: Partial<Hotkeys> = {
  * 어떤 동작을 보고하지 않는 플러그인에는 그 단축키가 없다.
  */
 export const LEGACY_HOTKEYS: Hotkeys = {
-  speed: 117, autoSpeed: null, skip: 118, autoFast: null, win: 121, lose: 122, escape: null, hpFull: null, hpLow: null,
+  speed: 117, autoSpeed: null, skip: 118, autoFast: null, win: 121, lose: 122, escape: null, enemyHpFull: null, enemyHpLow: null, hpFull: null, hpLow: null,
   quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null, backup: null, restore: null,
 };
 /**
@@ -78,8 +80,12 @@ export const LEGACY_HOTKEYS: Hotkeys = {
  * - 3(1.21.0): 백업·복원·퀵 세이브·퀵 로드·세이브 창·로드 창. 예전 묶음에는 이 필드가 없어서 기본값을 받는다(겹치는 키는 끔).
  * - 4(1.22.0): 조합 키, 자동 배속 빠르기·자동 배속 켜고 끄기·도망. 4 전 묶음에서 그 판의 기본값을 그대로 둔 필드는 새 기본값으로
  *   옮기고, 사용자가 바꾼 필드는 그대로 둔다(새 기본값과 겹치면 바꾼 쪽을 끈다).
+ * - 5(1.23.0): 적 체력 100%·1%. 4 묶음은 그대로 두고 없는 이 두 필드만 기본값(Ctrl+Home·Ctrl+End)을 받는다.
+ *   사용자가 그 조합을 이미 다른 동작에 썼으면 새 필드를 끈다(쓰던 단축키는 건드리지 않는다).
  */
-export const HOTKEYS_VERSION = 4;
+export const HOTKEYS_VERSION = 5;
+/** 조합 키 기본값(1.22.0)이 들어온 판: 이 판부터의 묶음은 없는 필드만 채운다 */
+const COMBO_KEYS_VERSION = 4;
 /** 체력 단축키 옮기기는 이 판 전의 묶음에만 */
 const HP_KEYS_VERSION = 2;
 export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null };
@@ -94,6 +100,8 @@ export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; group: HotkeyGroup
   { action: "win", group: "전투", label: "전투 이기기", short: "이기기" },
   { action: "lose", group: "전투", label: "전투 지기", short: "지기" },
   { action: "escape", group: "전투", label: "전투 도망", short: "도망" },
+  { action: "enemyHpFull", group: "전투", label: "적 체력 100%", short: "적 체력 100%" },
+  { action: "enemyHpLow", group: "전투", label: "적 체력 1%", short: "적 체력 1%" },
   { action: "hpFull", group: "체력", label: "내 체력 100%", short: "100%" },
   { action: "hpLow", group: "체력", label: "내 체력 1%", short: "1%" },
   { action: "quickSave", group: "세이브", label: "퀵 세이브", short: "퀵 세이브" },
@@ -131,8 +139,10 @@ export const ASSIST_MIN_VERSION = "1.1.0";
 export const HP_COMMAND_MIN_VERSION = "1.12.0";
 /** 세이브·로드 명령(saveMenu·loadMenu·quickSave·quickLoad)과 그 단축키, 백업·복원 단축키를 지원하는 플러그인 최소 버전 */
 export const SAVE_COMMAND_MIN_VERSION = "1.21.0";
+/** 적 체력 명령(enemyHpFull·enemyHpLow)과 그 단축키를 지원하는 플러그인 최소 버전 */
+export const ENEMY_HP_COMMAND_MIN_VERSION = "1.23.0";
 const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>([
-  "win", "lose", "escape", "hpFull", "hpLow", "cheat", "saveMenu", "loadMenu", "quickSave", "quickLoad",
+  "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow", "cheat", "saveMenu", "loadMenu", "quickSave", "quickLoad",
 ]);
 /** 세이브·로드 명령인가 */
 export const isSaveCommand = (kind: unknown): boolean => kind === "saveMenu" || kind === "loadMenu" || kind === "quickSave" || kind === "quickLoad";
@@ -140,6 +150,8 @@ export const isSaveCommand = (kind: unknown): boolean => kind === "saveMenu" || 
 export const isQuickSlot = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 999;
 /** 파티 체력 명령인가(맵·전투 모두에서 쓴다) */
 export const isHpCommand = (kind: unknown): boolean => kind === "hpFull" || kind === "hpLow";
+/** 적 체력 명령인가(전투 중만) */
+export const isEnemyHpCommand = (kind: unknown): boolean => kind === "enemyHpFull" || kind === "enemyHpLow";
 
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
@@ -204,12 +216,22 @@ export function validateHotkey(code: number | null, action: HotkeyAction, hotkey
  * - 판 표시(`hotkeys.v`)가 없는 예전 묶음에서 체력 단축키가 둘 다 null이면 예전 기본값(끔)을 그대로 둔 것이므로 새 기본값을 준다.
  *   새 판에서 사용자가 둘 다 끈 것은 판 표시가 있으므로 그대로 둔다.
  * - 4 전 묶음: 1.21.0 기본값과 같은(또는 없는) 필드는 새 기본값으로, 바꾼 필드는 그대로 두되 새 기본값과 겹치면 끈다.
+ * - 4 묶음: 그대로 두고, 없는 필드만 기본값을 준다(다른 필드가 이미 그 키를 쓰면 끈다).
  */
 export function migrateSavedAssist(v: unknown): unknown {
   if (!isObj(v) || !isObj(v.hotkeys)) return v;
   let h: Record<string, unknown> = v.hotkeys;
   const ver = typeof h.v === "number" ? h.v : 0;
   if (ver >= HOTKEYS_VERSION) return v;
+  if (ver >= COMBO_KEYS_VERSION) {
+    const filled: Record<string, unknown> = { ...h };
+    for (const { action } of HOTKEY_ACTIONS) {
+      if (filled[action] !== undefined) continue;
+      const def = DEFAULT_HOTKEYS[action];
+      filled[action] = HOTKEY_ACTIONS.some((a) => a.action !== action && filled[a.action] === def) ? null : def;
+    }
+    return { ...v, hotkeys: { ...filled, v: HOTKEYS_VERSION } };
+  }
   if (ver < HP_KEYS_VERSION && h.hpFull === null && h.hpLow === null) {
     const { hpFull: _f, hpLow: _l, ...rest } = h;
     h = rest;

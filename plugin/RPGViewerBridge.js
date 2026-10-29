@@ -13,7 +13,8 @@
  * 게임 창 단축키(RPG Viewer에서 바꿀 수 있음, Ctrl·Shift·Alt 조합 가능):
  * 진행 — F6 배속(×1→×2→×4→×8), Ctrl+F6 자동 배속 빠르기(×2→×4→×8),
  *   F7 본 대사 자동 넘기기 켜고 끄기, Ctrl+F7 본 이벤트 자동 배속 켜고 끄기.
- * 전투 중 — F10 이기기, F11 지기, Ctrl+F10 도망.
+ * 전투 중 — F10 이기기, F11 지기, Ctrl+F10 도망,
+ *   Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1%(살아 있는 적 전원, 1%는 쓰러뜨리지 않음).
  * 체력(맵·전투) — Home 내 체력 100%, End 내 체력 1%.
  * 세이브 — Ctrl+S 퀵 세이브, Ctrl+L 두 번 퀵 로드(기본은 마지막 세이브 칸),
  *   Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창.
@@ -58,7 +59,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.22.0",
+    VERSION: "1.23.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -118,37 +119,43 @@
   var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
   var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
   var COMMAND_KINDS = {
-    win: true, lose: true, escape: true, hpFull: true, hpLow: true, cheat: true,
+    win: true, lose: true, escape: true, enemyHpFull: true, enemyHpLow: true, hpFull: true, hpLow: true, cheat: true,
     saveMenu: true, loadMenu: true, quickSave: true, quickLoad: true
   };
   // save / load commands (1.21.0): on the map (loading also on the title), never tied to a battle
   var SCENE_COMMANDS = { saveMenu: true, loadMenu: true, quickSave: true, quickLoad: true };
   // party HP commands (1.12.0): work on the map and in battle
   var PARTY_COMMANDS = { hpFull: true, hpLow: true };
+  // enemy HP commands (1.23.0): battle only, alive enemies; they never end the battle, so they do not wait for messages
+  var ENEMY_HP_COMMANDS = { enemyHpFull: true, enemyHpLow: true };
   var CONTROL_POLL_MS = 1000, COMMAND_MAX_AGE_MS = 10000, AUTO_ADVANCE_UPDATES = 6, MAX_SPEED = 8;
   var KEY_SPEED = "rpgvSpeed", KEY_SKIP = "rpgvSkip", KEY_WIN = "rpgvWin", KEY_LOSE = "rpgvLose";
   var KEY_HP_FULL = "rpgvHpFull", KEY_HP_LOW = "rpgvHpLow";
   var KEY_BACKUP = "rpgvBackup", KEY_RESTORE = "rpgvRestore", KEY_QUICK_SAVE = "rpgvQuickSave", KEY_QUICK_LOAD = "rpgvQuickLoad";
   var KEY_SAVE_MENU = "rpgvSaveMenu", KEY_LOAD_MENU = "rpgvLoadMenu";
   var KEY_AUTO_SPEED = "rpgvAutoSpeed", KEY_AUTO_FAST = "rpgvAutoFast", KEY_ESCAPE = "rpgvEscape";
+  var KEY_ENEMY_HP_FULL = "rpgvEnemyHpFull", KEY_ENEMY_HP_LOW = "rpgvEnemyHpLow";
   // same order as the viewer (core/live/assist HOTKEY_ACTIONS): a later duplicate loses
   var HOTKEY_NAMES = [
-    "speed", "autoSpeed", "skip", "autoFast", "win", "lose", "escape", "hpFull", "hpLow",
+    "speed", "autoSpeed", "skip", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow",
     "quickSave", "quickLoad", "saveMenu", "loadMenu", "backup", "restore"
   ];
   var HOTKEY_BUTTONS = {
     speed: KEY_SPEED, autoSpeed: KEY_AUTO_SPEED, skip: KEY_SKIP, autoFast: KEY_AUTO_FAST,
-    win: KEY_WIN, lose: KEY_LOSE, escape: KEY_ESCAPE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
+    win: KEY_WIN, lose: KEY_LOSE, escape: KEY_ESCAPE, enemyHpFull: KEY_ENEMY_HP_FULL, enemyHpLow: KEY_ENEMY_HP_LOW,
+    hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
     quickSave: KEY_QUICK_SAVE, quickLoad: KEY_QUICK_LOAD, saveMenu: KEY_SAVE_MENU, loadMenu: KEY_LOAD_MENU,
     backup: KEY_BACKUP, restore: KEY_RESTORE
   };
   // 1.22.0: a hotkey is keyCode | Ctrl 256 | Shift 512 | Alt 1024. Plain keys go through Input.keyMapper;
   // combos are caught by our own keydown listener (window, capture phase) and never reach the engine.
   var MOD_CTRL = 256, MOD_SHIFT = 512, MOD_ALT = 1024, MOD_MASK = 1792;
-  // F6 / Ctrl+F6 / F7 / Ctrl+F7, F10 F11 Ctrl+F10, Home End, Ctrl+S Ctrl+L Ctrl+Shift+S Ctrl+Shift+L, Ctrl+B Ctrl+Shift+B
+  // F6 / Ctrl+F6 / F7 / Ctrl+F7, F10 F11 Ctrl+F10 Ctrl+Home Ctrl+End, Home End, Ctrl+S Ctrl+L Ctrl+Shift+S Ctrl+Shift+L,
+  // Ctrl+B Ctrl+Shift+B
   var HOTKEY_DEFAULTS = {
     speed: 117, autoSpeed: 117 | MOD_CTRL, skip: 118, autoFast: 118 | MOD_CTRL,
-    win: 121, lose: 122, escape: 121 | MOD_CTRL, hpFull: 36, hpLow: 35,
+    win: 121, lose: 122, escape: 121 | MOD_CTRL, enemyHpFull: 36 | MOD_CTRL, enemyHpLow: 35 | MOD_CTRL,
+    hpFull: 36, hpLow: 35,
     quickSave: 83 | MOD_CTRL, quickLoad: 76 | MOD_CTRL, saveMenu: 83 | MOD_CTRL | MOD_SHIFT, loadMenu: 76 | MOD_CTRL | MOD_SHIFT,
     backup: 66 | MOD_CTRL, restore: 66 | MOD_CTRL | MOD_SHIFT
   };
@@ -1317,6 +1324,8 @@
       var actors = G.$gameParty.aliveMembers();
       for (i = 0; i < actors.length; i++) kill(actors[i]);
       BM.processDefeat();
+    } else if (ENEMY_HP_COMMANDS[kind] === true) {
+      runEnemyHpCommand(kind);
     } else if (kind === "escape") { // only reached when canEscapeNow()
       if (typeof BM.processEscape === "function") {
         var ratio = BM._escapeRatio;
@@ -1365,6 +1374,19 @@
     if (inBattleNow()) refreshBattleStatus();
   }
 
+  // 1.23.0 enemyHpFull: alive enemies to max HP. enemyHpLow: alive enemies to 1% (at least 1, never killed).
+  function runEnemyHpCommand(kind) {
+    var troop = G.$gameTroop;
+    var enemies = troop && typeof troop.aliveMembers === "function" ? troop.aliveMembers() : [];
+    for (var i = 0; enemies && i < enemies.length; i++) {
+      var e = enemies[i];
+      if (!e || typeof e.setHp !== "function") continue;
+      var mhp = typeof e.mhp === "number" && isFinite(e.mhp) && e.mhp > 0 ? e.mhp : 1;
+      e.setHp(kind === "enemyHpFull" ? mhp : Math.max(1, Math.floor(mhp * 0.01)));
+    }
+    refreshBattleStatus();
+  }
+
   function refreshBattleStatus() {
     var BM = G.BattleManager;
     try {
@@ -1410,7 +1432,7 @@
       lastCommand = c.id + ":ignored";
       return;
     }
-    if (!BM._phase || BM._phase === "init" || messageBusy()) return;
+    if (!BM._phase || BM._phase === "init" || (ENEMY_HP_COMMANDS[c.kind] !== true && messageBusy())) return;
     pendingCommand = null;
     try {
       runCommand(c.kind);
@@ -1488,6 +1510,8 @@
       if (inBattleNow() && !canEscapeNow()) showMessage("이 전투는 도망칠 수 없어요");
       else hotkeyCommand("escape");
     }
+    if (p.enemyHpFull) hotkeyCommand("enemyHpFull");
+    if (p.enemyHpLow) hotkeyCommand("enemyHpLow");
     if (p.hpFull) hotkeyCommand("hpFull");
     if (p.hpLow) hotkeyCommand("hpLow");
     if (p.backup) requestViewer("backup");
