@@ -118,10 +118,13 @@ export interface LiveAssist {
   /** 지금 실제로 돌고 있는 배속(자동 배속 포함) */
   effectiveSpeed: number;
   skipSeen: boolean;
+  /** 본 이벤트 자동 배속·그 빠르기(플러그인 1.22.0+, 단축키 Ctrl+F7·Ctrl+F6으로 바뀔 수 있음) */
+  autoFast?: boolean;
+  autoSpeed?: number;
   troopId: number | null;
   lastCommand: string | null;
-  /** 게임에 실제로 걸린 단축키 keyCode(null = 끔). 없으면 기본 단축키가 고정인 구버전 플러그인. */
-  hotkeys?: { speed: number | null; skip: number | null; win: number | null; lose: number | null };
+  /** 게임에 실제로 걸린 단축키(keyCode | 조합 비트, null = 끔, core/live/assist liveHotkeys). 없으면 기본 단축키가 고정인 구버전 플러그인. */
+  hotkeys?: Record<string, number | null>;
   /** 게임이 적용한 control.json의 t(null = 아직 없음). 게임은 시작 뒤에 쓰인 파일만 적용한다. 없으면 구버전. */
   controlT?: number | null;
   /** 게임이 화면 그림을 기록하고 있는가(플러그인 1.6.0+, 없으면 구버전) */

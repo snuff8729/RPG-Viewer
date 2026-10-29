@@ -4,9 +4,16 @@ import { noisyVariables } from "../../src/core/live/history";
 import { cmd, createHarness, LIVE_PATH, LOG_PATH, META_PATH, MemFs, PLUGIN_PATH, type Harness } from "./harness";
 
 let h: Harness;
-/** 1.21.0 기본 단축키: F1 백업, ` 복원, [ 퀵 세이브, ] 퀵 로드, 세이브 창·로드 창 끔 */
-const SAVE_KEYS = { backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null };
-const SAVE_OFF = { backup: null, restore: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null };
+/**
+ * 1.22.0 조합 기본 단축키(keyCode | Ctrl 256 | Shift 512): Ctrl+F6 자동 배속 빠르기, Ctrl+F7 자동 배속, Ctrl+F10 도망,
+ * Ctrl+S·Ctrl+L 퀵 세이브·퀵 로드, Ctrl+Shift+S·L 세이브 창·로드 창, Ctrl+B 백업, Ctrl+Shift+B 복원. keyMapper를 쓰지 않는다.
+ */
+const CTRL = 256, SHIFT = 512;
+const SAVE_KEYS = {
+  autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL,
+  quickSave: 83 | CTRL, quickLoad: 76 | CTRL, saveMenu: 83 | CTRL | SHIFT, loadMenu: 76 | CTRL | SHIFT,
+  backup: 66 | CTRL, restore: 66 | CTRL | SHIFT,
+};
 afterEach(() => { h?.bridge?._flushNow(); });
 
 // emits one story (message) record on the current branch
@@ -1011,14 +1018,14 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.21.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.22.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
-        speed: 1, effectiveSpeed: 1, skipSeen: false, troopId: null, canEscape: false, canLose: false,
+        speed: 1, effectiveSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8, troopId: null, canEscape: false, canLose: false,
         lastCommand: null, controlT: null, capturePictures: false, captureMenuScenes: false, captureNotices: false, notices: [], htmlNotices: false, extensions: [],
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS },
         quickSlot: 20,
@@ -1523,11 +1530,11 @@ describe("RPGViewerBridge", () => {
       h = newGame();
       const km2: Record<number, string> = { 13: "ok", 117: "otherPlugin" };
       h.g.Input.keyMapper = km2;
-      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null, ...SAVE_OFF });
+      // combos do not use Input.keyMapper: they keep working
+      expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: null, win: null, lose: null, hpFull: null, hpLow: null, ...SAVE_KEYS });
       poll(h);
       expect(km2).toEqual({
         13: "ok", 117: "otherPlugin", 118: "rpgvSkip", 121: "rpgvWin", 122: "rpgvLose", 36: "rpgvHpFull", 35: "rpgvHpLow",
-        112: "rpgvBackup", 192: "rpgvRestore", 219: "rpgvQuickSave", 221: "rpgvQuickLoad",
       });
       expect(assistOf(h).hotkeys).toEqual({ speed: null, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS });
     });
@@ -1643,6 +1650,113 @@ describe("RPGViewerBridge", () => {
       expect(h.g.BattleManager.calls).toEqual(["victory", "defeat:0"]);
     });
 
+    describe("combo hotkeys (1.22.0)", () => {
+      /** a combo (or plain key with modifiers) as a real keydown, then one frame; the key is released after */
+      const combo = (code: number, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; repeat?: boolean }) => {
+        const r = h.g.Input.keyEvent(code, mods);
+        h.bridge._frame(); h.g.Input.update(); h.g.Input.keyUp(code); h.g.Input.update();
+        return r;
+      };
+      const plain = (code: number) => { h.g.Input.press(code); h.bridge._frame(); h.g.Input.update(); };
+
+      it("Ctrl+F7 toggles 본 이벤트 자동 배속 in game (live.json, message); a control rewrite with the same value keeps it", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { autoFast: true, autoSpeed: 8, skipSeen: false });
+        h.bridge._tick();
+        expect(assistOf(h)).toMatchObject({ autoFast: true, autoSpeed: 8 });
+        expect(combo(118, { ctrl: true })).toEqual({ stopped: true, prevented: true });
+        expect(assistOf(h)).toMatchObject({ autoFast: false, skipSeen: false }); // plain F7 (skip) did not fire
+        expect(h.bridge._lastMessage).toBe("본 이벤트 자동 배속 끔");
+        writeControl(h, { autoFast: true, autoSpeed: 8, seenMessages: ["x"] }); // coverage rewrite, same value
+        poll(h);
+        expect(assistOf(h).autoFast).toBe(false);
+        combo(118, { ctrl: true });
+        expect(assistOf(h).autoFast).toBe(true);
+        expect(h.bridge._lastMessage).toBe("본 이벤트 자동 배속 켬");
+        writeControl(h, { autoFast: false, autoSpeed: 8 }); // the viewer changed it
+        poll(h);
+        expect(assistOf(h).autoFast).toBe(false);
+      });
+
+      it("Ctrl+F6 cycles 자동 배속 빠르기 ×2 → ×4 → ×8 without touching the base speed", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { speed: 1, autoSpeed: 8, autoFast: true });
+        h.bridge._tick();
+        combo(117, { ctrl: true });
+        expect(assistOf(h)).toMatchObject({ speed: 1, autoSpeed: 2 });
+        expect(h.bridge._lastMessage).toBe("본 이벤트 자동 배속 빠르기 ×2");
+        combo(117, { ctrl: true });
+        combo(117, { ctrl: true });
+        expect(assistOf(h)).toMatchObject({ speed: 1, autoSpeed: 8 });
+        writeControl(h, { speed: 1, autoSpeed: 8, autoFast: true, seenMessages: ["x"] });
+        poll(h);
+        combo(117, { ctrl: true });
+        expect(assistOf(h).autoSpeed).toBe(2);
+      });
+
+      it("modifiers match exactly: Ctrl+S is not plain S, plain F7 with Shift is nothing, plain keys never fire a combo", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { skipSeen: false, autoFast: true, hotkeys: { saveMenu: 83 } }); // plain S = 세이브 창, Ctrl+S = 퀵 세이브
+        h.bridge._tick();
+        expect(assistOf(h).hotkeys).toMatchObject({ saveMenu: 83, quickSave: 83 | CTRL, skip: 118 });
+        expect(h.g.Input.keyMapper[83]).toBe("rpgvSaveMenu");
+        expect(combo(118, { shift: true })).toEqual({ stopped: true, prevented: true }); // Shift+F7: not bound
+        expect(assistOf(h)).toMatchObject({ skipSeen: false, autoFast: true });
+        expect(combo(118, { ctrl: true, shift: true })).toEqual({ stopped: true, prevented: true });
+        expect(assistOf(h)).toMatchObject({ skipSeen: false, autoFast: true });
+        plain(118); // plain F7: skip only
+        expect(assistOf(h)).toMatchObject({ skipSeen: true, autoFast: true });
+        expect(h.bridge._lastMessage).toBe("본 대사 자동 넘기기 켬");
+        // a key we do not own passes through to the game with or without modifiers
+        expect(combo(90, { shift: true })).toEqual({ stopped: false, prevented: false });
+        expect(combo(65, { ctrl: true })).toEqual({ stopped: false, prevented: false });
+        // key repeat of a held combo does not fire again
+        h.g.Input.keyEvent(118, { ctrl: true });
+        h.g.Input.keyEvent(118, { ctrl: true, repeat: true });
+        h.bridge._frame();
+        expect(assistOf(h).autoFast).toBe(false);
+        h.g.Input.keyEvent(118, { ctrl: true, repeat: true });
+        h.bridge._frame();
+        expect(assistOf(h).autoFast).toBe(false);
+      });
+
+      it("rejects combos on game / window keys and Ctrl+Alt (default instead); Ctrl on letters is fine", () => {
+        h = newGame();
+        writeControl(h, { hotkeys: {
+          autoSpeed: 37 | CTRL, // Ctrl+← (moving key)
+          autoFast: 82 | CTRL, // Ctrl+R (reload)
+          escape: 90 | SHIFT, // Shift+Z (dash + OK)
+          quickSave: 83 | CTRL | 1024, // Ctrl+Alt+S
+          quickLoad: 17 | CTRL, // Ctrl alone
+          backup: 90 | CTRL, // Ctrl+Z: fine
+          restore: 4096 | 66,
+        } });
+        h.bridge._tick();
+        expect(assistOf(h).hotkeys).toEqual({
+          speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS, backup: 90 | CTRL,
+        });
+      });
+
+      it("Ctrl+F10 escapes in battle only when the battle allows it", () => {
+        h = newGame();
+        onMap(h);
+        combo(121, { ctrl: true });
+        expect(h.g.BattleManager.calls).toEqual([]);
+        startBattle(h);
+        h.g.BattleManager._canEscape = false;
+        combo(121, { ctrl: true });
+        expect(h.bridge._lastMessage).toBe("이 전투는 도망칠 수 없어요");
+        expect(h.g.BattleManager.calls).toEqual([]);
+        h.g.BattleManager._canEscape = true;
+        combo(121, { ctrl: true });
+        expect(assistOf(h).lastCommand).toBe("key-escape-" + h.clock.t);
+        expect(h.g.BattleManager.calls).toEqual(["escape:1", "abort"]);
+      });
+    });
+
     it("remaps hotkeys from control.json: invalid/reserved -> default, null disables, others' keys untouched", () => {
       h = newGame();
       const km = h.g.Input.keyMapper;
@@ -1661,7 +1775,7 @@ describe("RPGViewerBridge", () => {
       h.g.Input.press(117);
       h.bridge._frame();
       expect(assistOf(h).speed).toBe(1); // old F6 no longer bound
-      writeControl(h, { hotkeys: { speed: 999, skip: 13, win: "x" } }); // all invalid / missing -> defaults
+      writeControl(h, { hotkeys: { speed: 5000, skip: 13, win: "x" } }); // all invalid / missing -> defaults
       poll(h);
       expect(km[65]).toBeUndefined();
       expect([km[117], km[118], km[121], km[122]]).toEqual(["rpgvSpeed", "rpgvSkip", "rpgvWin", "rpgvLose"]);
@@ -1808,13 +1922,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.21\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.22\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.21.0");
+    expect(h.bridge.VERSION).toBe("1.22.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

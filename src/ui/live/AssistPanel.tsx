@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, Gauge, Heart, HeartCrack, History, Save, WandSparkles } from "lucide-react";
-import { openCheatSheet } from "./cheat/CheatSheet";
+import { FolderOpen, Gauge, Heart, HeartCrack, History, Save } from "lucide-react";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
-  AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HP_COMMAND_MIN_VERSION, hotkeySummary,
+  AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode,
+  HP_COMMAND_MIN_VERSION, hotkeySummary,
   isAutoSpeed, isHpCommand, isQuickSlot, isSaveCommand, isSpeed, keyLabel, liveHotkeys, SAVE_COMMAND_MIN_VERSION, sameHotkeys, SPEEDS,
   validateHotkey, versionAtLeast, type HotkeyAction,
 } from "@/core/live/assist";
@@ -70,23 +70,34 @@ export function AssistPanel() {
   /** 마지막 명령이 세이브·로드 명령이면 응답을 세이브 칸에 보인다 */
   const saveSent = isSaveCommand(sentCommand?.kind);
 
-  // 단축키 바꾸기: 고른 동작의 다음 keydown을 잡는다(Escape는 취소).
+  // 단축키 바꾸기: 고른 동작의 다음 keydown을 Ctrl·Shift·Alt 조합과 함께 잡는다(Escape는 취소).
   const [capturing, setCapturing] = useState<HotkeyAction | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
+  /** 잡는 중에 누르고 있는 조합 키("Ctrl+Shift+") */
+  const [heldMods, setHeldMods] = useState("");
   useEffect(() => {
     if (capturing === null) return;
+    const modsOf = (e: KeyboardEvent) => (e.ctrlKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "");
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "Escape") { setCapturing(null); return; }
-      const code = e.keyCode;
+      if (e.key === "Escape") { setCapturing(null); setHeldMods(""); return; }
+      // 조합 키만 누르면 다음 키를 기다린다
+      if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.key === "Meta") { setHeldMods(modsOf(e)); return; }
+      const code = hotkeyCode(e.keyCode, { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
       const err = validateHotkey(code, capturing, hotkeys);
       setHotkeyError(err);
       setCapturing(null);
+      setHeldMods("");
       if (err === null) setSettings({ ...settings, hotkeys: { ...hotkeys, [capturing]: code } });
     };
+    const onKeyUp = (e: KeyboardEvent) => setHeldMods(modsOf(e));
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
   }, [capturing, hotkeys, settings, setSettings]);
 
   // 게임이 보고한 단축키가 설정과 5초 넘게 다르면 플러그인 업데이트를 안내한다.
@@ -106,11 +117,12 @@ export function AssistPanel() {
   const setHotkey = (action: HotkeyAction, code: number | null) => {
     setHotkeyError(null);
     setCapturing(null);
+    setHeldMods("");
     setSettings({ ...settings, hotkeys: { ...hotkeys, [action]: code } });
   };
 
   return (
-    <Popover open={panelOpen} onOpenChange={(open) => { setPanelOpen(open); if (!open) { setCapturing(null); setHotkeyError(null); } }}>
+    <Popover open={panelOpen} onOpenChange={(open) => { setPanelOpen(open); if (!open) { setCapturing(null); setHeldMods(""); setHotkeyError(null); } }}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm"><Gauge />게임 보조</Button>
       </PopoverTrigger>
@@ -129,21 +141,28 @@ export function AssistPanel() {
             {SPEEDS.map((s) => <ToggleGroupItem key={s} value={String(s)}>×{s}</ToggleGroupItem>)}
           </ToggleGroup>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="assist-skip-seen">본 대사 자동 넘기기</Label>
-          <Switch
-            id="assist-skip-seen" disabled={!supported} checked={settings.skipSeen}
-            onCheckedChange={(c) => setSettings({ ...settings, skipSeen: c })}
-          />
-        </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="assist-auto-fast">본 이벤트 자동 배속</Label>
+            <Label htmlFor="assist-skip-seen">본 대사 자동 넘기기</Label>
             <Switch
-              id="assist-auto-fast" disabled={!supported} checked={settings.autoFast}
-              onCheckedChange={(c) => setSettings({ ...settings, autoFast: c })}
+              id="assist-skip-seen" disabled={!supported} checked={settings.skipSeen}
+              onCheckedChange={(c) => setSettings({ ...settings, skipSeen: c })}
             />
           </div>
+          <p className="text-xs text-muted-foreground">이미 본 대사는 바로 넘겨요</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="assist-auto-fast">본 이벤트 자동 배속</Label>
+              <Switch
+                id="assist-auto-fast" disabled={!supported} checked={settings.autoFast}
+                onCheckedChange={(c) => setSettings({ ...settings, autoFast: c })}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">대사·선택지를 모두 본 이벤트는 아래 빠르기로 돌려요</p>
+          </div>
+          <Label className="text-xs text-muted-foreground">빠르기</Label>
           <ToggleGroup
             type="single" variant="outline" size="sm" disabled={!supported || !settings.autoFast}
             value={String(settings.autoSpeed)}
@@ -237,11 +256,6 @@ export function AssistPanel() {
           </AlertDialog>
         </div>
         <Separator />
-        <div className="flex items-center justify-between gap-2">
-          <Label>아이템·능력치·스위치</Label>
-          <Button variant="outline" size="sm" onClick={() => { setPanelOpen(false); openCheatSheet(); }}><WandSparkles />치트 열기</Button>
-        </div>
-        <Separator />
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
             <Label>단축키</Label>
@@ -252,25 +266,33 @@ export function AssistPanel() {
               기본값으로
             </Button>
           </div>
-          {HOTKEY_ACTIONS.map(({ action, label }) => {
-            const code = hotkeys[action];
-            return (
-              <div key={action} className="flex items-center justify-between gap-2">
-                <span className="text-sm">{label}</span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="outline" size="sm" disabled={!supported}
-                    onClick={() => { setHotkeyError(null); setCapturing(capturing === action ? null : action); }}
-                  >
-                    {capturing === action ? "키를 누르세요…" : code === null ? "꺼짐" : keyLabel(code)}
-                  </Button>
-                  <Button variant="ghost" size="sm" disabled={!supported || code === null} onClick={() => setHotkey(action, null)}>
-                    끄기
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+          {HOTKEY_GROUPS.map((group) => (
+            <div key={group} className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">{group}</p>
+              {HOTKEY_ACTIONS.filter((a) => a.group === group).map(({ action, label }) => {
+                const code = hotkeys[action];
+                return (
+                  <div key={action} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 text-sm">{label}</span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="outline" size="sm" disabled={!supported}
+                        onClick={() => { setHotkeyError(null); setHeldMods(""); setCapturing(capturing === action ? null : action); }}
+                      >
+                        {capturing === action ? `${heldMods}키를 누르세요…` : code === null ? "꺼짐" : keyLabel(code)}
+                      </Button>
+                      <Button variant="ghost" size="sm" disabled={!supported || code === null} onClick={() => setHotkey(action, null)}>
+                        끄기
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {capturing !== null && (
+            <p className="text-xs text-muted-foreground">Ctrl·Shift·Alt를 누른 채로 누르면 조합 키가 돼요 (Esc: 취소)</p>
+          )}
           {hotkeyError && <p className="text-xs text-destructive">{hotkeyError}</p>}
           {showMismatch && (
             <p className="text-xs text-muted-foreground">게임에 적용되지 않은 단축키가 있어요 — 플러그인을 업데이트해 주세요</p>
