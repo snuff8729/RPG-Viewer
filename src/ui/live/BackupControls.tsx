@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AssistControlSize } from "./AssistControls";
-import { assistFavoriteLabel } from "./assistItems";
+import { assistFavoriteLabel, assistFavoriteShortLabel } from "./assistItems";
 import { gameKeyOf } from "./readPosition";
 import { useGamePath, useLauncherAvailable } from "./useGamePath";
 
@@ -52,29 +52,32 @@ function useNote(): [string | null, (s: string | null) => void] {
 
 interface Props {
   size?: AssistControlSize;
-  /** 버튼 바로 옆에 둘 것(예: 즐겨찾기 ☆) */
+  /** 칸 오른쪽 끝에 둘 것(예: 즐겨찾기 ☆). 있으면 버튼이 칸을 채운다(보조 탭 칸 나눔과 같은 모양). */
   favorite?: ReactNode;
+  /** 짧은 이름(맨 위 줄) */
+  short?: boolean;
 }
 
 const NO_PATH = "백업 창에서 게임 폴더 위치를 먼저 정해 주세요";
 
-/** 버튼 + 결과 글(툴팁) + 옆에 둘 것 */
+/** 버튼 + 결과 글(툴팁) + 오른쪽 끝에 둘 것 */
 function BackupControlShell({ button, tip, favorite }: { button: ReactNode; tip: string | null; favorite?: ReactNode }) {
+  const fill = favorite != null;
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className={fill ? "flex min-w-0 items-center gap-1" : "inline-flex items-center gap-1"}>
       {tip === null ? button : (
         <Tooltip open>
-          <TooltipTrigger asChild><span className="inline-flex">{button}</span></TooltipTrigger>
+          <TooltipTrigger asChild><span className={fill ? "flex min-w-0 flex-1" : "inline-flex"}>{button}</span></TooltipTrigger>
           <TooltipContent>{tip}</TooltipContent>
         </Tooltip>
       )}
-      {favorite}
+      {fill && <span className="ml-auto shrink-0">{favorite}</span>}
     </span>
   );
 }
 
 /** `지금 백업` 한 번 누르기(백업 창의 `지금 백업`과 같다, 이름 없이). 휴대폰 보기·백업을 못 쓰는 곳에서는 그리지 않는다. */
-export function BackupNowButton({ size = "sm", favorite }: Props) {
+export function BackupNowButton({ size = "sm", favorite, short }: Props) {
   const ctl = useBackupControls();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useNote();
@@ -93,8 +96,11 @@ export function BackupNowButton({ size = "sm", favorite }: Props) {
     }
   };
   const button = (
-    <Button variant="outline" size={size} disabled={!path || busy} title={path ? undefined : NO_PATH} onClick={() => void onClick()}>
-      <Save />{busy ? "백업 중…" : assistFavoriteLabel("backup")}
+    <Button
+      variant="outline" size={size} disabled={!path || busy} className={favorite != null ? "min-w-0 flex-1" : undefined}
+      title={path ? (short ? assistFavoriteLabel("backup") : undefined) : NO_PATH} onClick={() => void onClick()}
+    >
+      <Save />{busy ? "백업 중…" : short ? assistFavoriteShortLabel("backup") : assistFavoriteLabel("backup")}
     </Button>
   );
   return <BackupControlShell button={button} tip={note} favorite={favorite} />;
@@ -104,7 +110,7 @@ export function BackupNowButton({ size = "sm", favorite }: Props) {
  * `마지막 백업으로 복원`: 게임 창 단축키 복원과 같은 백업(latestRestorable — 가장 최근의 직접·자동 백업)으로 되돌리고 게임을 다시 켠다.
  * 누르면 그 백업 시각을 보여 주고 한 번 더 묻는다. 휴대폰 보기·백업을 못 쓰는 곳에서는 그리지 않는다.
  */
-export function RestoreLatestButton({ size = "sm", favorite }: Props) {
+export function RestoreLatestButton({ size = "sm", favorite, short }: Props) {
   const ctl = useBackupControls();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useNote();
@@ -138,8 +144,11 @@ export function RestoreLatestButton({ size = "sm", favorite }: Props) {
     }
   };
   const button = (
-    <Button variant="outline" size={size} disabled={!path || busy} title={path ? undefined : NO_PATH} onClick={() => void onClick()}>
-      <ArchiveRestore />{busy ? "복원 중…" : assistFavoriteLabel("restore")}
+    <Button
+      variant="outline" size={size} disabled={!path || busy} className={favorite != null ? "min-w-0 flex-1" : undefined}
+      title={path ? (short ? assistFavoriteLabel("restore") : undefined) : NO_PATH} onClick={() => void onClick()}
+    >
+      <ArchiveRestore />{busy ? "복원 중…" : short ? assistFavoriteShortLabel("restore") : assistFavoriteLabel("restore")}
     </Button>
   );
   return (

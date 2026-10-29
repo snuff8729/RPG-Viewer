@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { assistItemLabel, type AssistCommandItemId, type AssistFavoriteSlot } from "./assistItems";
+import { assistItemLabel, assistItemShortLabel, type AssistCommandItemId, type AssistFavoriteSlot } from "./assistItems";
 import { useAssistGuards } from "./useAssistSession";
 
 /** sm = 게임 보조 창·위 줄(작게), lg = 휴대폰(크게 누르기 쉽게). 버튼·배속 고르기에만 적용된다. */
@@ -22,23 +22,30 @@ export type AssistControlSize = "sm" | "lg";
 
 interface ControlProps {
   size?: AssistControlSize;
-  /** 조작 바로 옆에 둘 것(예: 즐겨찾기 ☆). 없으면 조작만 그린다. */
+  /** 조작 옆(줄·칸의 오른쪽 끝)에 둘 것(예: 즐겨찾기 ☆). 없으면 조작만 그린다. */
   favorite?: ReactNode;
+  /** 짧은 이름(맨 위 줄). 긴 이름은 툴팁(title)으로. 배속 고르기는 칸을 붙여 좁게 그린다. */
+  short?: boolean;
 }
 
-/** 조작 + 옆에 둘 것. 옆에 둘 것이 없으면 감싸지 않는다(모양 그대로). */
+/** ☆가 있는 버튼 묶음 칸: 칸마다 버튼 + 오른쪽 끝 ☆(보조 탭·백업 줄이 같이 쓴다) */
+// eslint-disable-next-line react-refresh/only-export-components
+export const ASSIST_FAVORITE_GRID = "grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-2";
+
+/** 조작 + 줄(칸) 오른쪽 끝에 둘 것. 옆에 둘 것이 없으면 감싸지 않는다(모양 그대로). */
 function WithFavorite({ favorite, children }: { favorite?: ReactNode; children: ReactNode }) {
   if (favorite == null || favorite === false) return <>{children}</>;
-  return <span className="inline-flex items-center gap-1">{children}{favorite}</span>;
+  return <div className="flex min-w-0 items-center gap-1">{children}<span className="ml-auto shrink-0">{favorite}</span></div>;
 }
 
 /** 배속(×1 ~). */
-export function SpeedControl({ size = "sm", favorite }: ControlProps) {
+export function SpeedControl({ size = "sm", favorite, short }: ControlProps) {
   const { settings, setSettings, supported } = useAssist();
   return (
     <WithFavorite favorite={favorite}>
       <ToggleGroup
-        type="single" variant="outline" size={size} disabled={!supported} aria-label={assistItemLabel("speed")}
+        type="single" variant="outline" size={size} spacing={short ? 0 : undefined} disabled={!supported} aria-label={assistItemLabel("speed")}
+        title={short ? assistItemLabel("speed") : undefined}
         value={String(settings.speed)}
         onValueChange={(v) => { const n = Number(v); if (isSpeed(n)) setSettings({ ...settings, speed: n }); }}
       >
@@ -49,11 +56,12 @@ export function SpeedControl({ size = "sm", favorite }: ControlProps) {
 }
 
 /** 본 이벤트 자동 배속의 빠르기(자동 배속이 켜져 있을 때만). */
-export function AutoSpeedControl({ size = "sm" }: { size?: AssistControlSize }) {
+export function AutoSpeedControl({ size = "sm", short }: { size?: AssistControlSize; short?: boolean }) {
   const { settings, setSettings, supported } = useAssist();
   return (
     <ToggleGroup
-      type="single" variant="outline" size={size} disabled={!supported || !settings.autoFast} aria-label="자동 배속 빠르기"
+      type="single" variant="outline" size={size} spacing={short ? 0 : undefined} disabled={!supported || !settings.autoFast} aria-label="자동 배속 빠르기"
+      title={short ? "자동 배속 빠르기" : undefined}
       value={String(settings.autoSpeed)}
       onValueChange={(v) => { const n = Number(v); if (isAutoSpeed(n)) setSettings({ ...settings, autoSpeed: n }); }}
     >
@@ -62,38 +70,39 @@ export function AutoSpeedControl({ size = "sm" }: { size?: AssistControlSize }) 
   );
 }
 
-/** 이름 + 켜고 끄기 한 줄 */
-function SwitchRow({ id, label, checked, onChange, favorite }: {
-  id: string; label: string; checked: boolean; onChange(c: boolean): void; favorite?: ReactNode;
+/** 이름 + 켜고 끄기 한 줄. 줄에서는 이름 왼쪽, 스위치·☆ 오른쪽 끝(☆가 맨 끝). short = 맨 위 줄(이름 바로 옆에 스위치). */
+function SwitchRow({ id, label, title, checked, onChange, favorite, short }: {
+  id: string; label: string; title?: string; checked: boolean; onChange(c: boolean): void; favorite?: ReactNode; short?: boolean;
 }) {
   const { supported } = useAssist();
   return (
-    <div className="flex items-center justify-between gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <WithFavorite favorite={favorite}>
-        <Switch id={id} disabled={!supported} checked={checked} onCheckedChange={onChange} />
-      </WithFavorite>
+    <div className={short ? "flex items-center gap-1.5" : "flex items-center gap-2"} title={title}>
+      <Label htmlFor={id} className={short ? undefined : "mr-auto"}>{label}</Label>
+      <Switch id={id} disabled={!supported} checked={checked} onCheckedChange={onChange} />
+      {favorite}
     </div>
   );
 }
 
 /** 본 대사 자동 넘기기 켜고 끄기. 한 화면에 둘 이상 둘 때는 id를 달리 준다. */
-export function SkipSeenControl({ favorite, id = "assist-skip-seen" }: ControlProps & { id?: string }) {
+export function SkipSeenControl({ favorite, short, id = "assist-skip-seen" }: ControlProps & { id?: string }) {
   const { settings, setSettings } = useAssist();
   return (
     <SwitchRow
-      id={id} label={assistItemLabel("skipSeen")} checked={settings.skipSeen} favorite={favorite}
+      id={id} label={short ? assistItemShortLabel("skipSeen") : assistItemLabel("skipSeen")} title={short ? assistItemLabel("skipSeen") : undefined}
+      checked={settings.skipSeen} favorite={favorite} short={short}
       onChange={(c) => setSettings({ ...settings, skipSeen: c })}
     />
   );
 }
 
 /** 본 이벤트 자동 배속 켜고 끄기. 한 화면에 둘 이상 둘 때는 id를 달리 준다. */
-export function AutoFastControl({ favorite, id = "assist-auto-fast" }: ControlProps & { id?: string }) {
+export function AutoFastControl({ favorite, short, id = "assist-auto-fast" }: ControlProps & { id?: string }) {
   const { settings, setSettings } = useAssist();
   return (
     <SwitchRow
-      id={id} label={assistItemLabel("autoFast")} checked={settings.autoFast} favorite={favorite}
+      id={id} label={short ? assistItemShortLabel("autoFast") : assistItemLabel("autoFast")} title={short ? assistItemLabel("autoFast") : undefined}
+      checked={settings.autoFast} favorite={favorite} short={short}
       onChange={(c) => setSettings({ ...settings, autoFast: c })}
     />
   );
@@ -114,7 +123,7 @@ const CONFIRM: Partial<Record<AssistCommandItemId, { title: string; description:
  * 게임에 명령 하나를 보내는 버튼(이기기·지기·도망·적 체력·내 체력·세이브·로드).
  * 쓸 수 없을 때(전투 밖·플러그인 버전·도망 못 침)는 꺼지고, 지기(게임 오버 전투)·퀵 로드는 한 번 더 묻는다.
  */
-export function AssistCommandButton({ id, size = "sm", favorite }: ControlProps & { id: AssistCommandItemId }) {
+export function AssistCommandButton({ id, size = "sm", favorite, short }: ControlProps & { id: AssistCommandItemId }) {
   const { sendCommand } = useAssist();
   const g = useAssistGuards();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -134,8 +143,12 @@ export function AssistCommandButton({ id, size = "sm", favorite }: ControlProps 
   return (
     <>
       <WithFavorite favorite={favorite}>
-        <Button variant="outline" size={size} disabled={disabled} onClick={() => { if (ask) setConfirmOpen(true); else sendCommand(id); }}>
-          {Icon && <Icon />}{assistItemLabel(id)}
+        <Button
+          variant="outline" size={size} disabled={disabled} className={favorite ? "min-w-0 flex-1" : undefined}
+          title={short && assistItemShortLabel(id) !== assistItemLabel(id) ? assistItemLabel(id) : undefined}
+          onClick={() => { if (ask) setConfirmOpen(true); else sendCommand(id); }}
+        >
+          {Icon && <Icon />}{short ? assistItemShortLabel(id) : assistItemLabel(id)}
         </Button>
       </WithFavorite>
       {confirm && (
@@ -163,32 +176,33 @@ interface GroupProps {
   className?: string;
 }
 
+/** ☆가 있으면 칸 나눔(칸마다 버튼 + 오른쪽 끝 ☆), 없으면 버튼만 한 줄(줄 바꿈) */
 function CommandGroup({ ids, size, favorite, className }: GroupProps & { ids: readonly AssistCommandItemId[] }) {
   return (
-    <div className={className}>
+    <div className={className ?? (favorite ? ASSIST_FAVORITE_GRID : "flex flex-wrap gap-2")}>
       {ids.map((id) => <AssistCommandButton key={id} id={id} size={size} favorite={favorite?.(id)} />)}
     </div>
   );
 }
 
 /** 전투: 이기기 · 지기 · 도망 */
-export function BattleControls({ className = "flex gap-2", ...rest }: GroupProps) {
-  return <CommandGroup ids={["win", "lose", "escape"]} className={className} {...rest} />;
+export function BattleControls(props: GroupProps) {
+  return <CommandGroup ids={["win", "lose", "escape"]} {...props} />;
 }
 
 /** 적 체력 100% · 1% */
-export function EnemyHpControls({ className = "flex gap-2", ...rest }: GroupProps) {
-  return <CommandGroup ids={["enemyHpFull", "enemyHpLow"]} className={className} {...rest} />;
+export function EnemyHpControls(props: GroupProps) {
+  return <CommandGroup ids={["enemyHpFull", "enemyHpLow"]} {...props} />;
 }
 
 /** 내 체력 100% · 1% */
-export function HpControls({ className = "flex gap-2", ...rest }: GroupProps) {
-  return <CommandGroup ids={["hpFull", "hpLow"]} className={className} {...rest} />;
+export function HpControls(props: GroupProps) {
+  return <CommandGroup ids={["hpFull", "hpLow"]} {...props} />;
 }
 
 /** 퀵 세이브 · 퀵 로드 · 세이브 창 · 로드 창 */
-export function SaveControls({ className = "flex flex-wrap gap-2", ...rest }: GroupProps) {
-  return <CommandGroup ids={["quickSave", "quickLoad", "saveMenu", "loadMenu"]} className={className} {...rest} />;
+export function SaveControls(props: GroupProps) {
+  return <CommandGroup ids={["quickSave", "quickLoad", "saveMenu", "loadMenu"]} {...props} />;
 }
 
 /** 퀵 세이브 칸 입력(빈칸 = 마지막 칸) */

@@ -2,6 +2,7 @@ import { useAssist } from "@/app/LiveProvider";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { ASSIST_FAVORITE_GRID } from "./AssistControls";
 import { AssistFavoriteStar } from "./AssistFavoriteStar";
 import { AssistContent } from "./AssistPanel";
 import { BackupNowButton, RestoreLatestButton, useBackupControls } from "./BackupControls";
@@ -31,7 +32,7 @@ export function AssistTab({ session, active = true, className }: AssistTabProps)
           <Separator />
           <div className="flex flex-col gap-2">
             <Label>백업</Label>
-            <div className="flex flex-wrap gap-2">
+            <div className={ASSIST_FAVORITE_GRID}>
               <BackupNowButton favorite={<AssistFavoriteStar id="backup" />} />
               <RestoreLatestButton favorite={<AssistFavoriteStar id="restore" />} />
             </div>

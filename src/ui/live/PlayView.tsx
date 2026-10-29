@@ -17,22 +17,27 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 const layoutStore = safeStore();
 
-/** 맨 위 줄: 연결 상태·지금 맵·남은 것, 보조 즐겨찾기, `⋯` 메뉴(실행·휴대폰으로 보기·백업·게임 설정). */
+/**
+ * 맨 위: 첫 줄은 연결 상태·지금 맵·남은 것과 `⋯` 메뉴(실행·휴대폰으로 보기·백업·게임 설정),
+ * 둘째 줄은 보조 즐겨찾기(왼쪽부터, 짧은 이름, 넘치면 줄 바꿈).
+ */
 function PlayTopBar({ popup }: { popup: boolean }) {
   return (
-    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3 py-1.5">
-      {!popup && (
-        <>
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
-        </>
-      )}
-      <ConnectionBadge />
-      <PlayTopBarMapName />
-      <AssistFavoritesBar size="sm" className="min-w-0 flex-1" />
-      <div className="ml-auto flex items-center gap-2">
-        <PlayMenu />
+    <header className="flex shrink-0 flex-col border-b">
+      <div className="flex h-12 items-center gap-3 px-3">
+        {!popup && (
+          <>
+            <SidebarTrigger />
+            <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
+          </>
+        )}
+        <ConnectionBadge />
+        <PlayTopBarMapName />
+        <div className="ml-auto flex items-center gap-2">
+          <PlayMenu />
+        </div>
       </div>
+      <AssistFavoritesBar size="sm" className="px-3 pb-2" />
     </header>
   );
 }

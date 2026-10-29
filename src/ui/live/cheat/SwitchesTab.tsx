@@ -85,13 +85,14 @@ function VariableRow({ entry, live, disabled, apply, finder, note, badge, editab
   const desc = note ?? `지금 ${current === null ? "?" : current}`;
   const nick = nicknameOf(finder, "variable", entry.id);
   return (
-    <Item variant="outline" size="xs" className="flex-nowrap">
+    <Item variant="outline" size="xs">
       <StarButton finder={finder} kind="variable" id={entry.id} />
-      <ItemContent className="min-w-0">
+      {/* 좁으면 이름 몫(10rem)을 남기고 입력·적용은 다음 줄로 */}
+      <ItemContent className="min-w-40">
         <RowTitle finder={finder} kind="variable" entry={entry} editable={editable}>{badge}</RowTitle>
         <ItemDescription className="truncate">{nick ? `${entry.name || "(이름 없음)"} · ${desc}` : desc}</ItemDescription>
       </ItemContent>
-      <ItemActions>
+      <ItemActions className="ml-auto">
         <Input className="h-6 w-20 text-xs" placeholder="새 값" value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} />
         <Button
           size="xs" disabled={disabled || text === "" || text.length > 1000}
@@ -312,8 +313,8 @@ export function SwitchesTab({ data, live, disabled, apply, finder }: CheatTabPro
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <ToggleGroup type="single" variant="outline" size="sm" value={kind} onValueChange={(v) => { if (v === "switch" || v === "variable") setKind(v); }}>
-          <ToggleGroupItem value="switch">스위치</ToggleGroupItem>
           <ToggleGroupItem value="variable">변수</ToggleGroupItem>
+          <ToggleGroupItem value="switch">스위치</ToggleGroupItem>
         </ToggleGroup>
         <Tabs value={mode} onValueChange={(v) => finder.setMode(v as FinderMode)}>
           <TabsList className="w-full">

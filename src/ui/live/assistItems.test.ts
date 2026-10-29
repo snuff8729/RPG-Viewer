@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ASSIST_FAVORITE_IDS } from "@/core/live/favoritesFile";
-import { ASSIST_ITEMS, assistFavoriteLabel, BACKUP_ITEMS, visibleAssistFavorites, withObjectParticle } from "./assistItems";
+import { ASSIST_ITEMS, assistFavoriteLabel, assistFavoriteShortLabel, BACKUP_ITEMS, visibleAssistFavorites, withObjectParticle } from "./assistItems";
 
 describe("assist favorites bar items", () => {
   it("every favorite id has a control and a label", () => {
@@ -8,7 +8,14 @@ describe("assist favorites bar items", () => {
     for (const id of ASSIST_FAVORITE_IDS) {
       expect(ids.has(id)).toBe(true);
       expect(assistFavoriteLabel(id)).not.toBe(id);
+      expect(assistFavoriteShortLabel(id)).not.toBe(id);
+      expect(assistFavoriteShortLabel(id).length).toBeLessThanOrEqual(assistFavoriteLabel(id).length);
     }
+  });
+  it("uses short names in the bar", () => {
+    expect(assistFavoriteShortLabel("skipSeen")).toBe("넘기기");
+    expect(assistFavoriteShortLabel("enemyHpFull")).toBe("적 HP 100%");
+    expect(assistFavoriteShortLabel("restore")).toBe("복원");
   });
   it("hides battle controls outside battle, keeps order", () => {
     expect(visibleAssistFavorites(["speed", "win", "hpFull", "escape"], false)).toEqual(["speed", "hpFull"]);
