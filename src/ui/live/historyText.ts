@@ -33,7 +33,7 @@ export function stateChangeText(c: StateChange, data: GameData): string {
 
 export function battleText(r: RecordOf<"battle">, data: GameData): string {
   if (r.phase === "start") return `⚔ 전투 시작: ${r.troopName || data.troops?.[r.troopId]?.name || `#${r.troopId}`}`;
-  const res = r.result === "win" ? "승리" : r.result === "escape" ? "도주" : r.result === "lose" ? "패배" : r.result === "abort" ? "중단" : "";
+  const res = r.result === "win" ? (r.skipped === true ? "건너뜀(이김)" : "승리") : r.result === "escape" ? "도주" : r.result === "lose" ? "패배" : r.result === "abort" ? "중단" : "";
   return res ? `⚔ 전투 종료: ${res}` : "⚔ 전투 종료";
 }
 

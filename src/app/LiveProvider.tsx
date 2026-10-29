@@ -16,7 +16,7 @@ import { logEditPaths } from "./logEdit";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
 import type { GameData, GameIndex } from "@/core/types";
 import {
-  adoptLiveAssist, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, hotkeysForSave, mergeAssist,
+  adoptLiveAssist, ASSIST_KEYS, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, hotkeysForSave, mergeAssist,
   migrateSavedAssist, normalizeAssist, parseControlFile, resyncDue, seenSets, versionAtLeast,
   type AssistCommand, type AssistCommandKind, type AssistKey, type AssistSettings, type ControlFile, type SeenSets, type WrittenControl,
 } from "@/core/live/assist";
@@ -186,7 +186,7 @@ function loadAssist(gameKey: string | null): AssistSettings {
   }
 }
 const dirtyStorageKey = (gameKey: string) => `rpgv.assistDirty.${gameKey}`;
-const ASSIST_KEY_SET: ReadonlySet<string> = new Set<AssistKey>(["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot"]);
+const ASSIST_KEY_SET: ReadonlySet<string> = new Set<AssistKey>(ASSIST_KEYS);
 let keyReplySeq = 0;
 /** 아직 control.json에 쓰지 못한 설정 키(게임별) */
 function loadDirty(gameKey: string | null): Set<AssistKey> {

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
-  AutoFastControl, AutoSpeedControl, BattleControls, EnemyHpControls, HotkeySettings, HpControls, QuickSlotInput, SaveControls,
+  AutoFastControl, AutoSpeedControl, BattleControls, EncounterControl, EnemyHpControls, HotkeySettings, HpControls, QuickSlotInput, SaveControls,
   SkipSeenControl, SpeedControl,
 } from "./AssistControls";
 import { withObjectParticle, type AssistFavoriteSlot } from "./assistItems";
@@ -29,7 +29,7 @@ export interface AssistContentProps {
 }
 
 /**
- * 게임 보조 내용(덮개 없이): 배속·본 대사 자동 넘기기·자동 배속·전투·체력·세이브·단축키.
+ * 게임 보조 내용(덮개 없이): 배속·본 대사 자동 넘기기·자동 배속·적 만남·전투·체력·세이브·단축키.
  * 칸들을 Fragment로 내놓으므로 바깥에서 `flex flex-col gap-*`로 감싼다(PopoverContent는 이미 그렇다).
  */
 export function AssistContent(props: AssistContentProps) {
@@ -44,7 +44,9 @@ function AssistContentOwn(props: AssistContentProps) {
 function AssistBody({ session, active = true, header = true, favorite }: AssistContentProps & { session: AssistSession }) {
   const { settings } = useAssist();
   const { live } = useLive();
-  const { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, canEscape, canLose } = useAssistGuards();
+  const { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, encounterSupported, canEscape, canLose } = useAssistGuards();
+  /** 게임이 기억하는 이겨 본 적 종류 수(플러그인 1.24.0) */
+  const knownEnemies: unknown = live?.assist?.knownEnemies;
   const { statusText, hpSent, saveSent, showMismatch } = session;
   /** 게임이 알려 준 지금의 퀵 세이브 칸 */
   const liveSlot: unknown = live?.assist?.quickSlot;
@@ -74,6 +76,27 @@ function AssistBody({ session, active = true, header = true, favorite }: AssistC
         </div>
         <Label className="text-xs text-muted-foreground">빠르기</Label>
         <AutoSpeedControl />
+      </div>
+      <Separator />
+      <div className="flex flex-col gap-2">
+        <Label>적 만남</Label>
+        <div className="flex flex-col gap-1">
+          <EncounterControl item="noRandomEncounter" favorite={favorite?.("noRandomEncounter")} />
+          <p className="text-xs text-muted-foreground">걸어 다녀도 랜덤 전투가 일어나지 않아요</p>
+        </div>
+        <div className="flex flex-col gap-1">
+          <EncounterControl item="skipBattles" favorite={favorite?.("skipBattles")} />
+          <p className="text-xs text-muted-foreground">전투 화면 없이 바로 이기고 경험치·골드·아이템을 받아요. 대화가 있는 전투는 그대로 싸워요</p>
+        </div>
+        <div className="flex flex-col gap-1">
+          <EncounterControl item="skipKnownOnly" favorite={favorite?.("skipKnownOnly")} />
+          <p className="text-xs text-muted-foreground">
+            모든 적을 한 번이라도 이겨 본 전투만 건너뛰어요{typeof knownEnemies === "number" ? ` (이겨 본 적 ${knownEnemies}종)` : ""}
+          </p>
+        </div>
+        {supported && !encounterSupported && (
+          <p className="text-xs text-muted-foreground">플러그인을 1.24.0으로 업데이트하면 쓸 수 있어요</p>
+        )}
       </div>
       <Separator />
       <div className="flex flex-col gap-2">

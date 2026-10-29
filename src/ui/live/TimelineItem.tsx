@@ -197,7 +197,8 @@ function rewardsText(rw: RecordOf<"battle">["rewards"], data: GameData): string 
 /** 전투 한 번(기록 탭): 머리(적 무리·결과·보상) + 안의 기록. 다시 본 같은 전투는 통째로 접는다. */
 function BattleTimeline({ item, ctx }: { item: BattleHistoryItem; ctx: TimelineCtx }) {
   const result = item.end?.result;
-  const label = result && result in BATTLE_RESULT_LABEL ? BATTLE_RESULT_LABEL[result] : item.end ? "끝남" : "진행 중";
+  const label = result === "win" && item.end?.skipped === true ? "건너뜀(이김)"
+    : result && result in BATTLE_RESULT_LABEL ? BATTLE_RESULT_LABEL[result] : item.end ? "끝남" : "진행 중";
   const variant = result === "win" ? "default" : result === "lose" ? "destructive" : "secondary";
   const rewards = rewardsText(item.end?.rewards, ctx.data);
   return (

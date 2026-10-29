@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
-  COMMAND_RESPONSE_MS, commandStatus, commandStatusText, ENEMY_HP_COMMAND_MIN_VERSION, HP_COMMAND_MIN_VERSION, isHpCommand, isSaveCommand,
+  COMMAND_RESPONSE_MS, commandStatus, commandStatusText, ENCOUNTER_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HP_COMMAND_MIN_VERSION, isHpCommand, isSaveCommand,
   liveHotkeys, SAVE_COMMAND_MIN_VERSION, sameHotkeys, versionAtLeast,
 } from "@/core/live/assist";
 
@@ -19,10 +19,12 @@ export function useAssistGuards() {
   const saveSupported = supported && versionAtLeast(live?.pluginVersion, SAVE_COMMAND_MIN_VERSION);
   /** 적 체력 명령은 플러그인 1.23.0부터(전투 중만) */
   const enemyHpSupported = supported && versionAtLeast(live?.pluginVersion, ENEMY_HP_COMMAND_MIN_VERSION);
+  /** 랜덤 전투 끄기·전투 건너뛰기·잡아 본 적만은 플러그인 1.24.0부터 */
+  const encounterSupported = supported && versionAtLeast(live?.pluginVersion, ENCOUNTER_MIN_VERSION);
   // 전투 안전장치: 플러그인이 false라고 알려 줄 때만 막는다(구버전은 필드가 없다).
   const canEscape = live?.assist?.canEscape !== false;
   const canLose = live?.assist?.canLose !== false;
-  return { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, canEscape, canLose };
+  return { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, encounterSupported, canEscape, canLose };
 }
 
 /**

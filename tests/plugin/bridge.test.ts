@@ -1018,14 +1018,15 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.23.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.24.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
-        speed: 1, effectiveSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8, troopId: null, canEscape: false, canLose: false,
+        speed: 1, effectiveSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8,
+        noRandomEncounter: false, skipBattles: false, skipKnownOnly: false, knownEnemies: 0, troopId: null, canEscape: false, canLose: false,
         lastCommand: null, controlT: null, capturePictures: false, captureMenuScenes: false, captureNotices: false, notices: [], htmlNotices: false, extensions: [],
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS },
         quickSlot: 20,
@@ -1907,7 +1908,7 @@ describe("RPGViewerBridge", () => {
       });
     });
 
-    describe("enemy HP commands (1.23.0)", () => {
+    describe("enemy HP commands (1.24.0)", () => {
       const hpOf = (ms: any[]) => ms.map((m) => [m.hp, m.isAlive()]);
       // three enemies: 100/100, 50/250 (1% = 2) and 30/50 (1% floors to 0 -> 1); plus one dead
       const troop = (hh: Harness) => {
@@ -2003,13 +2004,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.23\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.24\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.23.0");
+    expect(h.bridge.VERSION).toBe("1.24.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

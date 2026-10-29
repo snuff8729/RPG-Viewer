@@ -7,7 +7,7 @@ import type { AssistFavoriteId } from "@/core/live/favoritesFile";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  AssistCommandButton, AutoFastControl, AutoSpeedControl, SkipSeenControl, SpeedControl, type AssistControlSize,
+  AssistCommandButton, AutoFastControl, AutoSpeedControl, EncounterControl, SkipSeenControl, SpeedControl, type AssistControlSize,
 } from "./AssistControls";
 import { visibleAssistFavorites, withObjectParticle } from "./assistItems";
 import { BackupNowButton, RestoreLatestButton } from "./BackupControls";
@@ -50,6 +50,8 @@ function FavoriteControl({ id, size, idPrefix }: { id: AssistFavoriteId; size: A
           <AutoSpeedControl size={size} short />
         </span>
       );
+    case "noRandomEncounter": case "skipBattles": case "skipKnownOnly":
+      return <EncounterControl item={id} id={`${idPrefix}-${id}`} short />;
     case "lose": return <LoseButton size={size} />;
     case "backup": return <BackupNowButton size={size} short />;
     case "restore": return <RestoreLatestButton size={size} short />;

@@ -42,6 +42,7 @@ describe("historyText", () => {
   it("formats battle and transfer", () => {
     expect(battleText({ ...base, seq: 1, type: "battle", phase: "start", troopId: 1 }, data)).toBe("⚔ 전투 시작: 슬라임");
     expect(battleText({ ...base, seq: 1, type: "battle", phase: "end", troopId: 1, result: "escape" }, data)).toBe("⚔ 전투 종료: 도주");
+    expect(battleText({ ...base, seq: 1, type: "battle", phase: "end", troopId: 1, result: "win", skipped: true }, data)).toBe("⚔ 전투 종료: 건너뜀(이김)");
     expect(transferText({ ...base, seq: 1, type: "transfer", mapId: 1, x: 3, y: 4 }, data)).toBe("🚪 마을 (3, 4)");
   });
 });
