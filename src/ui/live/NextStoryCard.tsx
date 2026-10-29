@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { keyText, storyValue } from "@/core/story/progress";
 import { openGameSettings } from "../addons/gameSettingsOpen";
 import { openPage } from "../navigation";
 import { useLive } from "@/app/LiveProvider";
@@ -48,20 +50,38 @@ function StepBody({ s, compact }: { s: StoryStep; compact: boolean }) {
   );
 }
 
-/** `다음 스토리` 카드(플레이 화면·이 맵): 본편을 앞으로 보내는 가장 그럴듯한 행동과 다른 후보, 진행 기준. */
+const MAIN = "main";
+
+/** `다음 스토리` 카드(플레이 화면·이 맵): 본편(또는 고른 서브 미션)을 앞으로 보내는 가장 그럴듯한 행동과 다른 후보, 진행 기준. */
 export function NextStoryCard({ compact = false }: { compact?: boolean }) {
-  const { story } = useNextStory();
+  const { story, mode, sides, follow, setFollow } = useNextStory();
   const { connection, live } = useLive();
   if (connection !== "connected" || !live) return null;
   const [best, ...alts] = story?.steps ?? [];
+  const side = mode === "side";
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-1.5"><Star className="size-4" aria-hidden />다음 스토리</CardTitle>
+        <CardTitle className="flex items-center gap-1.5"><Star className="size-4" aria-hidden />{side ? "서브 미션" : "다음 스토리"}</CardTitle>
         {best && <CardAction><ConfidenceBadge c={best.confidence} /></CardAction>}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {best ? <StepBody s={best} compact={compact} /> : (
+        {sides.length > 0 && (
+          <Select value={follow ?? MAIN} onValueChange={(v) => setFollow(v === MAIN ? null : v)}>
+            <SelectTrigger size="sm" className="w-full" aria-label="따라갈 이야기">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={MAIN}>본편</SelectItem>
+              {sides.map((c) => (
+                <SelectItem key={keyText(c.key)} value={keyText(c.key)}>{c.label} = {storyValue(c.key, live)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {best ? <StepBody s={best} compact={compact} /> : side ? (
+          <p className="text-sm font-medium">이 미션의 다음 할 일을 찾지 못했어요</p>
+        ) : (
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">다음 스토리를 찾지 못했어요</p>
             <p className="text-xs text-muted-foreground">게임 설정에서 스토리 진행 기준(진행 변수)을 골라 보세요.</p>
@@ -85,8 +105,12 @@ export function NextStoryCard({ compact = false }: { compact?: boolean }) {
         )}
       </CardContent>
       <CardFooter className="flex flex-wrap items-center gap-x-2 border-t py-2 text-xs text-muted-foreground">
-        <span>{story ? `스토리 기준: ${story.label} = ${story.value}` : "스토리 기준을 찾지 못했어요"}</span>
-        <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={openGameSettings}>{story ? "바꾸기" : "고르기"}</Button>
+        {side ? <span>{story ? `미션 기준: ${story.label} = ${story.value}` : "미션 기준을 읽지 못했어요"}</span> : (
+          <>
+            <span>{story ? `스토리 기준: ${story.label} = ${story.value}` : "스토리 기준을 찾지 못했어요"}</span>
+            <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={openGameSettings}>{story ? "바꾸기" : "고르기"}</Button>
+          </>
+        )}
       </CardFooter>
     </Card>
   );
