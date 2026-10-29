@@ -7,6 +7,7 @@ import { lastSeqOf, type ReaderItem } from "./reader";
 /** 항목이 시작하는 기록 seq: key(r{seq}·c{seq}·k{seq}·h…)의 첫 번호, 없으면 lastSeqOf. 모르면 null. */
 export function firstSeqOf(item: ReaderItem): number | null {
   try {
+    if (item.kind === "hidden") return item.items.length > 0 ? firstSeqOf(item.items[0]) : item.seq;
     const k = item.key;
     let n = 0, i = 1, any = false;
     for (; i < k.length; i++) {
@@ -68,6 +69,7 @@ export function itemSummary(item: ReaderItem, max = 20): string {
       case "picture": s = item.caption || item.name; break;
       case "battle": s = `전투: ${item.troop}`; break;
       case "chapter": s = item.text.replace(/^—\s*|\s*—$/g, ""); break;
+      case "hidden": s = item.items.length > 0 ? itemSummary(item.items[0], Infinity) : ""; break;
       default: s = "";
     }
     s = squash(s);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode, type RefObject } from "react";
-import { Bookmark as BookmarkIcon, Check, ChevronRight, CornerDownRight, MoreHorizontal } from "lucide-react";
-import type { Bookmark } from "@/core/live/readerFile";
+import { Bookmark as BookmarkIcon, Check, ChevronRight, CornerDownRight, MoreHorizontal, Undo2 } from "lucide-react";
+import type { Bookmark, HideRule } from "@/core/live/readerFile";
+import { hideRuleLabel } from "./readerHide";
 import {
   chapterVarCandidates, durationLabel, partIndexAt, partTitle, sceneTitle, valueFlow, variableName, whenLabel,
   type ChapterHead, type ChapterPart, type Chapters, type ChapterScene, type ChapterVarCandidate,
@@ -143,7 +144,7 @@ export function TocBookmarks({ rows, onGo, onRename, onRemove }: {
     <div className="flex flex-col gap-1">
       <TocHeading>북마크</TocHeading>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">읽기 줄의 메뉴(⋯)에서 `여기 북마크`를 누르면 여기에 생겨요.</p>
+        <p className="text-sm text-muted-foreground">읽기 줄의 메뉴(⋯)에서 ‘여기 북마크’를 누르면 여기에 생겨요.</p>
       ) : (
         <ul className="flex flex-col">
           {rows.map((r) => (
@@ -301,6 +302,37 @@ export function TocChapterVar({ path, data, varId, onPick }: {
         ))}
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** `숨긴 문구` 관리: 규칙 목록, 이 갈래에서 숨긴 줄 수, 되돌리기 */
+export function TocHiddenRules({ rules, counts, onRemove }: {
+  rules: readonly HideRule[]; counts: readonly number[]; onRemove: (id: string) => void;
+}) {
+  if (rules.length === 0) {
+    return <p className="text-sm text-muted-foreground">숨긴 문구가 없어요. 읽기 줄의 메뉴(⋯)에서 보고 싶지 않은 문장이나 종류를 숨길 수 있어요.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs text-muted-foreground">숨김은 읽기 화면의 보기만 바꿔요. 기록은 그대로예요.</p>
+      <ul className="flex flex-col">
+        {rules.map((r, i) => {
+          const { title, kind } = hideRuleLabel(r);
+          return (
+            <li key={r.id} className="flex items-center gap-2 py-1.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{kind} · 이 갈래에서 {counts[i] ?? 0}줄</span>
+              </span>
+              <Button variant="outline" size="xs" onClick={() => onRemove(r.id)}>
+                <Undo2 />
+                되돌리기
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

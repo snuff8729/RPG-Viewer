@@ -34,8 +34,8 @@ export function PluginRowMenu({ name }: { name: string }) {
   );
 }
 
-/** 플러그인 명령 한 줄: 글이면 글만(Info 아이콘), 기술 명령이면 `플러그인: 원문`. 숨김 여부는 부르는 쪽이 정한다. */
-export function PluginLine({ text, raw, name, tech }: { text: string; raw: string; name: string; tech: boolean }) {
+/** 플러그인 명령 한 줄: 글이면 글만(Info 아이콘), 기술 명령이면 `플러그인: 원문`. 숨김 여부는 부르는 쪽이 정한다. menu = 명령별 보이기 설정 메뉴(기록 화면) */
+export function PluginLine({ text, raw, name, tech, menu = true }: { text: string; raw: string; name: string; tech: boolean; menu?: boolean }) {
   return (
     <div className="flex items-start gap-2 text-sm text-muted-foreground">
       {tech
@@ -46,7 +46,7 @@ export function PluginLine({ text, raw, name, tech }: { text: string; raw: strin
             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{text}</span>
           </>
         )}
-      <PluginRowMenu name={name} />
+      {menu && <PluginRowMenu name={name} />}
     </div>
   );
 }

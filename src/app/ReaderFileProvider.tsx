@@ -6,7 +6,7 @@ import { readFavoritesText } from "@/core/live/favoritesFile";
 import {
   applyReaderOps, cleanBookmarkName, compactReaderOps, legacyHideRules, mergeReaderFile, nextReaderT, parseReaderFile, parseReaderOps,
   readerNeedsWrite, readerPendingKey, resolveReader, serializeReaderFile,
-  type Bookmark, type HideRule, type ReaderFile, type ReaderOp,
+  type Bookmark, type HideRule, type HideRuleInput, type ReaderFile, type ReaderOp,
 } from "@/core/live/readerFile";
 import { gameKeyOf } from "@/ui/live/readPosition";
 import { loadOverrides, loadShowAll } from "@/ui/live/pluginDisplay";
@@ -27,7 +27,7 @@ export interface ReaderFileValue {
   addBookmark(b: { branch: number; seq: number; name: string }): void;
   removeBookmark(id: string): void;
   renameBookmark(id: string, name: string): void;
-  addHideRule(rule: Omit<HideRule, "id" | "t">): void;
+  addHideRule(rule: HideRuleInput): void;
   removeHideRule(id: string): void;
   setChapterVar(id: number | null): void;
   /** 아직 파일에 쓰지 못한 바꿈이 있다(쓰기 권한 없음 등) */

@@ -26,6 +26,9 @@ export type HideRule =
   | { id: string; kind: "digits"; pattern: string; t: number }
   | { id: string; kind: "type"; type: string; t: number };
 
+/** 새 규칙(id·t 없이) */
+export type HideRuleInput = { kind: "exact"; text: string } | { kind: "digits"; pattern: string } | { kind: "type"; type: string };
+
 /** 파싱한 파일. hide가 null = 파일에 없음(예전 설정을 쓴다). */
 export interface ReaderFile {
   bookmarks: Bookmark[];

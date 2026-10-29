@@ -6,11 +6,12 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EyeOff } from "lucide-react";
 import { FaceImage } from "../script/FaceImage";
 import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
 import { useAsset } from "../script/useAssetUrl";
 import { PluginLine } from "./PluginLine";
-import { usePluginShowAll } from "./pluginDisplay";
+import { NEVER_HIDDEN, ReaderHideContext, useLineHidden } from "./readerHide";
 import { sameShot, type ScreenShot } from "@/core/addons/screenPictures";
 import { ScreenPictures } from "../addons/ScreenPictures";
 import { CutinPictures } from "../addons/CutinPictures";
@@ -56,11 +57,28 @@ function Cutin({ item }: { item: Extract<ReaderItem, { kind: "cutin" }> }) {
   return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} /></div> : null;
 }
 
-/** 플러그인 명령 줄. 기술 명령은 `플러그인 명령 모두 보기`를 켰을 때만. */
+/** 플러그인 명령 줄(보일지는 숨김 규칙이 정한다 — 명령별 메뉴 대신 읽기 줄 메뉴) */
 function ReaderPlugin({ item }: { item: Extract<ReaderItem, { kind: "plugin" }> }) {
-  const [showAll] = usePluginShowAll();
-  if (item.tech && !showAll) return null;
-  return <PluginLine text={item.text} raw={item.raw} name={item.name} tech={item.tech} />;
+  return <PluginLine text={item.text} raw={item.raw} name={item.name} tech={item.tech} menu={false} />;
+}
+
+/** 숨김 규칙으로 숨긴 줄이 이어진 자리: `숨긴 문구 N줄`, 누르면 잠깐 펼쳐 본다 */
+function HiddenLines({ item }: { item: Extract<ReaderItem, { kind: "hidden" }> }) {
+  return (
+    <Collapsible>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="xs" className="text-muted-foreground">
+          <EyeOff />
+          숨긴 문구 {item.items.length}줄
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-2 opacity-70">
+        <ReaderHideContext.Provider value={NEVER_HIDDEN}>
+          {item.items.map(x => <ReaderItemView key={x.key} item={x} />)}
+        </ReaderHideContext.Provider>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 type BattleReaderItem = Extract<ReaderItem, { kind: "battle" }>;
@@ -96,15 +114,19 @@ function LogLine({ line }: { line: BattleLogItem }) {
  */
 function BattleBody({ item }: { item: BattleReaderItem }) {
   const [logOpen, setLogOpen] = useState(false);
+  // 숨김 규칙에 맞는 안쪽 줄(전투 로그·알림·대사 등)은 뺀다
+  const hidden = useLineHidden();
+  const inner = item.items.filter(x => !hidden(x));
+  const logLines = Math.max(0, item.logLines - item.items.filter(x => isLogLine(x) && hidden(x)).length);
   return (
     <div className="space-y-3">
-      {item.logLines > 0 && (
+      {logLines > 0 && (
         <Button variant="ghost" size="sm" className="text-muted-foreground" aria-expanded={logOpen} onClick={() => setLogOpen(o => !o)}>
-          {logOpen ? "전투 기록 접기" : `전투 기록 ${item.logLines}줄`}
+          {logOpen ? "전투 기록 접기" : `전투 기록 ${logLines}줄`}
         </Button>
       )}
       {item.screen && <Screen shot={item.screen} />}
-      {groupLog(item.items).map(g => {
+      {groupLog(inner).map(g => {
         if (!Array.isArray(g)) return <ReaderItemView key={g.key} item={g} />;
         if (!logOpen) {
           const kept = g.filter(l => l.kind === "notice" || l.screen);
@@ -186,6 +208,9 @@ function RepeatTalk({ item }: { item: Extract<ReaderItem, { kind: "message" }> }
 
 /** 읽기 항목 하나(대사·그림·고른 선택·장면 구분·전투). 전체 읽기와 선택 흐름이 함께 쓴다. */
 export const ReaderItemView = memo(function ReaderItemView({ item }: { item: ReaderItem }) {
+  // 전투 안·다시 본 대화 안의 줄은 여기서 숨긴다(맨 위 줄은 읽기 화면이 `숨긴 문구 N줄`로 묶어 온다)
+  const hidden = useLineHidden();
+  if (item.kind !== "hidden" && hidden(item)) return null;
   switch (item.kind) {
     case "chapter":
       if (item.part) {
@@ -223,6 +248,8 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
       return <Screen shot={item.screen} />;
     case "cutin":
       return <Cutin item={item} />;
+    case "hidden":
+      return <HiddenLines item={item} />;
   }
 }, (a, b) => sameItem(a.item, b.item));
 
@@ -249,6 +276,10 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
   if (a.key !== b.key || a.kind !== b.kind) return false;
   switch (a.kind) {
     case "chapter": return a.text === (b as typeof a).text && a.part === (b as typeof a).part;
+    case "hidden": {
+      const h = b as typeof a;
+      return a.seq === h.seq && a.items.length === h.items.length && a.items.every((x, i) => sameItem(x, h.items[i]));
+    }
     case "message": {
       const m = b as typeof a;
       return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useLive, useLiveData } from "@/app/LiveProvider";
 import { choiceFlow, type FlowItem } from "@/core/live/choiceFlow";
 import { branchLabel, branchPath, foldTimeline } from "@/core/live/history";
@@ -8,14 +8,17 @@ import { hiddenImageMatcher } from "@/core/addons/hiddenImages";
 import { withoutMenuScreens } from "@/core/addons/screenPictures";
 import { useScreenSizes } from "../addons/pictureContext";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
-import { useHiddenNoticeKinds, useNoticesShown } from "./noticeDisplay";
+import { useReaderFile } from "@/app/ReaderFileProvider";
+import { compileHideRules, matchHide } from "@/core/live/hideRules";
+import type { ReaderItem } from "@/core/live/reader";
+import { NOTICE_KINDS, type NoticeKind } from "@/core/addons/notices";
+import { ReaderHideContext } from "./readerHide";
 import type { HistoryModel } from "@/core/live/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderItemView } from "./ReaderItemView";
-import { useBattlesShown } from "./battleDisplay";
 import { usePluginOverrides } from "./pluginDisplay";
 import { choiceTexts } from "./historyText";
 
@@ -89,9 +92,14 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, coverage } = useLive();
   const { overrides } = usePluginOverrides();
-  const [battlesShown] = useBattlesShown();
-  const [noticesShown] = useNoticesShown();
-  const [hiddenNoticeKinds] = useHiddenNoticeKinds();
+  // 읽기의 숨김 규칙(reader.json): 전투·알림 통째·알림 종류 숨김은 항목을 만들 때 빼고, 나머지 줄은 ReaderItemView가 뺀다
+  const { hideRules } = useReaderFile();
+  const compiledHide = useMemo(() => compileHideRules(hideRules), [hideRules]);
+  const isHidden = useCallback((it: ReaderItem) => matchHide(it, compiledHide) >= 0, [compiledHide]);
+  const battlesShown = !compiledHide.types.has("battle");
+  const noticesShown = !compiledHide.types.has("notice");
+  const kindsKey = NOTICE_KINDS.filter((k) => compiledHide.types.has(`notice-kind:${k}`)).join(",");
+  const hiddenNoticeKinds = useMemo(() => new Set<NoticeKind>(kindsKey ? (kindsKey.split(",") as NoticeKind[]) : []), [kindsKey]);
   const { hiddenImages, menuPicturesShown } = useAddons();
   const screens = useScreenSizes(records);
 
@@ -110,19 +118,21 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
   if (!data) return null;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {/* 갈래가 바뀌면 펼침 상태를 처음으로 */}
-      <div key={branch} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
-        <p className="text-center text-sm text-muted-foreground">— {branchLabel(model, branch)} · 처음부터 —</p>
-        {flow.map(item => {
-          switch (item.kind) {
-            case "chapter": return <ReaderItemView key={item.key} item={item} />;
-            case "segment": return <Segment key={item.key} item={item} />;
-            case "choice": return <ChoicePoint key={item.key} item={item} />;
-            case "fork": return <Fork key={item.key} item={item} model={model} branch={branch} onSelect={onSelectBranch} />;
-          }
-        })}
+    <ReaderHideContext.Provider value={isHidden}>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* 갈래가 바뀌면 펼침 상태를 처음으로 */}
+        <div key={branch} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
+          <p className="text-center text-sm text-muted-foreground">— {branchLabel(model, branch)} · 처음부터 —</p>
+          {flow.map(item => {
+            switch (item.kind) {
+              case "chapter": return <ReaderItemView key={item.key} item={item} />;
+              case "segment": return <Segment key={item.key} item={item} />;
+              case "choice": return <ChoicePoint key={item.key} item={item} />;
+              case "fork": return <Fork key={item.key} item={item} model={model} branch={branch} onSelect={onSelectBranch} />;
+            }
+          })}
+        </div>
       </div>
-    </div>
+    </ReaderHideContext.Provider>
   );
 }
