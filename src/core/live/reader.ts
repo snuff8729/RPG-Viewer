@@ -10,7 +10,7 @@ import { applyPictureOp, composedScene, pictureOp, stackPictures, type PictureVa
 import { cutinRuns, withOldErases, type CutinStep } from "./cutins";
 import { isNoticeHidden, noticeRecordKind, noticeSourceLabel, type NoticeKind } from "../addons/notices";
 import type { GameData, Location } from "../types";
-import { branchLabel, isContinuation } from "./history";
+import { branchLabel, foldTimelineFrom, isContinuation, type FoldCache, type FoldOptions } from "./history";
 import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginText";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "./types";
 
@@ -193,100 +193,143 @@ function battleItem(
   };
 }
 
+/** readerItems 설정 */
+export interface ReaderItemsOptions { battles?: boolean; notices?: boolean; hiddenNoticeKinds?: ReadonlySet<NoticeKind>; compose?: ComposeOptions }
+
+/** 화면 항목 하나와 그것을 넣은 목록 */
+type PlacedScreen = { out: ReaderItem[]; item: ReaderItem; bridge: boolean };
+
 /**
- * foldTimeline 결과를 읽기 항목으로 바꾼다(대사·그림·고른 선택·플러그인 명령·장면 구분만). 예외를 던지지 않는다.
- * model은 갈래 시작 문구(`— {n}회차 갈래 {m} 시작 —`)에 쓴다. overrides: 플러그인 명령별 보이기 설정(pluginText).
- * 플러그인 줄은 모두 넣고 tech로 표시만 한다(숨기기는 화면이 정한다).
- * opts.battles = false면 전투 묶음을, opts.notices = false면 알림 문구(1.9.0, 전투 안의 것도)를 뺀다.
- * opts.hiddenNoticeKinds: 그 종류(업적·획득·퀘스트·알림)의 알림 문구만 뺀다.
- * scenes(화면 그림 따라 그리기, scenesBySeq): 주면 보이는 이벤트 그림·스탠딩이 앞에 보인 것과 달라진 대사에 screen을 붙인다(nextShot).
- * 그림 표시 기록(231)은 따로 항목을 만들지 않는다(글자 그림만 남는다): 그림 명령 기록으로 화면 그림을 다시 쌓아(pictureStack)
- * 그림이 없는 대사(화면 그림 따라 그리기가 꺼졌거나 그 전 기록)에 같은 방식으로 screen을 붙인다. 대사 없이 바뀐 묶음
- * (선택·장면 구분·전투 앞, 또는 PICTURE_RUN_GAP_MS 넘게 쉰 뒤)은 화면 항목으로 보인다(scenes가 없을 때만). opts.compose: ComposeOptions.
+ * 읽기 항목을 만드는 중인 상태. 이어 만들기(readerItemsFrom)는 이것을 보관했다가 새 접힌 항목만 더 바꾼다.
+ * 이미 넣은 항목 중 뒤에서 바뀌는 것은 lastScreen(더 진한 모습으로 바뀜)과 지금 구간(seg)의 화면 항목(컷인으로 빠짐)뿐이다.
  */
-export function readerItems(
-  items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
-  scenes: Map<number, ScreenScene> | null = null, opts: { battles?: boolean; notices?: boolean; hiddenNoticeKinds?: ReadonlySet<NoticeKind>; compose?: ComposeOptions } = {},
-): ReaderItem[] {
-  const pctx: PictureContext = opts?.compose?.ctx ?? { screen: data?.screenSize ?? DEFAULT_SCREEN };
-  const vars = opts?.compose?.vars ?? null;
+interface ReaderState {
+  /** 맨 위 목록 */
+  top: ReaderItem[];
   /** 그림 명령으로 다시 쌓은 화면 그림(번호 → 그림) */
-  let stack: ReadonlyMap<number, StackPicture> = new Map();
+  stack: ReadonlyMap<number, StackPicture>;
   /** shown이 이 묶음으로 정해졌으면 그 묶음(같으면 다시 계산하지 않는다) */
-  let composedFor: ReadonlyMap<number, StackPicture> | null = null;
+  composedFor: ReadonlyMap<number, StackPicture> | null;
   /** 아직 보이지 않은 그림 명령 묶음: 첫·끝 기록 seq와 끝 기록 시각 */
-  let pending: { first: number; last: number; t: number } | null = null;
+  pending: { first: number; last: number; t: number } | null;
   /** 바로 앞에 이어진 플러그인 기록들(글자 그림 설명용) */
-  let plugins: RecordOf<"plugin">[] = [];
+  plugins: RecordOf<"plugin">[];
   /** 마지막으로 보인 그림의 열쇠(nextShot). "" = 아무것도 없음, null = 모름 */
-  let shown: string | null = null;
+  shown: string | null;
   /** 마지막으로 보인(또는 화면에 있던) 그림의 대략적인 열쇠(coarseShotKey). null = 모름 */
-  let shownCoarse: string | null = null;
+  shownCoarse: string | null;
   /**
    * 지금 구간(대사·전투 로그 줄·선택·장면 구분 사이)의 그림 명령들(컷인 찾기). start = 구간 시작 때의 그림 묶음,
    * screens = 구간 안에 넣은 화면 항목(bridge = 화면 기록, 아니면 다시 쌓은 것)과 넣은 목록.
    */
-  let seg: {
-    start: ReadonlyMap<number, StackPicture>; steps: CutinStep[];
-    screens: { out: ReaderItem[]; item: ReaderItem; bridge: boolean }[];
-  } | null = null;
+  seg: { start: ReadonlyMap<number, StackPicture>; steps: CutinStep[]; screens: PlacedScreen[] } | null;
   /** 마지막으로 넣은 화면 항목(그 뒤로 다른 기록의 그림을 보면 null) */
-  let lastScreen: Extract<ReaderItem, { kind: "screen" }> | null = null;
+  lastScreen: Extract<ReaderItem, { kind: "screen" }> | null;
+}
+
+const newReaderState = (): ReaderState => ({
+  top: [], stack: new Map(), composedFor: null, pending: null, plugins: [], shown: null, shownCoarse: null, seg: null, lastScreen: null,
+});
+
+/**
+ * 뒤에서 제자리로 바뀔 수 있는 lastScreen을 사본으로 바꾼다(맨 위 목록, 또는 그것이 든 전투 항목의 목록에서도).
+ * 이미 내준 항목 객체가 바뀌지 않게 한다. top이 s.top과 다르면(사본 목록) 그 목록에서 바꾼다. 찾지 못하면 false.
+ */
+function detachLastScreen(s: ReaderState, top: ReaderItem[]): boolean {
+  const ls = s.lastScreen;
+  if (!ls) return true;
+  const copy = { ...ls };
+  let found = false;
+  for (let i = top.length - 1; i >= 0 && !found; i--) {
+    const it = top[i];
+    if (it === ls) { top[i] = copy; found = true; }
+    else if (it.kind === "battle") {
+      const j = it.items.indexOf(ls);
+      if (j >= 0) { const items = it.items.slice(); items[j] = copy; top[i] = { ...it, items }; found = true; }
+    }
+  }
+  if (!found) return false;
+  if (s.seg) s.seg = { ...s.seg, screens: s.seg.screens.map(x => (x.item === ls ? { ...x, item: copy } : x)) };
+  s.lastScreen = copy;
+  return true;
+}
+
+/** 같은 상태의 사본(맨 위 목록·구간을 따로 가진다). 원본·원본이 내준 항목은 바뀌지 않는다. 만들 수 없으면 null. */
+function cloneReaderState(s: ReaderState): ReaderState | null {
+  const top = s.top.slice();
+  const seg = s.seg && {
+    start: s.seg.start, steps: s.seg.steps.slice(),
+    screens: s.seg.screens.map(x => (x.out === s.top ? { ...x, out: top } : x)),
+  };
+  const c: ReaderState = { ...s, top, seg };
+  return detachLastScreen(c, top) ? c : null;
+}
+
+interface ReaderConfig {
+  data: GameData; choiceText: Map<number, string>; model: HistoryModel; overrides: PluginOverrides | null;
+  scenes: Map<number, ScreenScene> | null; opts: ReaderItemsOptions;
+}
+
+/** 상태 st를 바꾸며 접힌 항목을 읽기 항목으로 바꾸는 함수들 */
+function readerConverter(cfg: ReaderConfig, st: ReaderState) {
+  const { data, choiceText, model, overrides, scenes, opts } = cfg;
+  const pctx: PictureContext = opts?.compose?.ctx ?? { screen: data?.screenSize ?? DEFAULT_SCREEN };
+  const vars = opts?.compose?.vars ?? null;
   /** seq의 화면에서 새로 보일 그림. always가 아니면(전투 로그·전투 시작·끝) 그 seq에 화면이 있을 때만 본다. */
   const shotAt = (seq: number, always: boolean): ScreenShot | null => {
     if (!scenes || (!always && !scenes.has(seq))) return null;
     const scene = scenes.get(seq);
-    const { shot, key } = nextShot(shown, scene);
-    shown = key;
-    shownCoarse = scene ? coarseShotKey(nextShot(null, scene).shot) : null;
-    lastScreen = null;
-    composedFor = null;
-    if (scene) pending = null; // 실제 화면 그림이 다시 쌓은 것보다 앞선다
+    const { shot, key } = nextShot(st.shown, scene);
+    st.shown = key;
+    st.shownCoarse = scene ? coarseShotKey(nextShot(null, scene).shot) : null;
+    st.lastScreen = null;
+    st.composedFor = null;
+    if (scene) st.pending = null; // 실제 화면 그림이 다시 쌓은 것보다 앞선다
     return shot;
   };
   /** 다시 쌓은 화면 그림에서 새로 보일 그림(shotAt과 같은 비교) */
   const composedShot = (seq: number): ScreenShot | null => {
-    pending = null;
-    if (composedFor === stack) return null;
-    composedFor = stack;
+    st.pending = null;
+    if (st.composedFor === st.stack) return null;
+    st.composedFor = st.stack;
     // 1.18.2: 그때 게임의 실제 화면 크기로 나눈다
-    const scene = withScreen(composedScene(stackPictures(stack), ctxAt(pctx, seq)), knownScreenAt(pctx, seq));
-    const { shot, key } = nextShot(shown, scene);
-    shown = key;
-    shownCoarse = coarseShotKey(nextShot(null, scene).shot);
-    lastScreen = null;
+    const scene = withScreen(composedScene(stackPictures(st.stack), ctxAt(pctx, seq)), knownScreenAt(pctx, seq));
+    const { shot, key } = nextShot(st.shown, scene);
+    st.shown = key;
+    st.shownCoarse = coarseShotKey(nextShot(null, scene).shot);
+    st.lastScreen = null;
     return shot;
   };
   /** 대사의 그림: 실제 화면 그림(scenes)이 있으면 그것, 없으면 다시 쌓은 것 */
   const messageShot = (seq: number): ScreenShot | null => (scenes?.has(seq) ? shotAt(seq, true) : composedShot(seq));
   /** 대사 없이 바뀐 그림 명령 묶음을 화면 항목으로(화면 그림 따라 그리기 기록이 없을 때만) */
   const flushPending = (out: ReaderItem[]) => {
-    const p = pending;
+    const p = st.pending;
     if (!p) return;
-    if (scenes) { pending = null; return; }
+    if (scenes) { st.pending = null; return; }
     const shot = composedShot(p.last);
     if (shot) {
       const item: ReaderItem = { kind: "screen", key: `r${p.first}`, seq: p.last, screen: shot };
       out.push(item);
-      seg?.screens.push({ out, item, bridge: false });
+      st.seg?.screens.push({ out, item, bridge: false });
     }
   };
   /** 그림 명령 기록 하나를 쌓는다. 글자 그림(이름 없는 표시)은 항목으로 돌려준다. */
   const pictureRecord = (rec: RecordOf<"picture">, out: ReaderItem[]): ReaderItem | null => {
     const op = pictureOp(rec, data, screenAt(pctx, rec.seq), vars);
     const t = typeof rec.t === "number" ? rec.t : 0;
-    if (op && pending && t - pending.t > PICTURE_RUN_GAP_MS) flushPending(out);
-    const next = applyPictureOp(stack, op);
+    if (op && st.pending && t - st.pending.t > PICTURE_RUN_GAP_MS) flushPending(out);
+    const next = applyPictureOp(st.stack, op);
     if (op) {
-      if (!seg) seg = { start: stack, steps: [], screens: [] };
-      seg.steps.push({ rec, stack: next });
+      if (!st.seg) st.seg = { start: st.stack, steps: [], screens: [] };
+      st.seg.steps.push({ rec, stack: next });
     }
-    if (next !== stack) {
-      stack = next;
-      pending = pending ? { first: pending.first, last: rec.seq, t } : { first: rec.seq, last: rec.seq, t };
+    if (next !== st.stack) {
+      st.stack = next;
+      st.pending = st.pending ? { first: st.pending.first, last: rec.seq, t } : { first: rec.seq, last: rec.seq, t };
     }
     const text = op ? op.op === "show" && !op.pic : rec.op === undefined && !rec.name;
-    return text ? pictureItem(rec, plugins) : null;
+    return text ? pictureItem(rec, st.plugins) : null;
   };
   /**
    * 1.10.1 화면 기록(대사 사이에 바뀐 그림): 보이는 그림(10% 넘게 보이는 것)의 이름·대략적인 위치가 지금 보이는 것과
@@ -296,15 +339,15 @@ export function readerItems(
     if (!scenes || !scenes.has(seq)) return null;
     const { shot, key } = nextShot(null, visibleScene(scenes.get(seq)));
     const coarse = coarseShotKey(shot);
-    if (coarse === shownCoarse) {
+    if (coarse === st.shownCoarse) {
       // 같은 그림이 더 진하게(나타나는 중이던 것): 방금 넣은 화면 항목을 더 진한 모습으로 바꾼다
-      if (shot && lastScreen && opacitySum(shot) > opacitySum(lastScreen.screen)) { lastScreen.screen = shot; shown = key; }
+      if (shot && st.lastScreen && opacitySum(shot) > opacitySum(st.lastScreen.screen)) { st.lastScreen.screen = shot; st.shown = key; }
       return null;
     }
-    shownCoarse = coarse;
-    shown = key;
-    lastScreen = null;
-    composedFor = null;
+    st.shownCoarse = coarse;
+    st.shown = key;
+    st.lastScreen = null;
+    st.composedFor = null;
     return shot;
   };
   /**
@@ -313,12 +356,12 @@ export function readerItems(
    * (화면 기록이 컷인의 가장 완전한 장면보다 겹이 많으면 화면 기록을, 아니면 컷인을).
    */
   const finishSegment = (out: ReaderItem[], boundary: LogRecord | null, open = false) => {
-    const s = seg;
-    seg = null;
+    const s = st.seg;
+    st.seg = null;
     if (!s || s.steps.length === 0) return;
     // 아직 이어지는 끝(기록의 마지막·진행 중인 전투)은 다음 대사를 모르니 예전 기록의 지우기를 짐작하지 않는다
-    const { steps, end } = open ? { steps: s.steps, end: stack } : withOldErases(s.steps, stack, boundary, data);
-    if (end !== stack) { stack = end; composedFor = null; }
+    const { steps, end } = open ? { steps: s.steps, end: st.stack } : withOldErases(s.steps, st.stack, boundary, data);
+    if (end !== st.stack) { st.stack = end; st.composedFor = null; }
     const lastT = s.steps[s.steps.length - 1].rec.t;
     const endT = boundary && typeof boundary.t === "number" && boundary.t > 0 ? boundary.t : (typeof lastT === "number" ? lastT : 0);
     for (const run of cutinRuns({ start: s.start, steps, end, endT }, pctx)) {
@@ -330,7 +373,7 @@ export function readerItems(
         const i = x.out.indexOf(x.item);
         if (i >= 0) x.out.splice(i, 1);
       }
-      if (related.length > 0) { shown = null; shownCoarse = null; lastScreen = null; composedFor = null; }
+      if (related.length > 0) { st.shown = null; st.shownCoarse = null; st.lastScreen = null; st.composedFor = null; }
       out.push({ kind: "cutin", key: `k${run.first}`, seq: run.last, frames: run.frames, best: run.best });
     }
   };
@@ -338,8 +381,8 @@ export function readerItems(
   const notices = opts?.notices !== false;
   const noticeHide = notices ? (opts?.hiddenNoticeKinds instanceof Set ? opts.hiddenNoticeKinds : undefined) : true;
   const noticeHidden = (rec: LogRecord | null | undefined) => rec?.type === "notice" && isNoticeHidden(rec, noticeHide);
-  /** tail: 목록 다음 기록(전투 끝 등, 모르면 null). undefined = 아직 이어지는 끝(기록의 마지막·진행 중인 전투). */
-  const convert = (list: HistoryItem[], out: ReaderItem[], tail?: LogRecord | null) => {
+  /** 접힌 항목들을 out에 바꿔 넣는다(끝의 구간은 열어 둔다 — finishList가 닫는다). */
+  const convertItems = (list: HistoryItem[], out: ReaderItem[]) => {
     for (const it of Array.isArray(list) ? list : []) {
       try {
         if (!it) continue;
@@ -349,9 +392,9 @@ export function readerItems(
           if (rec?.type === "screen") {
             const shot = screenShotAt(rec.seq);
             if (shot) {
-              lastScreen = { kind: "screen", key: `r${rec.seq}`, seq: rec.seq, screen: shot };
-              out.push(lastScreen);
-              seg?.screens.push({ out, item: lastScreen, bridge: true });
+              st.lastScreen = { kind: "screen", key: `r${rec.seq}`, seq: rec.seq, screen: shot };
+              out.push(st.lastScreen);
+              st.seg?.screens.push({ out, item: st.lastScreen, bridge: true });
             }
             continue;
           }
@@ -361,9 +404,9 @@ export function readerItems(
           if (rec && SEGMENT_BOUNDARY.has(rec.type)) finishSegment(out, rec);
           // 그림 명령(231·232·235)은 화면 그림을 다시 쌓기만 한다(따로 보이지 않는다). 글자 그림만 항목이 된다.
           const r = rec?.type === "picture" ? pictureRecord(rec, out) : fromRecord(rec, data, choiceText, model, overrides);
-          if (rec?.type !== "notice") plugins = rec?.type === "plugin" ? [...plugins, rec].slice(-20) : [];
+          if (rec?.type !== "notice") st.plugins = rec?.type === "plugin" ? [...st.plugins, rec].slice(-20) : [];
           // 갈래 시작(이어진 갈래 제외)은 앞의 그림을 모른다
-          if (rec?.type === "branchStart" && r) { flushPending(out); stack = new Map(); composedFor = null; }
+          if (rec?.type === "branchStart" && r) { flushPending(out); st.stack = new Map(); st.composedFor = null; }
           if (!r) continue;
           if (r.kind === "battle" && !battles) continue;
           // 대사 없이 바뀐 그림 묶음은 선택·장면 구분·스크롤 글·전투 앞에 따로 보인다
@@ -377,19 +420,19 @@ export function readerItems(
           }
           out.push(r);
         } else if (it.kind === "repeat") {
-          plugins = [];
+          st.plugins = [];
           finishSegment(out, it.record);
           flushPending(out);
           const item = messageItem(it.record, data, it.count);
           // 회차마다 그 대화 전부(대사·그림·알림·플러그인 글). 그림 명령은 화면 그림 쌓기에도 그대로 들어간다.
           const occurrences: ReaderItem[][] = [];
-          const saved = shown, savedCoarse = shownCoarse;
+          const saved = st.shown, savedCoarse = st.shownCoarse;
           let last: ScreenShot | null = null;
           for (const recs of Array.isArray(it.occurrences) ? it.occurrences : []) {
             const inner: ReaderItem[] = [];
             convert((Array.isArray(recs) ? recs : []).map(record => ({ kind: "record" as const, record, uncertain: false, changed: false })), inner, null);
             flushPending(inner);
-            plugins = [];
+            st.plugins = [];
             for (const x of inner) {
               if (x.kind === "screen") last = x.screen;
               else if ((x.kind === "message" || x.kind === "battlelog") && x.screen) last = x.screen;
@@ -397,20 +440,20 @@ export function readerItems(
             if (inner.length > 0) occurrences.push(inner);
           }
           if (occurrences.length > 0) item.occurrences = occurrences;
-          lastScreen = null;
-          composedFor = null;
+          st.lastScreen = null;
+          st.composedFor = null;
           // 접힌 대화가 새 그림을 남겼으면(앞에 보이던 것과 다르면) 접힌 부분 밖에 그 마지막 그림을 보인다.
           // 아니면 앞의 그림 상태로 되돌린다(접혀 있어 안 보이므로 다음 대사가 그림을 보인다).
           // (보였으면 shown·shownCoarse는 접힌 대화가 끝난 뒤의 그림 그대로 둔다)
           if (last && coarseShotKey(last) !== (savedCoarse ?? "")) {
             item.screen = last;
           } else {
-            shown = saved;
-            shownCoarse = savedCoarse;
+            st.shown = saved;
+            st.shownCoarse = savedCoarse;
           }
           out.push(item);
         } else if (it.kind === "battle") {
-          plugins = [];
+          st.plugins = [];
           // `전투 기록 보기`를 끄면 전투는 통째로 빠진다(그 안의 그림도 앞뒤 대사의 그림 비교에 넣지 않는다)
           if (!battles || !it.start) continue;
           finishSegment(out, it.start);
@@ -419,11 +462,11 @@ export function readerItems(
           const inner: ReaderItem[] = [];
           // 다시 본 같은 전투는 접혀 있어 그림을 붙이지 않는다
           if (it.repeat > 0) {
-            const saved = shown, savedCoarse = shownCoarse;
+            const saved = st.shown, savedCoarse = st.shownCoarse;
             convert(it.items, inner, it.end ?? undefined);
-            shown = saved;
-            shownCoarse = savedCoarse;
-            composedFor = null;
+            st.shown = saved;
+            st.shownCoarse = savedCoarse;
+            st.composedFor = null;
             for (const x of inner) if ((x.kind === "message" || x.kind === "battlelog") && x.screen) delete x.screen;
           } else {
             convert(it.items, inner, it.end ?? undefined);
@@ -436,15 +479,106 @@ export function readerItems(
           if (screen) b.screen = screen;
           if (endScreen) b.endScreen = endScreen;
           out.push(b);
-          plugins = [];
+          st.plugins = [];
         }
       } catch { /* 깨진 항목은 건너뛴다 */ }
     }
+  };
+  /** 목록 끝: 마지막 구간을 닫는다. tail: 목록 다음 기록(전투 끝 등, 모르면 null). undefined = 아직 이어지는 끝(기록의 마지막·진행 중인 전투). */
+  const finishList = (out: ReaderItem[], tail?: LogRecord | null) => {
     try { finishSegment(out, tail ?? null, tail === undefined); } catch { /* 컷인 없음 */ }
   };
-  const out: ReaderItem[] = [];
-  convert(items, out);
-  return out;
+  const convert = (list: HistoryItem[], out: ReaderItem[], tail?: LogRecord | null) => {
+    convertItems(list, out);
+    finishList(out, tail);
+  };
+  return { convertItems, finishList };
+}
+
+/**
+ * foldTimeline 결과를 읽기 항목으로 바꾼다(대사·그림·고른 선택·플러그인 명령·장면 구분만). 예외를 던지지 않는다.
+ * model은 갈래 시작 문구(`— {n}회차 갈래 {m} 시작 —`)에 쓴다. overrides: 플러그인 명령별 보이기 설정(pluginText).
+ * 플러그인 줄은 모두 넣고 tech로 표시만 한다(숨기기는 화면이 정한다).
+ * opts.battles = false면 전투 묶음을, opts.notices = false면 알림 문구(1.9.0, 전투 안의 것도)를 뺀다.
+ * opts.hiddenNoticeKinds: 그 종류(업적·획득·퀘스트·알림)의 알림 문구만 뺀다.
+ * scenes(화면 그림 따라 그리기, scenesBySeq): 주면 보이는 이벤트 그림·스탠딩이 앞에 보인 것과 달라진 대사에 screen을 붙인다(nextShot).
+ * 그림 표시 기록(231)은 따로 항목을 만들지 않는다(글자 그림만 남는다): 그림 명령 기록으로 화면 그림을 다시 쌓아(pictureStack)
+ * 그림이 없는 대사(화면 그림 따라 그리기가 꺼졌거나 그 전 기록)에 같은 방식으로 screen을 붙인다. 대사 없이 바뀐 묶음
+ * (선택·장면 구분·전투 앞, 또는 PICTURE_RUN_GAP_MS 넘게 쉰 뒤)은 화면 항목으로 보인다(scenes가 없을 때만). opts.compose: ComposeOptions.
+ */
+export function readerItems(
+  items: HistoryItem[], data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null = null,
+  scenes: Map<number, ScreenScene> | null = null, opts: ReaderItemsOptions = {},
+): ReaderItem[] {
+  const st = newReaderState();
+  const { convertItems, finishList } = readerConverter({ data, choiceText, model, overrides, scenes, opts }, st);
+  convertItems(items, st.top);
+  finishList(st.top);
+  return st.top;
+}
+
+// ---------------------------------------------------------------- 이어 만들기
+
+/** 이어 만들기 상태(readerItemsFrom이 돌려주고 다음 부를 때 다시 받는다). 밖에서 고치지 않는다. */
+export interface ReaderCache {
+  state: ReaderState | null;
+  /** 바꾼(다시 볼 일 없는) 접힌 항목 수와 그 마지막 항목 */
+  used: number;
+  lastUsed: HistoryItem | null;
+  /** 같아야 이어 쓰는 설정들(같은 객체) */
+  deps: readonly unknown[];
+}
+
+/**
+ * readerItems를 이어서 한다: fold가 앞의 cache를 이어 접은 결과(foldTimelineFrom, resumed)이고 설정이 같으면
+ * 앞에서 바꾼 데서부터 새로 다 접힌 항목만 바꾼다. 아니면 처음부터. 결과는 언제나
+ * readerItems(fold.items, data, choiceText, model, overrides, scenes, opts)와 같다.
+ * choiceText·scenes는 매번 새로 만들어도 되지만, 이미 지나간 기록의 값은 같아야 한다(기록이 덧붙기만 했으면 그렇다).
+ * scenes를 만든 그림 구분(ctx)이 바뀌면 opts.compose.ctx도 바뀌어야 한다(같은 ctx를 쓴다).
+ */
+export function readerItemsFrom(
+  fold: { items: HistoryItem[]; stable: number; resumed: boolean },
+  data: GameData, choiceText: Map<number, string>, model: HistoryModel, overrides: PluginOverrides | null,
+  scenes: Map<number, ScreenScene> | null, opts: ReaderItemsOptions, prev: ReaderCache | null,
+): { items: ReaderItem[]; cache: ReaderCache } {
+  const deps = [data, overrides, scenes === null, opts?.battles, opts?.notices, opts?.hiddenNoticeKinds, opts?.compose?.ctx, opts?.compose?.vars] as const;
+  const items = Array.isArray(fold.items) ? fold.items : [];
+  const stable = Math.min(Math.max(0, fold.stable), items.length);
+  const resumable = !!prev && !!prev.state && fold.resumed && prev.used <= stable
+    && prev.deps.length === deps.length && prev.deps.every((d, i) => d === deps[i])
+    && (prev.used === 0 || items[prev.used - 1] === prev.lastUsed);
+  // 보관한 상태는 내준 적이 없다(내준 것은 언제나 사본 fin) — 그대로 이어 쓴다
+  const st = resumable && prev?.state ? prev.state : newReaderState();
+  const used = resumable && prev ? prev.used : 0;
+  const cfg: ReaderConfig = { data, choiceText, model, overrides, scenes, opts };
+  readerConverter(cfg, st).convertItems(items.slice(used, stable), st.top);
+  const fin = cloneReaderState(st);
+  const cache: ReaderCache = { state: fin ? st : null, used: stable, lastUsed: stable > 0 ? items[stable - 1] : null, deps };
+  if (!fin) return { items: readerItems(items, data, choiceText, model, overrides, scenes, opts), cache };
+  const { convertItems, finishList } = readerConverter(cfg, fin);
+  convertItems(items.slice(stable), fin.top);
+  finishList(fin.top);
+  return { items: fin.top, cache };
+}
+
+/**
+ * 경로 기록 → 읽기 항목(foldTimeline + readerItems)을 이어 만드는 것. 부를 때마다 앞의 결과에서 이어 간다
+ * (foldTimelineFrom·readerItemsFrom). 결과는 readerItems(foldTimeline(path, model, foldOpts), …)와 같다.
+ */
+export class ReaderItemsBuilder {
+  private fold: FoldCache | null = null;
+  private reader: ReaderCache | null = null;
+
+  build(
+    path: LogRecord[], model: HistoryModel, foldOpts: FoldOptions, data: GameData, choiceText: Map<number, string>,
+    overrides: PluginOverrides | null, scenes: Map<number, ScreenScene> | null, opts: ReaderItemsOptions,
+  ): ReaderItem[] {
+    const folded = foldTimelineFrom(path, model, foldOpts, this.fold);
+    const built = readerItemsFrom(folded, data, choiceText, model, overrides, scenes, opts, this.reader);
+    this.fold = folded.cache;
+    this.reader = built.cache;
+    return built.items;
+  }
 }
 
 /** 컷인 구간을 끝내는 기록(대사·스크롤 글·선택지·고른 선택·전투 로그 줄·장소 이동·갈래 시작·전투) */

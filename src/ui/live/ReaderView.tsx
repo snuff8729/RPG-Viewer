@@ -4,8 +4,8 @@ import { useAddons } from "@/app/AddonsProvider";
 import { picturesBySeq, scenesBySeq, withoutMenuScreens } from "@/core/addons/screenPictures";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
-import { branchPath, foldTimeline, representative } from "@/core/live/history";
-import { lastSeqOf, readerItems } from "@/core/live/reader";
+import { branchPath, representative } from "@/core/live/history";
+import { lastSeqOf, ReaderItemsBuilder } from "@/core/live/reader";
 import { hasLayeredPictures, pictureVarIds } from "@/core/live/pictureStack";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { ChevronsDown, Info, Settings2, X } from "lucide-react";
@@ -148,15 +148,17 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     if (liveBranch === null || !varsKey) return null;
     try { return { branch: liveBranch, values: JSON.parse(varsKey) as Record<string, number> }; } catch { return null; }
   }, [liveBranch, varsKey]);
+  // 기록이 갈래 끝에 덧붙기만 했으면(보통) 앞에서 만든 항목을 두고 새 기록만 더 만든다(이어 만들기).
+  // 갈래·설정·앞의 기록이 바뀌면 처음부터. 결과는 처음부터 만든 것과 언제나 같다.
+  const [builder] = useState(() => new ReaderItemsBuilder());
   const items = useMemo(() => {
     if (!data || branch === null) return [];
-    const folded = foldTimeline(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null });
-    const all = readerItems(folded, data, choiceTexts(path, data), model, overrides, pictures, {
+    const all = builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, choiceTexts(path, data), overrides, pictures, {
       battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx: pictureCtx, vars },
     });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
     return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
-  }, [data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
+  }, [builder, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
   const layered = useMemo(() => !picturesOn && hasLayeredPictures(path), [picturesOn, path]);
