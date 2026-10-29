@@ -99,6 +99,8 @@ export class ServerFolder implements WritableGameFolder {
   }
 
   get root(): string { return this.session.root; }
+  /** 지금 서버 세션 id(서버가 다시 시작돼 다시 열었으면 새 id) */
+  get sessionId(): string { return this.id; }
 
   private reopen(staleId: string): Promise<boolean> {
     if (this.readOnly) return Promise.resolve(false);

@@ -18,12 +18,16 @@ description: 새 RPG Maker 게임을 뷰어에 맞추기 — 승인된 게임 �
 - 저장소 규칙: 구현은 서브에이전트가, 메인 세션은 검토만. 검증이 끝나면 master에 바로 머지하고 사용자에게는 **쉬운 한국어로 쓰임새만** 보고한다. 테스트는 합성(가짜) 데이터로만 만든다.
   Repo rules: subagents implement, main reviews; merge verified work to master; report to the user in plain Korean; tests use synthetic fixtures only.
 - UI는 shadcn 컴포넌트만. `src/core`는 순수 함수이고 예외를 던지지 않는다.
-- **가린 사본 / Masked mirror**: 사용자가 `npm run mask`로 만든 가린 사본 경로를 주면(폴더에 `AI-README.md`가 있음) 원본 대신 **그 사본에서만** 작업한다.
-  먼저 `AI-README.md`와 `REPORT.md`를 읽는다. `T_` + 16진수 14자리는 가려진 게임 글이다 — **절대 풀거나 추측하지 않는다**. 같은 글은 어디서나 같은 토큰이므로
-  어댑터 manifest·`bridge.js`·`viewer.ts`에 그림 이름·플러그인 이름·매개변수 값으로 토큰을 그대로 써도 된다. 그림·소리 파일은 빈 파일이다.
-  토큰이 든 파일은 보고에 적어 두면 사용자가 머지 전에 `npm run unmask -- "<원본 게임 폴더>" <파일...>`로 원래 글로 바꾼다(에이전트는 원본을 열지 않는다).
+- **가린 사본 / Masked mirror**: 사용자가 뷰어의 `게임 진단 → AI에게 맡기기`(또는 `npm run mask`)로 만든 가린 사본 경로를 주면(폴더에 `AI-README.md`가 있음,
+  보통 `Documents/RPG-Viewer-Masked/` 아래) 원본 대신 **그 사본에서만** 작업한다.
+  먼저 `AI-README.md`와 `REPORT.md`를 읽는다. `T_` + 16진수 14자리는 가려진 게임 글이다 — **절대 풀거나 추측하지 않는다**. 그림·소리 파일은 빈 파일이다.
+  어댑터에는 게임 이름·플러그인 이름·그림(파일) 이름·매개변수 값을 **사본에 보이는 토큰 그대로** 쓴다: `match.plugins`, `match.gameTitle`,
+  `defaults.spriteRoles` 열쇠, `bridge.js` 본문. 뷰어가 게임에 맞출 때·확장을 설치할 때 열린 게임에서 원래 글로 바꾼다(못 찾은 토큰은 설치 화면에 경고).
+  `label`·`description`·`options`·`viewer.ts`에는 토큰을 쓰지 않는다(풀리지 않고 화면에 보인다). 저장소 파일에 `npm run unmask`를 **돌리지 않는다** —
+  원래 글이 저장소에 들어간다. 사용자가 답변 속 토큰을 읽고 싶으면 뷰어의 `AI 답변 풀어보기`를 쓰라고 안내한다.
   If the user gives a masked mirror path (has `AI-README.md`), work only from it. `T_` + 14 hex = hidden text; never try to decode it.
-  Tokens may appear in adapter manifests / bridge files as-is; list those files so the user can run `npm run unmask` before merging.
+  Write game/plugin/file names as tokens in `match.*`, `spriteRoles` keys and `bridge.js`; the viewer resolves them against the open game.
+  Do not put tokens in labels/descriptions/options/viewer.ts, and never run `npm run unmask` on repo files.
 
 ## 1. 진단 / Diagnose
 

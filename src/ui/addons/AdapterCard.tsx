@@ -3,10 +3,11 @@ import { useAddons } from "@/app/AddonsProvider";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import type { BundledAdapter } from "@/core/adapters/bundle";
-import { getAdapterInstallStatus, installAdapter, uninstallAdapter, type AdapterInstallStatus } from "@/core/adapters/install";
+import {
+  getAdapterInstallStatus, installAdapter, uninstallAdapter, unknownTokensNote, type AdapterInstallResult, type AdapterInstallStatus,
+} from "@/core/adapters/install";
 import { isWritableFolder } from "@/core/fs/folder";
 import { versionAtLeast } from "@/core/live/assist";
-import type { InstallResult } from "@/core/live/installer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ function useAdapterInstall(adapter: BundledAdapter) {
   }, [wfolder, dataRoot, id, script]);
   const status = read && read.folder === wfolder && script !== null ? read.status : null;
   /** 클릭 핸들러 안에서 부를 것(쓰기 권한 요청) */
-  const run = useCallback(async (on: boolean): Promise<InstallResult> => {
+  const run = useCallback(async (on: boolean): Promise<AdapterInstallResult> => {
     if (!wfolder || dataRoot === null || script === null) return { ok: false, message: "폴더 열기로 연 게임에서만 설치할 수 있어요" };
     let granted = false;
     try { granted = await wfolder.requestWrite(); } catch { granted = false; }
@@ -55,7 +56,7 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
   const { isAdapterOn, setAdapterOn, isAdapterOptionOn, setAdapterOption } = useAddons();
   const { connection, live } = useLive();
   const { status, run, canInstall } = useAdapterInstall(adapter);
-  const [result, setResult] = useState<InstallResult | null>(null);
+  const [result, setResult] = useState<AdapterInstallResult | null>(null);
   const [busy, setBusy] = useState(false);
   const { id, label, description } = adapter.manifest;
   const on = isAdapterOn(id);
@@ -124,6 +125,11 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
               <AlertDescription>
                 {result.ok ? "게임 쪽 확장을 설치했어요. 게임을 다시 시작하면 적용돼요." : result.message}
               </AlertDescription>
+            </Alert>
+          )}
+          {result?.ok && result.unknownTokens !== undefined && (
+            <Alert>
+              <AlertDescription>{unknownTokensNote(result.unknownTokens)}</AlertDescription>
             </Alert>
           )}
           {hasScript && connection === "connected" && live && !versionAtLeast(live.pluginVersion, MIN_BRIDGE) && (

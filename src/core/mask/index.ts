@@ -9,3 +9,4 @@ export {
   type FreeTextIndex, type ScanHit, type ScanResult, type UnmaskResult,
 } from "./free";
 export { maskFileText, mirrorKindOf, type MirrorKind } from "./files";
+export { findTokenOriginals, resolveTokensFromGame, tokensIn, type ResolvedTokens } from "./dictionary";
