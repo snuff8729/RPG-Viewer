@@ -34,8 +34,20 @@ export function useScreenSizes(records: LogRecord[]): Pick<PictureContext, "scre
   const liveW = ls?.width ?? 0, liveH = ls?.height ?? 0;
   const liveScreen = useMemo(() => (liveW > 0 && liveH > 0 ? { width: liveW, height: liveH } : null), [liveW, liveH]);
   const guessed = data?.screenSize ?? DEFAULT_SCREEN;
-  const sizes = useMemo(() => screenSizeMarks(records), [records]);
+  const marks = useMemo(() => screenSizeMarks(records), [records]);
+  // 기록이 늘어도 크기 표시가 그대로면 같은 배열(그림 구분 문맥이 기록마다 바뀌지 않게 — 읽기 이어 만들기)
+  const sizes = useSameByKey(marks, useMemo(() => JSON.stringify(marks), [marks]));
   return useMemo(() => ({ screen: liveScreen ?? guessed, sizes, liveScreen }), [liveScreen, guessed, sizes]);
+}
+
+/** 내용 열쇠가 앞과 같으면 앞의 값(같은 객체)을 그대로 돌려준다. */
+function useSameByKey<T>(value: T, key: string): T {
+  const [kept, setKept] = useState({ key, value });
+  if (kept.key !== key) {
+    setKept({ key, value });
+    return value;
+  }
+  return kept.value;
 }
 
 /**
@@ -89,17 +101,26 @@ export function usePictureContext(records: LogRecord[], on: boolean, compose = f
     void Promise.all([worker(), worker(), worker(), worker()]).then(() => setVersion((v) => v + 1));
   }, [assets, need]);
 
-  return useMemo(() => {
-    if (!counts && !compose) return null;
+  const lookups = useMemo(() => {
     const cache = assets ? sizeCaches.get(assets) : undefined;
     const stats = assets ? statsCaches.get(assets) : undefined;
-    const sizeOf = (name: string) => cache?.get(name) ?? null;
-    const statsOf = (name: string) => stats?.get(name) ?? null;
     void version; // 크기·통계를 더 읽으면 다시 만든다
-    const hudScreen = latestKnownScreen({ sizes, liveScreen }) ?? screen;
     return {
-      screen, sizes, liveScreen, roles: pictureRoles, spriteRoles, sizeOf, statsOf,
-      hud: counts ? hudKeys(counts, hudScreen, sizeOf) : null, defaultRole, hidden,
+      sizeOf: (name: string) => cache?.get(name) ?? null,
+      statsOf: (name: string) => stats?.get(name) ?? null,
     };
-  }, [counts, compose, assets, screen, sizes, liveScreen, pictureRoles, spriteRoles, version, defaultRole, hidden]);
+  }, [assets, version]);
+  const hudScreen = latestKnownScreen({ sizes, liveScreen }) ?? screen;
+  const hudNow = useMemo(() => (counts ? hudKeys(counts, hudScreen, lookups.sizeOf) : null), [counts, hudScreen, lookups]);
+  // 화면 장식 판정이 그대로면 같은 집합(기록이 늘 때마다 문맥이 바뀌지 않게)
+  const hud = useSameByKey(hudNow, useMemo(() => (hudNow ? [...hudNow].sort().join("\n") : "-"), [hudNow]));
+  const active = !!counts || compose;
+
+  return useMemo(() => {
+    if (!active) return null;
+    return {
+      screen, sizes, liveScreen, roles: pictureRoles, spriteRoles, sizeOf: lookups.sizeOf, statsOf: lookups.statsOf,
+      hud, defaultRole, hidden,
+    };
+  }, [active, screen, sizes, liveScreen, pictureRoles, spriteRoles, lookups, hud, defaultRole, hidden]);
 }

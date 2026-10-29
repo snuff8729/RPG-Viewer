@@ -257,12 +257,56 @@ export function episodePictureKey(records: readonly LogRecord[], hidden?: ((name
   return [...names].sort().join("\n");
 }
 
-function fold(path: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean): HistoryItem[] {
-  const records = bySeq(Array.isArray(path) ? path : []);
-  const uncertain = (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false;
-  const changed = (seq: number) => opts?.changedSeqs?.has(seq) ?? false;
-  const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
+/** 접기에 쓰는 고정된 것(경로·모델·설정에서 만든다) */
+interface FoldEnv {
+  model: HistoryModel; opts: FoldOptions; noisy: Set<number>; nested: boolean;
+  /** 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들 */
+  forkChildren: Map<string, number[]>;
+  rep: (id: number) => number;
+  /** 경로에 기록이 있는 대표 갈래들 */
+  pathBranches: Set<number>;
+  uncertain: (seq: number) => boolean;
+  changed: (seq: number) => boolean;
+}
 
+/**
+ * 접는 중인 상태. 이어 접기(foldTimelineFrom)는 이것을 보관했다가 새 기록만 더 접는다.
+ * 이미 넣은 항목 중 뒤에서 바뀌는 것은 마지막 항목(반복 대화·같은 전투의 횟수)뿐이다.
+ */
+interface FoldState {
+  items: HistoryItem[];
+  seenSignatures: Set<string>;
+  /** 마지막 항목이 반복 항목일 때 그 시그니처 */
+  lastRepeatKey: string | null;
+  episode: Episode | null;
+  lastEpisode: { key: string | null; talk: boolean } | null;
+  group: RecordOf<"state">[];
+  seenBattles: Set<string>;
+}
+
+const newFoldState = (): FoldState => ({
+  items: [], seenSignatures: new Set(), lastRepeatKey: null, episode: null, lastEpisode: null, group: [], seenBattles: new Set(),
+});
+
+/** 마지막 항목이 횟수가 바뀔 수 있는 것(반복·전투)이면 사본으로 바꾼다 — 이미 내준 항목 객체는 그대로 두게. */
+function detachLast(items: HistoryItem[]): void {
+  const last = items[items.length - 1];
+  if (last?.kind === "repeat" || last?.kind === "battle") items[items.length - 1] = { ...last };
+}
+
+/** 같은 상태의 사본. 사본으로 계속 접어도 원본(과 원본이 내준 항목)은 바뀌지 않는다. */
+function cloneFoldState(s: FoldState): FoldState {
+  const items = s.items.slice();
+  detachLast(items);
+  return {
+    items, seenSignatures: new Set(s.seenSignatures), lastRepeatKey: s.lastRepeatKey,
+    episode: s.episode ? { ...s.episode, records: s.episode.records.slice() } : null,
+    lastEpisode: s.lastEpisode, group: s.group.slice(), seenBattles: new Set(s.seenBattles),
+  };
+}
+
+function foldEnv(records: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean): FoldEnv {
+  const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
   // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들(이어진 갈래는 갈래 지점이 아니다)
   const forkChildren = new Map<string, number[]>();
   for (const b of model?.branches?.values() ?? []) {
@@ -275,62 +319,69 @@ function fold(path: LogRecord[], model: HistoryModel, opts: FoldOptions, nested:
   // 갈래 지점의 갈래들은 대표 갈래 id로 보인다
   const rep = (id: number) => (model ? representative(model, id) : id);
   const pathBranches = new Set(records.map(r => rep(r.branch)));
-
-  const items: HistoryItem[] = [];
-  const seenSignatures = new Set<string>();
-  let lastRepeatKey: string | null = null;   // 마지막 항목이 반복 항목일 때 그 시그니처
-  let episode: Episode | null = null;
-  let lastEpisode: { key: string | null; talk: boolean } | null = null;
-  let group: RecordOf<"state">[] = [];
-
-  const push = (item: HistoryItem) => { items.push(item); lastRepeatKey = null; };
-  const pushRecord = (record: LogRecord) => push({ kind: "record", record, uncertain: uncertain(record.seq), changed: changed(record.seq) });
-
-  const flushGroup = () => {
-    if (group.length === 0) return;
-    push({ kind: "stateGroup", records: group, count: group.reduce((n, r) => n + r.changes.length, 0) });
-    group = [];
+  return {
+    model, opts, noisy, nested, forkChildren, rep, pathBranches,
+    uncertain: (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false,
+    changed: (seq: number) => opts?.changedSeqs?.has(seq) ?? false,
   };
+}
 
-  const flushEpisode = () => {
-    const ep = episode;
-    if (!ep) return;
-    episode = null;
-    const messages = ep.records.filter((r): r is RecordOf<"message"> => r.type === "message");
-    const hasChoice = ep.records.some(r => r.type === "choices" || r.type === "choice");
-    // 글(명령 위치)과 보인 그림이 모두 같아야 같은 대화
-    const signature = ep.key !== null && messages.length > 0
-      ? `${ep.key}|${messages.map(m => m.cmd).join(",")}|${episodePictureKey(ep.records, opts?.isHiddenImage)}` : null;
-    const foldable = signature !== null && !hasChoice && seenSignatures.has(signature)
-      && !ep.records.some(r => uncertain(r.seq));
-    if (foldable) {
-      const last = items[items.length - 1];
-      // 접힌 대화마다 그 기록 전부(대사·그림·화면·알림·플러그인 글)를 남긴다(펼치면 회차별로 보인다)
-      if (last?.kind === "repeat" && lastRepeatKey === signature) { last.count++; last.occurrences = [...(last.occurrences ?? []), ep.records]; }
-      else { push({ kind: "repeat", record: messages[0], count: 1, occurrences: [ep.records] }); lastRepeatKey = signature; }
-    } else {
-      for (const r of ep.records) pushRecord(r);
-    }
-    if (signature !== null && !ep.records.some(r => uncertain(r.seq))) seenSignatures.add(signature);
-    lastEpisode = { key: ep.key, talk: ep.records.some(r => TALK_TYPES.has(r.type)) };
-  };
+function pushItem(s: FoldState, item: HistoryItem): void { s.items.push(item); s.lastRepeatKey = null; }
+function pushRecord(env: FoldEnv, s: FoldState, record: LogRecord): void {
+  pushItem(s, { kind: "record", record, uncertain: env.uncertain(record.seq), changed: env.changed(record.seq) });
+}
 
-  const seenBattles = new Set<string>();
-  const forkAt = (r: LogRecord) => {
-    const children = forkChildren.get(`${r.branch}:${r.seq}`);
-    if (!children) return;
-    flushEpisode();
-    flushGroup();
-    const own = rep(r.branch);
-    const all = [own, ...children];
-    const next = children.find(id => pathBranches.has(id)) ?? own;
-    const rest = [...new Set(all.filter(id => id !== next))].sort((a, b) => a - b);
-    push({ kind: "fork", atSeq: r.seq, branches: [next, ...rest] });
-  };
+function flushGroup(s: FoldState): void {
+  if (s.group.length === 0) return;
+  const group = s.group;
+  pushItem(s, { kind: "stateGroup", records: group, count: group.reduce((n, r) => n + r.changes.length, 0) });
+  s.group = [];
+}
 
-  for (let i = 0; i < records.length; i++) {
+function flushEpisode(env: FoldEnv, s: FoldState): void {
+  const ep = s.episode;
+  if (!ep) return;
+  s.episode = null;
+  const messages = ep.records.filter((r): r is RecordOf<"message"> => r.type === "message");
+  const hasChoice = ep.records.some(r => r.type === "choices" || r.type === "choice");
+  // 글(명령 위치)과 보인 그림이 모두 같아야 같은 대화
+  const signature = ep.key !== null && messages.length > 0
+    ? `${ep.key}|${messages.map(m => m.cmd).join(",")}|${episodePictureKey(ep.records, env.opts?.isHiddenImage)}` : null;
+  const foldable = signature !== null && !hasChoice && s.seenSignatures.has(signature)
+    && !ep.records.some(r => env.uncertain(r.seq));
+  if (foldable) {
+    const last = s.items[s.items.length - 1];
+    // 접힌 대화마다 그 기록 전부(대사·그림·화면·알림·플러그인 글)를 남긴다(펼치면 회차별로 보인다)
+    if (last?.kind === "repeat" && s.lastRepeatKey === signature) { last.count++; last.occurrences = [...(last.occurrences ?? []), ep.records]; }
+    else { pushItem(s, { kind: "repeat", record: messages[0], count: 1, occurrences: [ep.records] }); s.lastRepeatKey = signature; }
+  } else {
+    for (const r of ep.records) pushRecord(env, s, r);
+  }
+  if (signature !== null && !ep.records.some(r => env.uncertain(r.seq))) s.seenSignatures.add(signature);
+  s.lastEpisode = { key: ep.key, talk: ep.records.some(r => TALK_TYPES.has(r.type)) };
+}
+
+function forkAt(env: FoldEnv, s: FoldState, r: LogRecord): void {
+  const children = env.forkChildren.get(`${r.branch}:${r.seq}`);
+  if (!children) return;
+  flushEpisode(env, s);
+  flushGroup(s);
+  const own = env.rep(r.branch);
+  const all = [own, ...children];
+  const next = children.find(id => env.pathBranches.has(id)) ?? own;
+  const rest = [...new Set(all.filter(id => id !== next))].sort((a, b) => a - b);
+  pushItem(s, { kind: "fork", atSeq: r.seq, branches: [next, ...rest] });
+}
+
+/**
+ * records[from..]을 접는다(끝의 대화·상태 변경 묶음은 열어 둔다 — foldEnd가 닫는다). 다음에 접을 위치를 돌려준다.
+ * stopAtOpen이면 기록 끝까지 이어지는(끝 기록이 아직 없는) 전투 앞에서 멈춘다(기록이 더 오면 그 전투 묶음이 바뀐다).
+ */
+function foldRecords(env: FoldEnv, s: FoldState, records: LogRecord[], from: number, stopAtOpen: boolean): number {
+  const { noisy } = env;
+  for (let i = from; i < records.length; i++) {
     const r = records[i];
-    if (!nested && r.type === "battle" && r.phase === "start") {
+    if (!env.nested && r.type === "battle" && r.phase === "start") {
       // 전투 한 번을 묶는다: 끝 기록까지(없으면 다음 전투·갈래 시작·이동·불러오기 앞까지)
       let j = i + 1;
       let end: RecordOf<"battle"> | null = null;
@@ -340,71 +391,181 @@ function fold(path: LogRecord[], model: HistoryModel, opts: FoldOptions, nested:
         if (BATTLE_STOP.has(x.type)) break;
         j++;
       }
+      if (stopAtOpen && !end && j >= records.length) return i;
       const inner = records.slice(i + 1, end ? j - 1 : j);
-      flushEpisode();
-      flushGroup();
-      const sub = fold(inner, model, { ...opts, noisy }, true);
+      flushEpisode(env, s);
+      flushGroup(s);
+      const sub = fold(inner, env.model, { ...env.opts, noisy }, true);
       // 전투 로그 줄과 알림 문구(1.9.0)를 함께 센다
       const logLines = inner.reduce((n, x) => n + (x.type === "battlelog" || x.type === "notice" ? 1 : 0), 0);
-      const signature = inner.some(x => uncertain(x.seq)) ? null : battleSignature(r, end, inner);
-      const last = items[items.length - 1];
-      if (signature !== null && seenBattles.has(signature)) {
-        if (last?.kind === "battle" && last.repeat > 0 && lastRepeatKey === signature) last.repeat++;
-        else { push({ kind: "battle", start: r, end, items: sub, logLines, repeat: 1 }); lastRepeatKey = signature; }
+      const signature = inner.some(x => env.uncertain(x.seq)) ? null : battleSignature(r, end, inner);
+      const last = s.items[s.items.length - 1];
+      if (signature !== null && s.seenBattles.has(signature)) {
+        if (last?.kind === "battle" && last.repeat > 0 && s.lastRepeatKey === signature) last.repeat++;
+        else { pushItem(s, { kind: "battle", start: r, end, items: sub, logLines, repeat: 1 }); s.lastRepeatKey = signature; }
       } else {
-        push({ kind: "battle", start: r, end, items: sub, logLines, repeat: 0 });
+        pushItem(s, { kind: "battle", start: r, end, items: sub, logLines, repeat: 0 });
       }
-      if (signature !== null) seenBattles.add(signature);
-      lastEpisode = null;
-      forkAt(r);
-      if (end) forkAt(end);
+      if (signature !== null) s.seenBattles.add(signature);
+      s.lastEpisode = null;
+      forkAt(env, s, r);
+      if (end) forkAt(env, s, end);
       i = j - 1;
       continue;
     }
     if (r.type === "screen") {
       // 1.10.0 화면 기록은 접기에 영향이 없다: 진행 중인 대화 안이면 그 대화와 함께(반복으로 접히면 함께 접힌다),
       // 아니면 그 자리에 넣되 대화·상태 변경 묶음의 이어짐은 끊지 않는다
-      if (episode) episode.records.push(r);
-      else { flushGroup(); push({ kind: "record", record: r, uncertain: false, changed: false }); }
+      if (s.episode) s.episode.records.push(r);
+      else { flushGroup(s); pushItem(s, { kind: "record", record: r, uncertain: false, changed: false }); }
     } else if (EPISODE_TYPES.has(r.type)) {
       const er = r as EpisodeRecord;
-      flushGroup();
+      flushGroup(s);
       const key = srcKey(er.src);
       const cmd = num(er.cmd);
-      if (episode && key !== null && key === episode.key && cmd > episode.lastCmd) {
-        episode.records.push(er);
-        episode.lastCmd = cmd;
+      if (s.episode && key !== null && key === s.episode.key && cmd > s.episode.lastCmd) {
+        s.episode.records.push(er);
+        s.episode.lastCmd = cmd;
       } else {
-        flushEpisode();
-        episode = { key, lastCmd: cmd, records: [er] };
+        flushEpisode(env, s);
+        s.episode = { key, lastCmd: cmd, records: [er] };
       }
     } else if (r.type === "state") {
       const original: StateChange[] = Array.isArray(r.changes) ? r.changes : [];
       const changes = original.filter(c => !(c && c.kind === "variable" && noisy.has(Number(c.id))));
       // 잦은 변수만 바꾼 기록은 화면에서 사라지므로 에피소드·묶음도 끊지 않는다
       if (changes.length > 0) {
-        flushEpisode();
+        flushEpisode(env, s);
         const rec: RecordOf<"state"> = changes.length === original.length && original === r.changes ? r : { ...r, changes };
         const key = srcKey(r.src);
-        // flushEpisode가 클로저 안에서 갱신하므로 TS 좁히기를 피해 명시적 타입으로 읽는다
-        const prev = lastEpisode as { key: string | null; talk: boolean } | null;
+        const prev = s.lastEpisode;
         if (prev?.talk && key !== null && key === prev.key) {
-          flushGroup();
-          pushRecord(rec);
+          flushGroup(s);
+          pushRecord(env, s, rec);
         } else {
-          group.push(rec);
+          s.group.push(rec);
         }
       }
     } else {
-      flushEpisode();
-      flushGroup();
-      pushRecord(r);
-      lastEpisode = null;
+      flushEpisode(env, s);
+      flushGroup(s);
+      pushRecord(env, s, r);
+      s.lastEpisode = null;
     }
 
-    forkAt(r);
+    forkAt(env, s, r);
   }
-  flushEpisode();
-  flushGroup();
-  return items;
+  return records.length;
+}
+
+/** 끝에 열려 있는 대화·상태 변경 묶음을 닫는다. */
+function foldEnd(env: FoldEnv, s: FoldState): void {
+  flushEpisode(env, s);
+  flushGroup(s);
+}
+
+function fold(path: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean): HistoryItem[] {
+  const records = bySeq(Array.isArray(path) ? path : []);
+  const env = foldEnv(records, model, opts, nested);
+  const s = newFoldState();
+  foldRecords(env, s, records, 0, false);
+  foldEnd(env, s);
+  return s.items;
+}
+
+// ---------------------------------------------------------------- 이어 접기
+
+/** 이어 접기 상태(foldTimelineFrom이 돌려주고 다음 부를 때 다시 받는다). 밖에서 고치지 않는다. */
+export interface FoldCache {
+  /** 다 접은(뒤 기록과 상관없는) 기록 수와 그때의 경로 기록들 */
+  done: number;
+  records: LogRecord[];
+  state: FoldState;
+  modelKey: string;
+  branchesKey: string;
+  noisy: Set<number>;
+  uncertain: Set<number> | undefined;
+  changed: Set<number> | undefined;
+  hidden: FoldOptions["isHiddenImage"];
+}
+
+export interface FoldResult {
+  /** foldTimeline(path, model, opts)와 같은 항목들 */
+  items: HistoryItem[];
+  /** 앞에서 이만큼의 항목은 이 cache로 이어 접는 동안 같은 객체 그대로다(바뀌지 않는다) */
+  stable: number;
+  /** 넘겨받은 cache를 이어 썼다(false = 처음부터 다시 접었다 — 이전 결과와 같은 항목이라고 볼 수 없다) */
+  resumed: boolean;
+  cache: FoldCache;
+}
+
+/** 갈래 모델에서 접기·읽기 항목에 쓰는 것(갈래 부모·저장 지점·회차·이어짐·회차별 순서)만 이은 열쇠 */
+function modelKey(model: HistoryModel): string {
+  const parts: string[] = [];
+  for (const b of model?.branches?.values() ?? []) parts.push(`${b.id},${b.run},${b.parent},${b.fromSeq},${model.alias?.get(b.id) ?? ""}`);
+  return `${parts.join(";")}|${(model?.runs ?? []).map(r => `${r.run}:${r.branches.join(",")}`).join(";")}`;
+}
+
+function sameSet<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
+/** limit 이하의 값이 두 집합에서 같은가 */
+function sameUpTo(a: Set<number> | undefined, b: Set<number> | undefined, limit: number): boolean {
+  if (a === b) return true;
+  for (const x of a ?? []) if (x <= limit && !b?.has(x)) return false;
+  for (const x of b ?? []) if (x <= limit && !a?.has(x)) return false;
+  return true;
+}
+
+/** 앞의 n개 기록이 같은가(같은 객체이거나, 같은 seq·종류 — 메뉴 화면 기록을 빼면서 새로 만든 사본) */
+function samePrefix(prev: LogRecord[], next: LogRecord[], n: number): boolean {
+  if (next.length < n || prev.length < n) return false;
+  for (let i = 0; i < n; i++) {
+    const a = prev[i], b = next[i];
+    if (a !== b && (a.seq !== b.seq || a.type !== b.type)) return false;
+  }
+  return true;
+}
+
+/**
+ * foldTimeline을 이어서 한다: 경로가 앞의 것에 기록만 덧붙은 것이면(같은 갈래에 기록이 쌓이는 보통의 경우)
+ * 앞에서 다 접은 데서부터 새 기록만 접는다. 갈래 모델(새 갈래)·잦은 변수·접기 설정이 바뀌었거나, 앞의 기록이
+ * 바뀌었으면(지우기·고치기·불확실 표시) 처음부터 다시 접는다. 결과 항목은 언제나 foldTimeline과 같다.
+ * opts.noisy가 없으면(경로에서 계산) 이어 쓰지 않는다.
+ */
+export function foldTimelineFrom(path: LogRecord[], model: HistoryModel, opts: FoldOptions, prev: FoldCache | null): FoldResult {
+  const records = bySeq(Array.isArray(path) ? path : []);
+  const env = foldEnv(records, model, opts, false);
+  const keyM = modelKey(model);
+  const keyB = [...env.pathBranches].sort((a, b) => a - b).join(",");
+  const limit = prev && prev.done > 0 ? prev.records[prev.done - 1].seq : -Infinity;
+  const resumable = !!prev && opts?.noisy instanceof Set
+    && prev.modelKey === keyM && prev.branchesKey === keyB && prev.hidden === (opts?.isHiddenImage ?? null)
+    && sameSet(prev.noisy, env.noisy)
+    && sameUpTo(prev.uncertain, opts?.uncertainSeqs, limit) && sameUpTo(prev.changed, opts?.changedSeqs, limit)
+    && samePrefix(prev.records, records, prev.done);
+  let state: FoldState;
+  let from = 0;
+  if (resumable && prev) {
+    state = prev.state;
+    from = prev.done;
+  } else {
+    state = newFoldState();
+  }
+  const done = foldRecords(env, state, records, from, true);
+  const stable = Math.max(0, state.items.length - 1);
+  const out = cloneFoldState(state);
+  foldRecords(env, out, records, done, false);
+  foldEnd(env, out);
+  return {
+    items: out.items, stable, resumed: resumable,
+    cache: {
+      done, records, state, modelKey: keyM, branchesKey: keyB, noisy: env.noisy,
+      uncertain: opts?.uncertainSeqs, changed: opts?.changedSeqs, hidden: opts?.isHiddenImage ?? null,
+    },
+  };
 }
