@@ -85,6 +85,9 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   const clock = { t: opts.startTime ?? 1_000_000 };
   const g: any = globalThis;
   const saves: Record<number, any> = {};
+  // window.addEventListener("keydown", fn, true) of the plugin (fresh per harness)
+  const keyListeners: ((e: any) => void)[] = [];
+  g.addEventListener = (type: string, fn: (e: any) => void) => { if (type === "keydown") keyListeners.push(fn); };
 
   // ---- Game_Message
   function Game_Message(this: any) { this.clear(); }
@@ -372,6 +375,20 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
       }
     },
     keyDown(keyCode: number) { const n = this.keyMapper[keyCode]; if (n) this._currentState[n] = true; },
+    /**
+     * A real keydown (1.22.0 combos): window capture listeners first (the bridge's), then the engine's
+     * Input._onKeyDown (keyDown) unless a listener stopped it. The key stays down until keyUp.
+     */
+    keyEvent(keyCode: number, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; repeat?: boolean } = {}) {
+      let stopped = false, prevented = false;
+      const e = {
+        keyCode, ctrlKey: !!mods.ctrl, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: false, repeat: !!mods.repeat,
+        preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, stopImmediatePropagation() { stopped = true; },
+      };
+      for (const l of keyListeners) { l(e); if (stopped) break; }
+      if (!stopped) this.keyDown(keyCode);
+      return { stopped, prevented };
+    },
     keyUp(keyCode: number) { const n = this.keyMapper[keyCode]; if (n) this._currentState[n] = false; },
     // a tap already seen by this frame's update: triggered until the next update releases it
     press(keyCode: number) {

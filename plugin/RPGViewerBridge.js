@@ -10,10 +10,15 @@
  * 게임 화면과 진행에는 영향을 주지 않습니다. 치트(아이템·돈·능력치·스위치·변수
  * 바꾸기)는 RPG Viewer에서 누를 때만, 실행 중인 게임에 바로 적용합니다.
  * 플러그인 명령이나 파라미터는 없습니다.
- * 게임 창 단축키: F6 배속(×1→×2→×4→×8), F7 본 대사 자동 넘기기,
- * 전투 중 F10 이기기, F11 지기, Home 내 체력 100%, End 내 체력 1%(맵·전투),
- * F1 세이브 폴더 백업, 숫자 1 왼쪽 키(백틱) 두 번 마지막 백업으로 복원(RPG Viewer가 처리),
- * [ 퀵 세이브, ] 두 번 퀵 로드(기본은 마지막 세이브 칸). 세이브 창·로드 창 열기는 기본 키가 없습니다.
+ * 게임 창 단축키(RPG Viewer에서 바꿀 수 있음, Ctrl·Shift·Alt 조합 가능):
+ * 진행 — F6 배속(×1→×2→×4→×8), Ctrl+F6 자동 배속 빠르기(×2→×4→×8),
+ *   F7 본 대사 자동 넘기기 켜고 끄기, Ctrl+F7 본 이벤트 자동 배속 켜고 끄기.
+ * 전투 중 — F10 이기기, F11 지기, Ctrl+F10 도망.
+ * 체력(맵·전투) — Home 내 체력 100%, End 내 체력 1%.
+ * 세이브 — Ctrl+S 퀵 세이브, Ctrl+L 두 번 퀵 로드(기본은 마지막 세이브 칸),
+ *   Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창.
+ * 백업(RPG Viewer가 처리) — Ctrl+B 세이브 폴더 백업, Ctrl+Shift+B 두 번 마지막 백업으로 복원.
+ * 조합 키는 조합 그대로일 때만 듣습니다(Ctrl+F7은 F7 동작을 하지 않고, 그 반대도 같음).
  * 퀵 세이브·세이브 창은 맵에서 이벤트가 없을 때만 하고, 게임이 저장을 막아 두었으면 하지 않습니다.
  * 선택지는 자동으로 고르지 않습니다.
  * 변수 변경은 숫자·참/거짓 값만 기록합니다(문자열·배열 등은 기록하지 않음).
@@ -53,7 +58,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.21.0",
+    VERSION: "1.22.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -125,17 +130,49 @@
   var KEY_HP_FULL = "rpgvHpFull", KEY_HP_LOW = "rpgvHpLow";
   var KEY_BACKUP = "rpgvBackup", KEY_RESTORE = "rpgvRestore", KEY_QUICK_SAVE = "rpgvQuickSave", KEY_QUICK_LOAD = "rpgvQuickLoad";
   var KEY_SAVE_MENU = "rpgvSaveMenu", KEY_LOAD_MENU = "rpgvLoadMenu";
-  var HOTKEY_NAMES = ["speed", "skip", "win", "lose", "hpFull", "hpLow", "backup", "restore", "quickSave", "quickLoad", "saveMenu", "loadMenu"];
+  var KEY_AUTO_SPEED = "rpgvAutoSpeed", KEY_AUTO_FAST = "rpgvAutoFast", KEY_ESCAPE = "rpgvEscape";
+  // same order as the viewer (core/live/assist HOTKEY_ACTIONS): a later duplicate loses
+  var HOTKEY_NAMES = [
+    "speed", "autoSpeed", "skip", "autoFast", "win", "lose", "escape", "hpFull", "hpLow",
+    "quickSave", "quickLoad", "saveMenu", "loadMenu", "backup", "restore"
+  ];
   var HOTKEY_BUTTONS = {
-    speed: KEY_SPEED, skip: KEY_SKIP, win: KEY_WIN, lose: KEY_LOSE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
-    backup: KEY_BACKUP, restore: KEY_RESTORE, quickSave: KEY_QUICK_SAVE, quickLoad: KEY_QUICK_LOAD,
-    saveMenu: KEY_SAVE_MENU, loadMenu: KEY_LOAD_MENU
+    speed: KEY_SPEED, autoSpeed: KEY_AUTO_SPEED, skip: KEY_SKIP, autoFast: KEY_AUTO_FAST,
+    win: KEY_WIN, lose: KEY_LOSE, escape: KEY_ESCAPE, hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
+    quickSave: KEY_QUICK_SAVE, quickLoad: KEY_QUICK_LOAD, saveMenu: KEY_SAVE_MENU, loadMenu: KEY_LOAD_MENU,
+    backup: KEY_BACKUP, restore: KEY_RESTORE
   };
-  // F6 F7 F10 F11, Home End (HP keys since 1.20.0); 1.21.0: F1 backup, backquote (192) restore, [ quick save, ] quick load, menus off
+  // 1.22.0: a hotkey is keyCode | Ctrl 256 | Shift 512 | Alt 1024. Plain keys go through Input.keyMapper;
+  // combos are caught by our own keydown listener (window, capture phase) and never reach the engine.
+  var MOD_CTRL = 256, MOD_SHIFT = 512, MOD_ALT = 1024, MOD_MASK = 1792;
+  // F6 / Ctrl+F6 / F7 / Ctrl+F7, F10 F11 Ctrl+F10, Home End, Ctrl+S Ctrl+L Ctrl+Shift+S Ctrl+Shift+L, Ctrl+B Ctrl+Shift+B
   var HOTKEY_DEFAULTS = {
-    speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35,
-    backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null
+    speed: 117, autoSpeed: 117 | MOD_CTRL, skip: 118, autoFast: 118 | MOD_CTRL,
+    win: 121, lose: 122, escape: 121 | MOD_CTRL, hpFull: 36, hpLow: 35,
+    quickSave: 83 | MOD_CTRL, quickLoad: 76 | MOD_CTRL, saveMenu: 83 | MOD_CTRL | MOD_SHIFT, loadMenu: 76 | MOD_CTRL | MOD_SHIFT,
+    backup: 66 | MOD_CTRL, restore: 66 | MOD_CTRL | MOD_SHIFT
   };
+  var AUTO_SPEED_NEXT = { 2: 4, 4: 8, 8: 2 };
+  // never hotkeys, plain or combined: lock / modifier / Windows keys
+  var LOCK_KEYS = { 20: true, 16: true, 17: true, 18: true, 91: true, 92: true, 93: true, 144: true, 145: true };
+  // no combos on moving / OK / cancel / menu keys (we swallow combos, so holding Ctrl or Shift would block them)
+  var NAV_KEYS = {
+    9: true, 13: true, 27: true, 32: true, 33: true, 34: true, 37: true, 38: true, 39: true, 40: true, 45: true,
+    96: true, 98: true, 100: true, 102: true, 104: true
+  };
+  // combos the game window (NW.js / Chromium) or Windows takes: reload, close, new window, devtools, print, zoom, context menu
+  var RESERVED_COMBOS = {};
+  (function () {
+    var C = MOD_CTRL, CS = MOD_CTRL | MOD_SHIFT;
+    var list = [
+      82 | C, 82 | CS, 87 | C, 87 | CS, 81 | C, 81 | CS, 78 | C, 78 | CS, 84 | C, 84 | CS,
+      73 | CS, 74 | CS, 67 | CS, 80 | C, 80 | CS,
+      115 | C, 115 | MOD_ALT, 121 | MOD_SHIFT,
+      187 | C, 189 | C, 48 | C, 107 | C, 109 | C, 187 | CS, 189 | CS, 48 | CS,
+      46 | CS
+    ];
+    for (var i = 0; i < list.length; i++) RESERVED_COMBOS[list[i]] = true;
+  })();
   // keyCodes the engine itself uses (default Input.keyMapper, F2-F5, F8, F9): never offered as hotkeys
   var RESERVED_KEYS = {
     9: true, 13: true, 16: true, 17: true, 18: true, 27: true, 32: true, 33: true, 34: true,
@@ -154,11 +191,14 @@
   var sceneAction = null;     // { id (command id or null for a key), kind, t } waiting for a safe moment
   var pendingLoad = null;     // { scene (the Scene_Load pushed), slot, id, t } quick load waiting for its load scene
   var messageEl = null, messageTimer = null;
+  var comboPressed = {};      // 1.22.0: action -> time its combo key went down (taken by the next pollHotkeys)
+  var comboReady = false;     // our keydown listener is installed (combos work)
+  var COMBO_MAX_AGE_MS = 1000;
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
   var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
   var seenMessages = Object.create(null), seenPages = Object.create(null);
-  // last speed/skipSeen taken from control.json: a rewrite with the same value does not undo a hotkey change
-  var ctrlSpeed = null, ctrlSkip = null;
+  // last speed/skipSeen/autoFast/autoSpeed taken from control.json: a rewrite with the same value does not undo a hotkey change
+  var ctrlSpeed = null, ctrlSkip = null, ctrlAutoFast = null, ctrlAutoSpeed = null;
   var lastControlKey = null, lastControlText = null, lastControlPollT = -Infinity;
   var lastCommandId = null, lastCommand = null, pendingCommand = null;
   var controlT = null;        // "t" of the last applied control.json (null = none applied this session)
@@ -709,6 +749,7 @@
       inBattle: inBattle,
       assist: {
         speed: assist.speed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
+        autoFast: assist.autoFast, autoSpeed: assist.autoSpeed,
         troopId: inBattle && G.$gameTroop && typeof G.$gameTroop._troopId === "number" ? G.$gameTroop._troopId : null,
         canEscape: inBattle && canEscapeNow(),
         canLose: inBattle && !!(G.BattleManager && G.BattleManager._canLose),
@@ -1016,11 +1057,20 @@
     return out;
   }
 
+  // Same rules as the viewer's validateHotkey (core/live/assist), without the duplicate check.
   function validHotkey(v) {
-    return typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= 8 && v <= 255 && RESERVED_KEYS[v] !== true;
+    if (typeof v !== "number" || !isFinite(v) || Math.floor(v) !== v || v < 8 || (v & ~(255 | MOD_MASK)) !== 0) return false;
+    var base = v & 255, mods = v & MOD_MASK;
+    if (base < 8 || LOCK_KEYS[base] === true) return false;
+    if (mods === 0) return RESERVED_KEYS[base] !== true;
+    if ((mods & MOD_CTRL) && (mods & MOD_ALT)) return false; // AltGr on some keyboards
+    if (NAV_KEYS[base] === true || RESERVED_COMBOS[v] === true) return false;
+    return !(mods === MOD_SHIFT && RESERVED_KEYS[base] === true); // Shift is dash: Shift + a game key stays the game's
   }
 
-  // control.json "hotkeys": keyCode or null (disabled) per entry; missing/invalid -> default,
+  function isCombo(v) { return typeof v === "number" && (v & MOD_MASK) !== 0; }
+
+  // control.json "hotkeys": keyCode (| modifier bits) or null (disabled) per entry; missing/invalid -> default,
   // a keyCode already taken by an earlier entry -> default if free, else disabled.
   function hotkeysFrom(h) {
     var out = {}, used = {};
@@ -1049,7 +1099,7 @@
     mappedKeys = {};
     for (var i = 0; i < HOTKEY_NAMES.length; i++) {
       var name = HOTKEY_NAMES[i], k = hotkeys[name];
-      if (k === null || km[k] !== undefined) continue;
+      if (k === null || isCombo(k) || km[k] !== undefined) continue;
       km[k] = HOTKEY_BUTTONS[name];
       mappedKeys[k] = HOTKEY_BUTTONS[name];
     }
@@ -1061,7 +1111,8 @@
     var km = G.Input && G.Input.keyMapper;
     for (var i = 0; i < HOTKEY_NAMES.length; i++) {
       var name = HOTKEY_NAMES[i], k = hotkeys[name];
-      out[name] = k !== null && km && typeof km === "object" && km[k] === HOTKEY_BUTTONS[name] ? k : null;
+      if (k !== null && isCombo(k)) out[name] = comboReady ? k : null;
+      else out[name] = k !== null && km && typeof km === "object" && km[k] === HOTKEY_BUTTONS[name] ? k : null;
     }
     return out;
   }
@@ -1081,8 +1132,14 @@
       if (ctrlSkip === null || c.skipSeen !== ctrlSkip) assist.skipSeen = c.skipSeen;
       ctrlSkip = c.skipSeen;
     }
-    if (typeof c.autoFast === "boolean") assist.autoFast = c.autoFast;
-    if (typeof c.autoSpeed === "number" && SPEED_OK[c.autoSpeed] === true) assist.autoSpeed = c.autoSpeed;
+    if (typeof c.autoFast === "boolean") {
+      if (ctrlAutoFast === null || c.autoFast !== ctrlAutoFast) assist.autoFast = c.autoFast;
+      ctrlAutoFast = c.autoFast;
+    }
+    if (typeof c.autoSpeed === "number" && SPEED_OK[c.autoSpeed] === true) {
+      if (ctrlAutoSpeed === null || c.autoSpeed !== ctrlAutoSpeed) assist.autoSpeed = c.autoSpeed;
+      ctrlAutoSpeed = c.autoSpeed;
+    }
     if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
     if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
     var cap = c.capturePictures === true;
@@ -1154,7 +1211,7 @@
     if (!km || typeof km !== "object") return true;
     for (var i = 0; i < HOTKEY_NAMES.length; i++) {
       var k = hotkeys[HOTKEY_NAMES[i]];
-      if (k !== null && km[k] === undefined) return false;
+      if (k !== null && !isCombo(k) && km[k] === undefined) return false;
     }
     return true;
   }
@@ -1372,25 +1429,77 @@
     pendingCommand = { id: "key-" + kind + "-" + t, kind: kind, t: t };
   }
 
+  // 1.22.0: combos (any of Ctrl / Shift / Alt held) are matched exactly here, before the engine's own keydown
+  // listener: a matching combo is queued for pollHotkeys and swallowed (no browser default, the engine never sees
+  // its key); a plain hotkey's key pressed with a modifier is swallowed too, so Ctrl+F7 never fires plain F7.
+  function onHotkeyKeyDown(e) {
+    try {
+      if (!e || typeof e.keyCode !== "number") return;
+      var k = e.keyCode;
+      if (LOCK_KEYS[k] === true) return;
+      var mods = (e.ctrlKey ? MOD_CTRL : 0) | (e.shiftKey ? MOD_SHIFT : 0) | (e.altKey ? MOD_ALT : 0);
+      if (mods === 0 || e.metaKey) return;
+      var code = k | mods, hit = null;
+      for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+        if (hotkeys[HOTKEY_NAMES[i]] === code) { hit = HOTKEY_NAMES[i]; break; }
+      }
+      if (hit === null && !has(mappedKeys, k)) return;
+      if (typeof e.preventDefault === "function") e.preventDefault();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+      if (hit !== null && !e.repeat) comboPressed[hit] = now();
+    } catch (err) { reportError(err); }
+  }
+
+  function installHotkeyListener() {
+    if (typeof G.addEventListener !== "function") return;
+    G.addEventListener("keydown", onHotkeyKeyDown, true);
+    comboReady = true;
+  }
+
+  // Which actions were pressed this frame: plain keys by Input.isTriggered, combos from the listener's queue (taken here).
+  function triggeredHotkeys(I) {
+    var out = {}, t = now();
+    for (var i = 0; i < HOTKEY_NAMES.length; i++) {
+      var name = HOTKEY_NAMES[i], k = hotkeys[name];
+      if (k === null) out[name] = false;
+      else if (isCombo(k)) out[name] = has(comboPressed, name) && t - comboPressed[name] <= COMBO_MAX_AGE_MS;
+      else out[name] = !!I.isTriggered(HOTKEY_BUTTONS[name]);
+    }
+    comboPressed = {};
+    return out;
+  }
+
+  function onOff(on) { return on ? "켬" : "끔"; }
+
   function pollHotkeys() {
     var I = G.Input;
     if (!I || typeof I.isTriggered !== "function") return;
-    if (I.isTriggered(KEY_SPEED)) assist.speed = SPEED_NEXT[assist.speed] || 1;
-    if (I.isTriggered(KEY_SKIP)) assist.skipSeen = !assist.skipSeen;
-    if (I.isTriggered(KEY_WIN)) hotkeyCommand("win");
-    if (I.isTriggered(KEY_LOSE)) hotkeyCommand("lose");
-    if (I.isTriggered(KEY_HP_FULL)) hotkeyCommand("hpFull");
-    if (I.isTriggered(KEY_HP_LOW)) hotkeyCommand("hpLow");
-    if (I.isTriggered(KEY_BACKUP)) requestViewer("backup");
-    if (I.isTriggered(KEY_RESTORE) && confirmPress("restore", "한 번 더 누르면 마지막 백업으로 되돌려요")) requestViewer("restore");
-    if (I.isTriggered(KEY_QUICK_SAVE)) hotkeyScene("quickSave");
-    if (I.isTriggered(KEY_QUICK_LOAD)) {
+    var p = triggeredHotkeys(I);
+    if (p.speed) { assist.speed = SPEED_NEXT[assist.speed] || 1; showMessage("배속 ×" + assist.speed); }
+    if (p.autoSpeed) {
+      assist.autoSpeed = AUTO_SPEED_NEXT[assist.autoSpeed] || 2;
+      showMessage("본 이벤트 자동 배속 빠르기 ×" + assist.autoSpeed + (assist.autoFast ? "" : " (자동 배속은 꺼져 있어요)"));
+    }
+    if (p.skip) { assist.skipSeen = !assist.skipSeen; showMessage("본 대사 자동 넘기기 " + onOff(assist.skipSeen)); }
+    if (p.autoFast) { assist.autoFast = !assist.autoFast; showMessage("본 이벤트 자동 배속 " + onOff(assist.autoFast)); }
+    if (p.win) hotkeyCommand("win");
+    if (p.lose) hotkeyCommand("lose");
+    if (p.escape) {
+      if (inBattleNow() && !canEscapeNow()) showMessage("이 전투는 도망칠 수 없어요");
+      else hotkeyCommand("escape");
+    }
+    if (p.hpFull) hotkeyCommand("hpFull");
+    if (p.hpLow) hotkeyCommand("hpLow");
+    if (p.backup) requestViewer("backup");
+    if (p.restore && confirmPress("restore", "한 번 더 누르면 마지막 백업으로 되돌려요")) requestViewer("restore");
+    if (p.quickSave) hotkeyScene("quickSave");
+    if (p.quickLoad) {
       var slot = quickSlotId();
       if (slot !== null && !slotExists(slot)) { armed.kind = null; showMessage("퀵 세이브(" + slot + "번 칸)가 아직 없어요"); }
       else if (confirmPress("quickLoad", "한 번 더 누르면 퀵 세이브" + (slot !== null ? "(" + slot + "번 칸)" : "") + "를 불러와요")) hotkeyScene("quickLoad");
     }
-    if (I.isTriggered(KEY_SAVE_MENU)) hotkeyScene("saveMenu");
-    if (I.isTriggered(KEY_LOAD_MENU)) hotkeyScene("loadMenu");
+    if (p.saveMenu) hotkeyScene("saveMenu");
+    if (p.loadMenu) hotkeyScene("loadMenu");
   }
 
   // ---------------------------------------------------------------- save / load / backup (1.21.0)
@@ -3485,6 +3594,7 @@
 
   function installAssist() {
     applyKeyMap();
+    try { installHotkeyListener(); } catch (ek) { reportError(ek); }
 
     hook(G.SceneManager, "SceneManager", "updateScene", function (orig) {
       return function () {
