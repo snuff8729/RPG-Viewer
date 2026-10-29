@@ -29,7 +29,11 @@ import { ReaderView } from "./ReaderView";
 import { ShareButton } from "./ShareButton";
 import { useMapChecklist } from "./useMapChecklist";
 
-/** 휴대폰 위쪽 한 줄: 사이드바·연결 점·지금 맵, 나머지는 모두 `더보기` 메뉴에. */
+/**
+ * 휴대폰 위쪽 한 줄: 사이드바·연결 점·지금 맵·게임 도구(한 번에 연다), 나머지는 모두 `더보기` 메뉴에.
+ * 게임 도구는 Drawer가 아닌 Sheet: 안에서 여는 치트·백업 Sheet와 게임 보조 Popover는 React 트리로는 이 안이라,
+ * vaul Drawer였다면 그 안에서 끄는 손가락 움직임이 Drawer 끌기로 번져 Drawer(와 그 안의 치트 창)를 닫을 수 있다.
+ */
 function MobileTopBar({ onTab }: { onTab: (t: PlayTab) => void }) {
   const { data, recentKey } = useGame();
   const { live, connection } = useLive();
@@ -52,6 +56,7 @@ function MobileTopBar({ onTab }: { onTab: (t: PlayTab) => void }) {
         className={cn("size-2 shrink-0 rounded-full", status.connected ? "bg-primary" : "bg-muted-foreground/40")}
       />
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{mapName ?? statusText}</span>
+      <Button variant="ghost" size="icon" aria-label="게임 도구" onClick={() => setToolsOpen(true)}><Wrench /></Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" aria-label="더보기"><Ellipsis /></Button>
@@ -75,11 +80,14 @@ function MobileTopBar({ onTab }: { onTab: (t: PlayTab) => void }) {
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuItem onSelect={() => setToolsOpen(true)}><Wrench />게임 도구</DropdownMenuItem>
-            {!remote && <DropdownMenuItem onSelect={openWindow}><ExternalLink />새 창으로 열기</DropdownMenuItem>}
-          </DropdownMenuGroup>
+          {!remote && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={openWindow}><ExternalLink />새 창으로 열기</DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       {!remote && <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />}

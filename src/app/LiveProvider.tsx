@@ -15,8 +15,8 @@ import { logEditPaths } from "./logEdit";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
 import type { GameIndex } from "@/core/types";
 import {
-  adoptLiveAssist, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, mergeAssist,
-  normalizeAssist, parseControlFile, resyncDue, seenSets, versionAtLeast,
+  adoptLiveAssist, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, hotkeysForSave, mergeAssist,
+  migrateSavedAssist, normalizeAssist, parseControlFile, resyncDue, seenSets, versionAtLeast,
   type AssistCommand, type AssistCommandKind, type AssistKey, type AssistSettings, type ControlFile, type SeenSets, type WrittenControl,
 } from "@/core/live/assist";
 import {
@@ -170,7 +170,7 @@ function loadAssist(gameKey: string | null): AssistSettings {
   if (gameKey === null) return DEFAULT_ASSIST;
   try {
     const raw = localStorage.getItem(assistStorageKey(gameKey));
-    return raw === null ? DEFAULT_ASSIST : normalizeAssist(JSON.parse(raw));
+    return raw === null ? DEFAULT_ASSIST : normalizeAssist(migrateSavedAssist(JSON.parse(raw)));
   } catch {
     return DEFAULT_ASSIST;
   }
@@ -200,7 +200,7 @@ async function readControl(folder: WritableGameFolder, path: string): Promise<Co
 }
 function saveAssist(gameKey: string | null, s: AssistSettings): void {
   if (gameKey === null) return;
-  try { localStorage.setItem(assistStorageKey(gameKey), JSON.stringify(s)); } catch { /* 저장 못 해도 동작 */ }
+  try { localStorage.setItem(assistStorageKey(gameKey), JSON.stringify({ ...s, hotkeys: hotkeysForSave(s.hotkeys) })); } catch { /* 저장 못 해도 동작 */ }
 }
 
 const LiveContext = createContext<LiveContextValue | null>(null);

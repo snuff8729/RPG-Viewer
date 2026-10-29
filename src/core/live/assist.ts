@@ -21,7 +21,15 @@ export type AssistCommandKind = "win" | "lose" | "escape" | "hpFull" | "hpLow" |
 export interface AssistCommand { id: string; kind: AssistCommandKind; at: number; ops?: CheatOp[] }
 export interface SeenSets { seenMessages: string[]; seenPages: string[] }
 
-export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null };
+/** F6 배속, F7 본 대사 넘기기, F10·F11 전투 이기기·지기, Home·End 내 체력 100%·1%(체력 키는 플러그인 1.20.0부터 기본) */
+export const DEFAULT_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35 };
+/** 1.20.0 전의 기본값(체력 단축키 없음). 단축키를 보고하지 않거나 체력 단축키를 보고하지 않는 플러그인은 이것이 고정이다. */
+export const LEGACY_HOTKEYS: Hotkeys = { speed: 117, skip: 118, win: 121, lose: 122, hpFull: null, hpLow: null };
+/**
+ * 저장하는 단축키 묶음(localStorage·control.json)의 판 표시 `v`. 이 표시가 없는 묶음은 예전 뷰어가 쓴 것이라,
+ * 체력 단축키 둘 다 null이면 예전 기본값(끔)을 그대로 둔 것으로 보고 새 기본값을 준다. 플러그인은 `v`를 무시한다.
+ */
+export const HOTKEYS_VERSION = 2;
 export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS };
 /** 단축키 동작(표시 순서)과 이름. short는 하단 안내 줄에 쓴다. */
 export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; label: string; short: string }[] = [
@@ -62,6 +70,9 @@ export function keyLabel(code: number): string {
   if (code >= 112 && code <= 123) return `F${code - 111}`;
   if ((code >= 65 && code <= 90) || (code >= 48 && code <= 57)) return String.fromCharCode(code);
   if (code >= 96 && code <= 105) return `Num ${code - 96}`;
+  if (code === 36) return "Home";
+  if (code === 35) return "End";
+  if (code === 46) return "Delete";
   return `키 ${code}`;
 }
 
@@ -78,6 +89,20 @@ export function validateHotkey(code: number | null, action: HotkeyAction, hotkey
   return null;
 }
 
+/**
+ * 디스크·localStorage에서 읽은 보조 설정(무엇이든)을 지금 판으로 옮긴다(normalizeAssist 전에). 판 표시(`hotkeys.v`)가 없는
+ * 예전 묶음에서 체력 단축키가 둘 다 null이면 예전 기본값(끔)을 그대로 둔 것이므로 그 두 필드를 빼서 새 기본값을 받게 한다.
+ * 새 판에서 사용자가 둘 다 끈 것은 판 표시가 있으므로 그대로 둔다. 예외를 던지지 않는다.
+ */
+export function migrateSavedAssist(v: unknown): unknown {
+  if (!isObj(v) || !isObj(v.hotkeys)) return v;
+  const h = v.hotkeys;
+  if (typeof h.v === "number" && h.v >= HOTKEYS_VERSION) return v;
+  if (h.hpFull !== null || h.hpLow !== null) return v;
+  const { hpFull: _f, hpLow: _l, ...rest } = h;
+  return { ...v, hotkeys: rest };
+}
+
 /** 저장된 단축키(무엇이든) → 올바른 단축키. 없는 필드는 기본값, 잘못됐거나 겹치는 키는 기본값(그것도 겹치면 끔). */
 export function normalizeHotkeys(v: unknown): Hotkeys {
   const o = isObj(v) ? v : {};
@@ -91,14 +116,18 @@ export function normalizeHotkeys(v: unknown): Hotkeys {
   return out;
 }
 
+/** 저장할 단축키 묶음: 판 표시(`v`)를 붙인다(localStorage·control.json). */
+export const hotkeysForSave = (h: Hotkeys): Hotkeys & { v: number } => ({ ...h, v: HOTKEYS_VERSION });
+
 /**
  * live.json `assist`(무엇이든)에서 게임에 실제로 걸린 단축키. `hotkeys`를 보고하지 않는 플러그인은
- * 기본 단축키가 고정이므로 기본값. 필드별로 null이면 끔, keyCode면 그 키, 그 밖에는 기본값.
+ * 예전 기본 단축키가 고정이므로 예전 기본값(체력 단축키 없음). 필드별로 null이면 끔, keyCode면 그 키,
+ * 그 밖에는 예전 기본값(체력 필드를 보고하지 않는 예전 플러그인에는 체력 단축키가 없다).
  */
 export function liveHotkeys(assist: unknown): Hotkeys {
   const h = isObj(assist) && isObj(assist.hotkeys) ? assist.hotkeys : null;
-  if (!h) return DEFAULT_HOTKEYS;
-  const pick = (a: HotkeyAction): number | null => (h[a] === null ? null : isKeyCode(h[a]) ? h[a] : DEFAULT_HOTKEYS[a]);
+  if (!h) return LEGACY_HOTKEYS;
+  const pick = (a: HotkeyAction): number | null => (h[a] === null ? null : isKeyCode(h[a]) ? h[a] : LEGACY_HOTKEYS[a]);
   return { speed: pick("speed"), skip: pick("skip"), win: pick("win"), lose: pick("lose"), hpFull: pick("hpFull"), hpLow: pick("hpLow") };
 }
 
@@ -192,7 +221,7 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
   return JSON.stringify({
     ...(isObj(flags) ? flags : {}),
     v: 1, t: Number.isFinite(now) ? now : 0,
-    speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: n.hotkeys,
+    speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: hotkeysForSave(n.hotkeys),
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
     command: cmd,
   });
@@ -214,7 +243,7 @@ export function parseControlFile(text: string | null | undefined): ControlFile |
   let c: unknown;
   try { c = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { return null; }
   if (!isObj(c) || c.v !== 1 || typeof c.t !== "number" || !Number.isFinite(c.t)) return null;
-  const settings = normalizeAssist(c);
+  const settings = normalizeAssist(migrateSavedAssist(c));
   const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
   const sets: SeenSets = { seenMessages: strs(c.seenMessages), seenPages: strs(c.seenPages) };
   const flags: Record<string, unknown> = {};
