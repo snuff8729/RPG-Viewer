@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FolderCog, Play } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
@@ -13,12 +13,29 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 /** 실행 뒤 `실행했어요`를 보여 주는 시간 */
 const LAUNCHED_MS = 3000;
 
+export interface GameLauncher {
+  /** 실행할 수 있는 곳인지(뷰어 서버·게임 연결 지원). false면 아무것도 그리지 않는다. */
+  visible: boolean;
+  running: boolean;
+  busy: boolean;
+  /** 실행(위치를 모르면 위치부터 묻는다). 클릭·메뉴 선택에서 부른다. */
+  launch(): void;
+  /** 위치를 직접 정한 게임이면 위치 바꾸기를 보인다 */
+  canChangePath: boolean;
+  changePath(): void;
+  /** `실행했어요`·실패 글(없으면 null) */
+  status: ReactNode;
+  /** 위치 창. 화면에 늘 그려 둔다(메뉴 안이 아니라 바깥에). */
+  dialog: ReactNode;
+}
+
 /**
- * 상단 `게임 실행` 버튼. 뷰어 서버(npm run dev / preview)에 실행 API가 있고 폴더 열기로 연 게임일 때만 보인다.
+ * 게임 실행(버튼이나 ⋯ 메뉴가 같이 쓴다). 뷰어 서버(npm run dev / preview)에 실행 API가 있고 폴더 열기로 연 게임일 때만 보인다.
  * 처음엔 게임 폴더 위치를 묻고, 게임마다 기억해 다음부터 바로 실행한다.
  * 자동 백업이 켜져 있으면 실행 직전에 세이브 폴더를 백업한다.
  */
-export function LaunchButton() {
+// eslint-disable-next-line react-refresh/only-export-components
+export function useGameLauncher(): GameLauncher {
   const { data } = useGame();
   const { supported, connection } = useLive();
   const available = useLauncherAvailable();
@@ -35,8 +52,10 @@ export function LaunchButton() {
     return () => clearTimeout(id);
   }, [launchedAt]);
 
-  if (!data || !gameKey || !supported || !available) return null;
   const running = connection === "connected";
+  if (!data || !gameKey || !supported || !available) {
+    return { visible: false, running, busy, launch: () => {}, canChangePath: false, changePath: () => {}, status: null, dialog: null };
+  }
 
   const openDialog = (path: string, error: string | null) => setDialog({ open: true, path, error });
 
@@ -69,36 +88,54 @@ export function LaunchButton() {
     }
   };
 
+  const status = launchedAt !== null
+    ? <span className="text-sm text-muted-foreground">실행했어요</span>
+    : launchError !== null ? <span className="text-sm text-destructive">{launchError}</span> : null;
+  const dialogEl = (
+    <GamePathDialog
+      open={dialog.open}
+      onOpenChange={(open) => setDialog((d) => ({ ...d, open }))}
+      initialPath={dialog.path}
+      initialError={dialog.error}
+      openedTitle={data.system.gameTitle}
+      confirmLabel="저장하고 실행"
+      confirmIcon={<Play />}
+      onConfirm={async (path) => {
+        setSavedPath(path);
+        return launch(path);
+      }}
+    />
+  );
+  return {
+    visible: true, running, busy, launch: () => void onMainClick(),
+    canChangePath: savedPath !== null && !fromServer, changePath: () => { if (savedPath !== null) openDialog(savedPath, null); },
+    status, dialog: dialogEl,
+  };
+}
+
+/**
+ * 상단 `게임 실행` 버튼. 뷰어 서버(npm run dev / preview)에 실행 API가 있고 폴더 열기로 연 게임일 때만 보인다.
+ */
+export function LaunchButton() {
+  const g = useGameLauncher();
+  if (!g.visible) return null;
   return (
     <>
-      {launchedAt !== null && <span className="text-sm text-muted-foreground">실행했어요</span>}
-      {launchError !== null && <span className="text-sm text-destructive">{launchError}</span>}
-      <Button variant="outline" size="sm" disabled={running || busy} onClick={() => void onMainClick()}>
-        <Play />{running ? "실행 중" : "게임 실행"}
+      {g.status}
+      <Button variant="outline" size="sm" disabled={g.running || g.busy} onClick={g.launch}>
+        <Play />{g.running ? "실행 중" : "게임 실행"}
       </Button>
-      {savedPath !== null && !fromServer && (
+      {g.canChangePath && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label="위치 바꾸기" onClick={() => openDialog(savedPath, null)}>
+            <Button variant="ghost" size="icon-sm" aria-label="위치 바꾸기" onClick={g.changePath}>
               <FolderCog />
             </Button>
           </TooltipTrigger>
           <TooltipContent>위치 바꾸기</TooltipContent>
         </Tooltip>
       )}
-      <GamePathDialog
-        open={dialog.open}
-        onOpenChange={(open) => setDialog((d) => ({ ...d, open }))}
-        initialPath={dialog.path}
-        initialError={dialog.error}
-        openedTitle={data.system.gameTitle}
-        confirmLabel="저장하고 실행"
-        confirmIcon={<Play />}
-        onConfirm={async (path) => {
-          setSavedPath(path);
-          return launch(path);
-        }}
-      />
+      {g.dialog}
     </>
   );
 }

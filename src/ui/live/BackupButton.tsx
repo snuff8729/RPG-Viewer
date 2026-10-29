@@ -68,10 +68,18 @@ type Confirm =
   | { kind: "restore"; backup: BackupMeta; running: boolean; launch: boolean }
   | { kind: "delete"; backup: BackupMeta };
 
+export interface BackupButtonProps {
+  /** 바깥(⋯ 메뉴)에서 열고 닫을 때. 게임 폴더 위치를 모르면 위치부터 묻는다. 없으면 버튼이 직접 연다. */
+  open?: boolean;
+  onOpenChange?(open: boolean): void;
+  /** 버튼을 그릴지(기본 true). false여도 자동 백업 지켜보기는 계속하므로 화면에 늘 두어야 한다. */
+  trigger?: boolean;
+}
+
 /**
  * 상단 `백업` 버튼과 백업 창. 세이브 폴더 전체를 통째로 남기고 되돌린다.
  */
-export function BackupButton() {
+export function BackupButton({ open: openProp, onOpenChange, trigger = true }: BackupButtonProps = {}) {
   const { data } = useGame();
   const { supported, connection } = useLive();
   const available = useLauncherAvailable();
@@ -88,7 +96,15 @@ export function BackupButton() {
   useAutoBackupWatcher(path, auto && available && supported, connected);
 
   const [pathDialog, setPathDialog] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  /** 열어 달라는 요청(위치를 모르면 위치 창, 알면 백업 창) */
+  const open = openProp ?? ownOpen;
+  const setOpen = (o: boolean) => {
+    if (openProp === undefined) setOwnOpen(o);
+    onOpenChange?.(o);
+  };
+  /** 위치 창에서 저장을 눌렀다(곧 닫히는 위치 창이 요청을 끄지 않게) */
+  const pathConfirmed = useRef(false);
   const [list, setList] = useState<BackupList | null>(null);
   const backups = list?.backups ?? null;
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +112,12 @@ export function BackupButton() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // 바깥에서 열면 지난 안내를 지운다
+  const [prevOpenProp, setPrevOpenProp] = useState(openProp);
+  if (prevOpenProp !== openProp) {
+    setPrevOpenProp(openProp);
+    if (openProp) { setError(null); setNotice(null); }
+  }
 
   const reload = useCallback(async () => {
     if (!path) return;
@@ -168,23 +190,31 @@ export function BackupButton() {
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={onButton}>
-        <ArchiveRestore />백업
-      </Button>
+      {trigger && (
+        <Button variant="outline" size="sm" onClick={onButton}>
+          <ArchiveRestore />백업
+        </Button>
+      )}
       <GamePathDialog
-        open={pathDialog}
-        onOpenChange={setPathDialog}
+        open={pathDialog || (open && path === null)}
+        onOpenChange={(o) => {
+          setPathDialog(o);
+          if (o) return;
+          if (pathConfirmed.current) pathConfirmed.current = false;
+          else if (open && path === null) setOpen(false);
+        }}
         initialPath=""
         initialError={null}
         openedTitle={data.system.gameTitle}
         confirmLabel="저장"
         onConfirm={async (p) => {
           setPath(p);
+          pathConfirmed.current = true;
           setOpen(true);
           return null;
         }}
       />
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet open={open && path !== null} onOpenChange={setOpen}>
         <SheetContent className="w-full sm:max-w-xl">
           <SheetHeader>
             <SheetTitle>세이브 백업</SheetTitle>
