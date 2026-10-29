@@ -26,6 +26,15 @@ function write(root: string, rel: string, text: string) {
 
 const PLUGIN_SRC = "/*:\n * @plugindesc アリスの機能\n */\n(function() {\n  var name = 'アリス';\n})();\n";
 
+/** PNG 시그니처 + IHDR(크기만) — 픽셀 없는 합성 머리 */
+function pngHead(w: number, h: number): Buffer {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b, 0);
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+}
+
 function makeGame(): string {
   const g = path.join(tmp, "game");
   write(g, "data/System.json", JSON.stringify({ gameTitle: "アリスの冒険", currencyUnit: "G", switches: ["", "扉"], variables: [], advanced: { screenWidth: 816, screenHeight: 624 } }));
@@ -35,6 +44,12 @@ function makeGame(): string {
   write(g, "js/plugins.js", formatPluginsJs([{ name: "アリス_Core", status: true, description: "説明", parameters: { 表示: "true" } }]));
   write(g, "js/plugins/アリス_Core.js", PLUGIN_SRC);
   write(g, "img/pictures/アリス.png", "PNGDATA");
+  fs.mkdirSync(path.join(g, "img/faces"), { recursive: true });
+  fs.writeFileSync(path.join(g, "img/faces/アリス顔.png"), pngHead(144, 144));
+  // 암호화 파일: "RPGMV" 머리 16바이트 + 키로 뒤섞인 앞 16바이트 + 평문 IHDR 크기
+  const enc = Buffer.concat([Buffer.from([0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0]), pngHead(576, 288)]);
+  for (let i = 16; i < 32; i++) enc[i] ^= 0x5a;
+  fs.writeFileSync(path.join(g, "img/faces/Actor1.png_"), enc);
   write(g, "save/file1.rmmzsave", "x");
   write(g, "index.html", "<html><head><title>アリスの冒険</title></head></html>");
   return g;
@@ -79,7 +94,16 @@ describe("mask-game", () => {
     expect(all.sort()).toEqual([
       "AI-README.md", "REPORT.md", "data/CommonEvents.json", "data/Map001.json", "data/MapInfos.json", "data/System.json",
       `img/pictures/${tokenOf("アリス")}.png`, "index.html", "js/plugins.js", plugin,
+      "IMAGES.json", `img/faces/${tokenOf("アリス顔")}.png`, "img/faces/Actor1.png_",
     ].sort());
+    const images = JSON.parse(fs.readFileSync(path.join(out, "IMAGES.json"), "utf8"));
+    expect(images).toEqual({
+      "img/faces/Actor1.png_": { width: 576, height: 288, bytes: 49, cols: 4, rows: 2 },
+      [`img/faces/${tokenOf("アリス顔")}.png`]: { width: 144, height: 144, bytes: 33, cols: 1, rows: 1 },
+      [`img/pictures/${tokenOf("アリス")}.png`]: { bytes: 7 },
+    });
+    expect(fs.readFileSync(path.join(out, "AI-README.md"), "utf8")).toContain("engine: MZ");
+    expect(fs.readFileSync(path.join(out, "REPORT.md"), "utf8")).toContain("engine: MZ");
     for (const f of all) {
       const text = fs.readFileSync(path.join(out, f), "utf8");
       expect(text, f).not.toMatch(/[぀-ヿ一-鿿]/);

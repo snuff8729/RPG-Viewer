@@ -10,6 +10,8 @@ import {
   type MaskContext, type MirrorKind, type ScanResult,
 } from "../src/core/mask/index.ts";
 import type { AdapterManifest } from "../src/core/adapters/manifest.ts";
+import { IMAGE_HEAD_BYTES, pngHeaderSize } from "../src/core/assets/imageSize.ts";
+import type { Engine } from "../src/core/types.ts";
 import { NodeFolder, readAdapterManifests } from "./diagnose-game.ts";
 
 export const USAGE = "사용법: npm run mask -- \"<게임 폴더>\" --out \"<빈 출력 폴더>\" [--note \"<문제 설명>\"]\n"
@@ -44,7 +46,10 @@ export function isInside(child: string, parent: string): boolean {
   return r === "" || (!r.startsWith("..") && !path.isAbsolute(r));
 }
 
-export interface MirrorEntry { rel: string; maskedRel: string; kind: MirrorKind; text: string | null }
+/** 빈 파일로 옮기는 img/** 그림의 원래 크기(PNG 머리에서 읽음). 크기를 못 읽으면 width·height 없이 bytes만 */
+export interface ImageInfo { width?: number; height?: number; bytes: number }
+
+export interface MirrorEntry { rel: string; maskedRel: string; kind: MirrorKind; text: string | null; image?: ImageInfo }
 
 export interface MaskPass {
   ctx: MaskContext;
@@ -52,6 +57,8 @@ export interface MaskPass {
   /** 원래 게임으로 만든 진단 보고서(가리기 전). 게임을 못 읽으면 null */
   report: string | null;
   base: string;
+  /** 원래 게임의 엔진(게임을 못 읽으면 null) */
+  engine?: Engine | null;
 }
 
 const isFile = (p: string) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
@@ -87,23 +94,71 @@ export async function runMaskPass(root: string, adapters: AdapterManifest[] = re
   for (const rel of listMirrorFiles(root, base)) {
     const kind = mirrorKindOf(rel, base)!;
     const maskedRel = maskFileName(rel, ctx);
-    if (kind === "placeholder") { entries.push({ rel, maskedRel, kind, text: null }); continue; }
+    if (kind === "placeholder") {
+      const image = isImagePath(rel, base) ? imageInfoOf(path.join(root, rel)) : undefined;
+      entries.push({ rel, maskedRel, kind, text: null, ...(image ? { image } : {}) });
+      continue;
+    }
     let text: string;
     try { text = fs.readFileSync(path.join(root, rel), "utf8"); } catch { continue; }
     entries.push({ rel, maskedRel, kind, text: maskFileText(kind, text, ctx).text });
   }
-  return { ctx, entries, report: await diagnoseReport(root, adapters), base };
+  const d = await diagnoseDir(root, adapters);
+  return { ctx, entries, report: d.report, base, engine: d.engine };
+}
+
+const isImagePath = (rel: string, base: string) => rel.toLowerCase().startsWith(base ? `${base}/img/`.toLowerCase() : "img/");
+
+/** 그림 파일의 크기·바이트 수. 앞 몇십 바이트만 읽는다(암호화 파일은 머리만 풀어 IHDR을 본다) */
+export function imageInfoOf(file: string): ImageInfo | undefined {
+  let fd: number | null = null;
+  try {
+    const bytes = fs.statSync(file).size;
+    fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(IMAGE_HEAD_BYTES);
+    const n = fs.readSync(fd, head, 0, IMAGE_HEAD_BYTES, 0);
+    const size = pngHeaderSize(new Uint8Array(head.buffer, head.byteOffset, n));
+    return size ? { ...size, bytes } : { bytes };
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== null) try { fs.closeSync(fd); } catch { /* 무시 */ }
+  }
+}
+
+export type ImageManifestEntry = ImageInfo & { cols?: number; rows?: number };
+
+/** IMAGES.json 내용: 가린 경로 → { width, height, bytes } (img/faces/는 cols·rows = 크기/144도) */
+export function imageManifest(entries: readonly MirrorEntry[]): Record<string, ImageManifestEntry> {
+  const out: Record<string, ImageManifestEntry> = {};
+  for (const e of [...entries].sort((a, b) => a.maskedRel.localeCompare(b.maskedRel))) {
+    if (!e.image) continue;
+    const v: ImageManifestEntry = { ...e.image };
+    if (/(^|\/)img\/faces\//i.test(e.maskedRel) && v.width !== undefined && v.height !== undefined) {
+      v.cols = v.width / 144;
+      v.rows = v.height / 144;
+    }
+    out[e.maskedRel] = v;
+  }
+  return out;
+}
+
+async function diagnoseDir(root: string, adapters: AdapterManifest[]): Promise<{ report: string | null; engine: Engine | null }> {
+  const folder = new NodeFolder(root);
+  const loaded = await loadGame(folder);
+  if (!loaded.ok) return { report: null, engine: null };
+  const input = await gatherDiagnosisInput(folder, loaded.data, { readLog: true });
+  return {
+    report: reportMarkdown(diagnoseGame(loaded.data, input.pluginsText, input.files, input.log, {
+      pluginSources: input.pluginSources, adapters, settings: settingsOfAddonFile(input.addonFile),
+    })),
+    engine: loaded.data.engine,
+  };
 }
 
 /** 폴더의 진단 보고서(마크다운). 게임을 못 읽으면 null */
 export async function diagnoseReport(root: string, adapters: AdapterManifest[]): Promise<string | null> {
-  const folder = new NodeFolder(root);
-  const loaded = await loadGame(folder);
-  if (!loaded.ok) return null;
-  const input = await gatherDiagnosisInput(folder, loaded.data, { readLog: true });
-  return reportMarkdown(diagnoseGame(loaded.data, input.pluginsText, input.files, input.log, {
-    pluginSources: input.pluginSources, adapters, settings: settingsOfAddonFile(input.addonFile),
-  }));
+  return (await diagnoseDir(root, adapters)).report;
 }
 
 export const AI_README = `# AI-README — 가린 사본 / Masked mirror
@@ -123,6 +178,10 @@ This folder is a **read-only masked mirror** of an RPG Maker game. The original 
   (manifest의 match·spriteRoles, bridge.js) — 뷰어가 열린 게임에서 원래 글로 바꿉니다. 저장소 파일을 unmask하지 마세요.
   The game is never edited. Put fixes in the RPG-Viewer repo (adapters/ etc.) and write game/plugin/file names as tokens
   (manifest match/spriteRoles, bridge.js) — the viewer resolves them against the open game. Never unmask repo files.
+- \`IMAGES.json\`에 그림마다 원래 크기가 있습니다: 가린 경로 → \`{ width, height, bytes }\`(픽셀은 없음). \`img/faces/\`는 \`cols\`·\`rows\`(= 크기/144)도 있습니다.
+  얼굴 한 칸은 144×144이고 index 칸은 왼쪽 위부터 (index%4, floor(index/4))입니다. 모든 얼굴 파일이 4×2 시트(576×288)는 아닙니다.
+  \`IMAGES.json\` lists each image's original size: masked path → \`{ width, height, bytes }\` (no pixels). \`img/faces/\` entries also have \`cols\`/\`rows\` (= size/144).
+  A face cell is 144×144 at (index%4, floor(index/4)) from the top-left; not every face file is a 4×2 (576×288) sheet.
 - 문제 설명과 자동 진단 보고서는 \`REPORT.md\`에 있습니다. / The problem description and diagnosis report are in \`REPORT.md\`.
 `;
 
@@ -156,10 +215,12 @@ export async function writeMirror(pass: MaskPass, out: string, note: string | nu
     } else put(e.maskedRel, e.text);
   }
   const textFiles = written.length;
-  put("AI-README.md", AI_README);
+  const engineLine = `engine: ${pass.engine ?? "unknown"}`;
+  put("AI-README.md", `${AI_README}- ${engineLine} (RPG Maker ${pass.engine ?? "?"})\n`);
+  put("IMAGES.json", JSON.stringify(imageManifest(pass.entries), null, 1) + "\n");
   // 가린 사본으로 다시 진단하면 게임 글은 이미 토큰이라, 거기 남은 한국어 낱말은 뷰어 자신의 문구다 — 그건 사전으로 바꾸지 않는다
   const keep = [...keepWordsOf(await diagnoseReport(out, adapters) ?? ""), ...keepWordsOf(AI_README)];
-  const parts = ["# 문제와 진단 / Problem and diagnosis", ""];
+  const parts = ["# 문제와 진단 / Problem and diagnosis", "", engineLine, ""];
   if (note !== null && note.trim() !== "") parts.push("## 사용자 설명 / User note", "", maskFreeText(note, index, pass.ctx, keep), "");
   parts.push("## 자동 진단 / Automatic diagnosis", "", pass.report === null ? "(게임을 읽지 못해 진단을 만들지 못했어요.)" : maskFreeText(pass.report, index, pass.ctx, keep));
   put("REPORT.md", parts.join("\n") + "\n");
