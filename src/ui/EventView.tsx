@@ -48,8 +48,8 @@ function Callers({ id }: { id: number }) {
       <CollapsibleContent className="border-t px-1 py-1">
         {callers.length === 0 && <p className="px-2 py-1 text-sm text-muted-foreground">호출하는 곳이 없어요</p>}
         {callers.map((c) => (
-          <Button key={locationKey(c.location)} variant="ghost" size="sm" className="w-full justify-start" onClick={() => openPage(c.location)}>
-            {c.path}
+          <Button key={locationKey(c.location)} variant="ghost" size="sm" className="w-full justify-start" title={c.path} onClick={() => openPage(c.location)}>
+            <span className="truncate">{c.path}</span>
           </Button>
         ))}
       </CollapsibleContent>
@@ -74,9 +74,9 @@ export function EventView({ route }: { route: Extract<Route, { kind: "page" }> }
       {loc.source === "common" && <Callers id={loc.commonEventId} />}
       {pages.length >= 2 && (
         <Tabs value={String(pageOf(loc))} onValueChange={(v) => openPage(withPage(loc, Number(v)))} className="mb-4">
-          <TabsList>
+          <TabsList className="max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto">
             {pages.map((p) => (
-              <TabsTrigger key={pageOf(p.location)} value={String(pageOf(p.location))}>
+              <TabsTrigger key={pageOf(p.location)} value={String(pageOf(p.location))} className="h-6.5 flex-none">
                 페이지 {pageOf(p.location) + 1}
                 {isNowPage(p.location, live) && <Badge variant="outline" className="ml-1">지금</Badge>}
               </TabsTrigger>

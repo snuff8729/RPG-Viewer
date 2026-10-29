@@ -62,7 +62,7 @@ function EventRow({ e }: { e: MissingEventGroup }) {
         <ChevronRight className="mt-0.5 size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{e.entry.title}</span>
+            <span className="min-w-0 font-medium wrap-anywhere">{e.entry.title}</span>
             {e.active === true && <Badge>지금 페이지</Badge>}
             <span className="text-xs text-muted-foreground">{countText(e.choiceCount, e.pageCount)}</span>
           </div>

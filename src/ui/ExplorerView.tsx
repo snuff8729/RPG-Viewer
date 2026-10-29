@@ -26,7 +26,7 @@ function Group({ open, onOpenChange, title, children }: {
         {title}
       </CollapsibleTrigger>
       {/* 접힌 그룹은 CollapsibleContent가 내용을 렌더하지 않는다 */}
-      <CollapsibleContent className="grid gap-1 border-t p-2 sm:grid-cols-2 lg:grid-cols-3">{children}</CollapsibleContent>
+      <CollapsibleContent className="grid grid-cols-1 gap-1 border-t p-2 sm:grid-cols-2 lg:grid-cols-3">{children}</CollapsibleContent>
     </Collapsible>
   );
 }

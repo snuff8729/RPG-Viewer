@@ -24,7 +24,8 @@ export function ScriptView({ nodes, basePath, onRefClick, pageKey, location }: {
   location?: Location;
 }) {
   const view = (
-    <div className="space-y-2" data-page-key={pageKey}>
+    // 띄어쓰기 없는 긴 대사·스크립트도 폭 안에서 줄바꿈한다
+    <div className="space-y-2 wrap-anywhere" data-page-key={pageKey}>
       {nodes.map((n, j) => {
         const path = [...basePath, j];
         return (
@@ -37,6 +38,9 @@ export function ScriptView({ nodes, basePath, onRefClick, pageKey, location }: {
   );
   return location ? <ScriptLocation.Provider value={location}>{view}</ScriptLocation.Provider> : view;
 }
+
+/** 긴 공통 이벤트·맵 이름 링크가 한 줄로 늘어나지 않게 줄바꿈한다 */
+const LINK_WRAP = "h-auto min-w-0 shrink whitespace-normal text-left wrap-anywhere";
 
 function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]; onRefClick?: (ref: Ref) => void }) {
   const { data, index } = useGame();
@@ -74,7 +78,7 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
       const target = onRefClick ? firstClickableRef(node.refs) : undefined;
       return (
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span>⚙ {node.description}</span>
+          <span className="min-w-0">⚙ {node.description}</span>
           {target && (
             <Button variant="ghost" size="icon-xs" aria-label="참조 보기" onClick={() => onRefClick!(target)}>
               <ExternalLink />
@@ -86,9 +90,9 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
     case "commonEvent": {
       const name = data?.commonEvents[node.commonEventId]?.name || `#${node.commonEventId}`;
       return (
-        <div className="flex items-center text-sm">
+        <div className="flex flex-wrap items-center text-sm">
           <span>↪ 공통 이벤트</span>
-          <Button variant="link" size="sm" onClick={() => openPage({ source: "common", commonEventId: node.commonEventId })}>{name}</Button>
+          <Button variant="link" size="sm" className={LINK_WRAP} onClick={() => openPage({ source: "common", commonEventId: node.commonEventId })}>{name}</Button>
           <span>실행</span>
         </div>
       );
@@ -99,9 +103,9 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
       const name = data?.mapInfos[mapId]?.name || `#${mapId}`;
       const target = index?.pages.find((p) => p.location.source === "map" && p.location.mapId === mapId);
       return (
-        <div className="flex items-center text-sm">
+        <div className="flex flex-wrap items-center text-sm">
           <span>🚪 이동 →</span>
-          <Button variant="link" size="sm" disabled={!target} onClick={() => target && openPage(target.location)}>{name}</Button>
+          <Button variant="link" size="sm" className={LINK_WRAP} disabled={!target} onClick={() => target && openPage(target.location)}>{name}</Button>
           <span>({node.x ?? "?"}, {node.y ?? "?"})</span>
         </div>
       );
