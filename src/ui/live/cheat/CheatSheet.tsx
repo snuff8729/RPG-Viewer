@@ -18,6 +18,7 @@ import { useGamePath, useLauncherAvailable } from "../useGamePath";
 import { ActorsTab } from "./ActorsTab";
 import { ItemsTab } from "./ItemsTab";
 import { SwitchesTab } from "./SwitchesTab";
+import { useVariableFinder } from "./useVariableFinder";
 
 const OPEN_EVENT = "rpgv:open-cheat";
 /** 다른 곳(게임 보조 창)에서 치트 창을 연다 */
@@ -63,6 +64,9 @@ export function CheatSheet() {
   const seq = useRef(0);
   const [backupNote, setBackupNote] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
+  // 창을 닫았다 열어도 보던 탭과 변수 찾기 상태가 남는다(게임에서 값을 바꾸고 돌아오는 흐름)
+  const [tab, setTab] = useState("items");
+  const finder = useVariableFinder(gameKey, live);
 
   useEffect(() => {
     const onOpen = () => setOpen(true);
@@ -134,7 +138,7 @@ export function CheatSheet() {
               </AlertDescription>
             </Alert>
           )}
-          <Tabs defaultValue="items">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="w-full">
               <TabsTrigger value="items">아이템</TabsTrigger>
               <TabsTrigger value="actors">캐릭터</TabsTrigger>
@@ -150,7 +154,7 @@ export function CheatSheet() {
                 )}
               </div>
               {backupNote && <p className="text-xs text-muted-foreground">{backupNote}</p>}
-              <SwitchesTab {...props} />
+              <SwitchesTab {...props} finder={finder} />
             </TabsContent>
           </Tabs>
           {history.length > 0 && (
