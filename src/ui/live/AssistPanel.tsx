@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FolderOpen, Gauge, Heart, HeartCrack, History, Save } from "lucide-react";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
-  AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode,
+  AUTO_SPEEDS, COMMAND_RESPONSE_MS, commandStatus, commandStatusText, DEFAULT_HOTKEYS, ENEMY_HP_COMMAND_MIN_VERSION, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode,
   HP_COMMAND_MIN_VERSION, hotkeySummary,
   isAutoSpeed, isHpCommand, isQuickSlot, isSaveCommand, isSpeed, keyLabel, liveHotkeys, SAVE_COMMAND_MIN_VERSION, sameHotkeys, SPEEDS,
   validateHotkey, versionAtLeast, type HotkeyAction,
@@ -36,6 +36,8 @@ export function AssistPanel() {
   const hpSupported = supported && versionAtLeast(live?.pluginVersion, HP_COMMAND_MIN_VERSION);
   /** 세이브·로드 명령은 플러그인 1.21.0부터(맵, 불러오기는 타이틀에서도) */
   const saveSupported = supported && versionAtLeast(live?.pluginVersion, SAVE_COMMAND_MIN_VERSION);
+  /** 적 체력 명령은 플러그인 1.23.0부터(전투 중만) */
+  const enemyHpSupported = supported && versionAtLeast(live?.pluginVersion, ENEMY_HP_COMMAND_MIN_VERSION);
   /** 게임이 알려 준 지금의 퀵 세이브 칸 */
   const liveSlot: unknown = live?.assist?.quickSlot;
   const [confirmQuickLoad, setConfirmQuickLoad] = useState(false);
@@ -184,7 +186,19 @@ export function AssistPanel() {
             </Button>
             <Button variant="outline" size="sm" disabled={!inBattle || !canEscape} onClick={() => sendCommand("escape")}>도망</Button>
           </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={!inBattle || !enemyHpSupported} onClick={() => sendCommand("enemyHpFull")}>
+              <Heart />적 체력 100%
+            </Button>
+            <Button variant="outline" size="sm" disabled={!inBattle || !enemyHpSupported} onClick={() => sendCommand("enemyHpLow")}>
+              <HeartCrack />적 체력 1%
+            </Button>
+          </div>
           {!inBattle && <p className="text-xs text-muted-foreground">전투 중에만 쓸 수 있어요</p>}
+          {supported && !enemyHpSupported && (
+            <p className="text-xs text-muted-foreground">적 체력은 플러그인을 1.23.0으로 업데이트하면 쓸 수 있어요</p>
+          )}
+          {inBattle && enemyHpSupported && <p className="text-xs text-muted-foreground">적 체력 1%는 적을 쓰러뜨리지 않아요</p>}
           {inBattle && canLose && <p className="text-xs text-muted-foreground">패배 장면이 있는 전투면 그 장면이 나와요</p>}
           {inBattle && !canEscape && <p className="text-xs text-muted-foreground">이 전투는 도망칠 수 없어요</p>}
           {inBattle && !canLose && loseKey !== null && (

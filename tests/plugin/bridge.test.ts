@@ -10,7 +10,7 @@ let h: Harness;
  */
 const CTRL = 256, SHIFT = 512;
 const SAVE_KEYS = {
-  autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL,
+  autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL, enemyHpFull: 36 | CTRL, enemyHpLow: 35 | CTRL,
   quickSave: 83 | CTRL, quickLoad: 76 | CTRL, saveMenu: 83 | CTRL | SHIFT, loadMenu: 76 | CTRL | SHIFT,
   backup: 66 | CTRL, restore: 66 | CTRL | SHIFT,
 };
@@ -1018,7 +1018,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.22.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.23.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1907,6 +1907,87 @@ describe("RPGViewerBridge", () => {
       });
     });
 
+    describe("enemy HP commands (1.23.0)", () => {
+      const hpOf = (ms: any[]) => ms.map((m) => [m.hp, m.isAlive()]);
+      // three enemies: 100/100, 50/250 (1% = 2) and 30/50 (1% floors to 0 -> 1); plus one dead
+      const troop = (hh: Harness) => {
+        const a = new hh.g.Game_Battler(), b = new hh.g.Game_Battler(), c = new hh.g.Game_Battler(), dead = new hh.g.Game_Battler();
+        b._mhp = 250; b._hp = 50;
+        c._mhp = 50; c._hp = 30;
+        dead._hp = 0; dead.addNewState(1);
+        hh.g.$gameTroop._enemies = [a, b, c, dead];
+        return [a, b, c, dead];
+      };
+      const combo = (code: number) => {
+        h.g.Input.keyEvent(code, { ctrl: true });
+        h.bridge._frame(); h.g.Input.update(); h.g.Input.keyUp(code); h.g.Input.update();
+      };
+
+      it("enemyHpLow sets alive enemies to 1% (at least 1) without killing; enemyHpFull fills them; status refreshed, battle goes on", () => {
+        h = newGame();
+        startBattle(h);
+        const es = troop(h);
+        h.g.$gameMessage._busy = true; // does not wait for messages
+        writeControl(h, { command: { id: "e-1", kind: "enemyHpLow" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(hpOf(es)).toEqual([[1, true], [2, true], [1, true], [0, false]]);
+        expect(assistOf(h).lastCommand).toBe("e-1");
+        expect(h.g.BattleManager.calls).toEqual(["refreshStatus"]);
+        writeControl(h, { command: { id: "e-2", kind: "enemyHpFull" } });
+        poll(h);
+        h.bridge._frame();
+        expect(hpOf(es)).toEqual([[100, true], [250, true], [50, true], [0, false]]); // the dead stay dead
+        expect(assistOf(h).lastCommand).toBe("e-2");
+        expect(h.g.$gameParty.inBattle()).toBe(true);
+      });
+
+      it("ignored on the map, before the battle started, or when stale; failed when an enemy throws", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { command: { id: "e-3", kind: "enemyHpLow" } });
+        h.bridge._tick();
+        h.bridge._frame();
+        expect(assistOf(h).lastCommand).toBe("e-3:ignored");
+        const issued = h.clock.t;
+        h.clock.t += 2000;
+        startBattle(h);
+        const es = troop(h);
+        writeControl(h, { command: { id: "e-4", kind: "enemyHpLow", at: issued } });
+        poll(h);
+        h.bridge._frame();
+        expect(assistOf(h).lastCommand).toBe("e-4:ignored");
+        expect(es[0].hp).toBe(100);
+        es[1].setHp = () => { throw new Error("broken"); };
+        writeControl(h, { command: { id: "e-5", kind: "enemyHpLow" } });
+        poll(h);
+        expect(() => h.bridge._frame()).not.toThrow();
+        expect(assistOf(h).lastCommand).toBe("e-5:failed");
+      });
+
+      it("hotkeys default to Ctrl+Home / Ctrl+End (battle only; plain Home / End stay 내 체력)", () => {
+        h = newGame();
+        expect(assistOf(h).hotkeys).toMatchObject({ enemyHpFull: 36 | CTRL, enemyHpLow: 35 | CTRL, hpFull: 36, hpLow: 35 });
+        onMap(h);
+        const es = troop(h);
+        combo(35);
+        expect(es[0].hp).toBe(100); // not in battle
+        startBattle(h);
+        h.g.$gameTroop._enemies = es;
+        const party = h.g.$gameParty._battlers;
+        combo(35);
+        expect(hpOf(es)).toEqual([[1, true], [2, true], [1, true], [0, false]]);
+        expect(assistOf(h).lastCommand).toBe("key-enemyHpLow-" + h.clock.t);
+        expect(party.map((m: any) => m.hp)).toEqual([100, 100]); // Ctrl+End is not plain End
+        combo(36);
+        expect(hpOf(es)).toEqual([[100, true], [250, true], [50, true], [0, false]]);
+        writeControl(h, { hotkeys: { enemyHpFull: null, enemyHpLow: 76 } });
+        poll(h);
+        expect(assistOf(h).hotkeys).toMatchObject({ enemyHpFull: null, enemyHpLow: 76 });
+        expect(h.g.Input.keyMapper[76]).toBe("rpgvEnemyHpLow");
+      });
+    });
+
     it("never throws into the game when assist hooks fail", () => {
       h = newGame();
       onMap(h);
@@ -1922,13 +2003,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.22\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.23\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.22.0");
+    expect(h.bridge.VERSION).toBe("1.23.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {
