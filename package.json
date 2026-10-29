@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start": "vite build && vite preview",
     "test": "vitest run",
     "diagnose": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/diagnose-game.ts",
     "mask": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/mask-game.ts",

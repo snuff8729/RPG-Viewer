@@ -16,7 +16,8 @@ const share = new ShareState({ sessions, store: fileShareStore() })
 export default defineConfig({
   // 휴대폰 보기를 위해 모든 네트워크에서 듣는다. 이 PC가 아닌 요청은 lanSharePlugin이 맨 앞에서 막는다.
   server: { host: true },
-  preview: { host: true },
+  // npm start(빌드 + preview)도 개발 서버와 같은 주소(5173)로 연다 — 브라우저 저장값·휴대폰 주소가 그대로 이어진다.
+  preview: { host: true, port: 5173 },
   plugins: [lanSharePlugin(share), react(), tailwindcss(), launcherPlugin(), fsApiPlugin({ sessions, remote: share }), maskApiPlugin({ sessions, remote: share })],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
