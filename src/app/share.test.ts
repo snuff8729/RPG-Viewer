@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectRemote, fetchSharedSession, REMOTE_KEY, startShare, untilText } from "./share";
-import { isReadOnlyFolder, ServerFolder, type FetchFn } from "./serverFolder";
+import { isRemoteFolder, remoteWritable, ServerFolder, type FetchFn } from "./serverFolder";
 
 function memStore() {
   const m = new Map<string, string>();
@@ -50,23 +50,37 @@ describe("share control", () => {
   });
 });
 
-describe("read-only ServerFolder", () => {
-  it("never sends writes and reports no write permission", async () => {
-    const urls: string[] = [];
-    const f: FetchFn = async (url) => { urls.push(url); return reply({ ok: true }); };
-    const folder = new ServerFolder({ id: "s", root: "", title: "", engine: "", name: "" }, f, { readOnly: true });
-    expect(isReadOnlyFolder(folder)).toBe(true);
-    await expect(folder.writeText("a.txt", "x")).rejects.toThrow();
-    await expect(folder.remove("a.txt")).rejects.toThrow();
-    expect(await folder.canWrite()).toBe(false);
-    expect(await folder.requestWrite()).toBe(false);
-    expect(urls).toEqual([]);
-    expect(isReadOnlyFolder(new ServerFolder({ id: "s", root: "", title: "", engine: "", name: "" }, f))).toBe(false);
+describe("remote (phone) ServerFolder", () => {
+  it("writes only control.json and addons.json, never removes", async () => {
+    const calls: { url: string; path: unknown }[] = [];
+    const f: FetchFn = async (url, init) => { calls.push({ url, path: JSON.parse(String(init?.body)).path }); return reply({ ok: true }); };
+    const folder = new ServerFolder({ id: "s", root: "", title: "", engine: "MV", name: "" }, f, { remote: true });
+    expect(isRemoteFolder(folder)).toBe(true);
+    expect(await folder.writeText("www/rpg-viewer/control.json", "{}")).toBe(true);
+    expect(await folder.writeText("www/rpg-viewer/addons.json", "{}")).toBe(true);
+    for (const p of ["a.txt", "www/rpg-viewer/live.json", "www/js/plugins.js", "rpg-viewer/control.json", "www/rpg-viewer/../rpg-viewer/control.json"]) {
+      await expect(folder.writeText(p, "x")).rejects.toThrow();
+    }
+    await expect(folder.remove("www/rpg-viewer/control.json")).rejects.toThrow();
+    expect(await folder.canWrite()).toBe(true);
+    expect(await folder.requestWrite()).toBe(true);
+    expect(calls).toEqual([
+      { url: "/api/fs/write", path: "www/rpg-viewer/control.json" },
+      { url: "/api/fs/write", path: "www/rpg-viewer/addons.json" },
+    ]);
+    expect(isRemoteFolder(new ServerFolder({ id: "s", root: "", title: "", engine: "MV", name: "" }, f))).toBe(false);
+  });
+  it("knows the allowed files per engine", () => {
+    expect(remoteWritable("MZ", "rpg-viewer/control.json")).toBe(true);
+    expect(remoteWritable("MZ", "rpg-viewer/addons.json")).toBe(true);
+    expect(remoteWritable("MZ", "www/rpg-viewer/control.json")).toBe(false);
+    expect(remoteWritable("MV", "rpg-viewer/addons.json")).toBe(false);
+    expect(remoteWritable("", "rpg-viewer/control.json")).toBe(false);
   });
   it("does not try to reopen a lost session", async () => {
     const urls: string[] = [];
     const f: FetchFn = async (url) => { urls.push(url); return new Response(null, { status: 410 }); };
-    const folder = new ServerFolder({ id: "s", root: "", title: "", engine: "", name: "" }, f, { readOnly: true });
+    const folder = new ServerFolder({ id: "s", root: "", title: "", engine: "", name: "" }, f, { remote: true });
     expect(await folder.readText("x")).toBeNull();
     expect(urls).toEqual(["/api/fs/read"]);
   });

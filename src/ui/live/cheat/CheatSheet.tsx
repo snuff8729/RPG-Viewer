@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WandSparkles } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
+import { isRemoteView } from "@/app/share";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import { loadAutoBackup, makeBackup, notifyBackupsChanged } from "@/app/backups";
 import {
@@ -54,7 +55,9 @@ export function CheatSheet() {
   const { live, connection } = useLive();
   const { cheatSupported, sendCheat, cheatResults, setLiveActors } = useAssist();
   const [open, setOpen] = useState(false);
-  const available = useLauncherAvailable();
+  // 휴대폰 보기에서는 백업하지 않는다(PC에서)
+  const launcher = useLauncherAvailable();
+  const available = launcher && !isRemoteView();
   const gameKey = data ? gameKeyOf(data) : null;
   const { path } = useGamePath(gameKey);
   const [history, setHistory] = useState<HistoryEntry[]>([]);

@@ -3,7 +3,7 @@ import { useGame } from "./GameProvider";
 import { fetchSharedSession, REMOTE_CHECK_MS } from "./share";
 
 /**
- * 휴대폰 보기: PC가 공유한 게임을 읽기 전용으로 열고, 몇 초마다 공유 상태를 다시 본다.
+ * 휴대폰 보기: PC가 공유한 게임을 열고(쓰기는 게임 보조·치트·게임 설정 파일만), 몇 초마다 공유 상태를 다시 본다.
  * - 꺼짐·기간 끝·QR 바뀜이면 서버가 준 문구(error)
  * - PC가 다른 게임을 열어 공유 게임이 바뀌면 그 게임을 다시 연다
  */

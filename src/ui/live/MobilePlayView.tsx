@@ -75,39 +75,35 @@ function MobileTopBar({ onTab }: { onTab: (t: PlayTab) => void }) {
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>
-          {/* 휴대폰 보기는 읽기만: 실행·공유·백업·보조·치트·설정을 숨긴다 */}
-          {!remote && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setToolsOpen(true)}><Wrench />게임 도구</DropdownMenuItem>
-                <DropdownMenuItem onSelect={openWindow}><ExternalLink />새 창으로 열기</DropdownMenuItem>
-              </DropdownMenuGroup>
-            </>
-          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={() => setToolsOpen(true)}><Wrench />게임 도구</DropdownMenuItem>
+            {!remote && <DropdownMenuItem onSelect={openWindow}><ExternalLink />새 창으로 열기</DropdownMenuItem>}
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      {!remote && (
-        <>
-          <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />
-          <Sheet open={toolsOpen} onOpenChange={setToolsOpen}>
-            <SheetContent side="bottom">
-              <SheetHeader>
-                <SheetTitle>게임 도구</SheetTitle>
-                <SheetDescription>실행·휴대폰으로 보기·백업·게임 보조·치트·게임 설정</SheetDescription>
-              </SheetHeader>
-              <div className="flex flex-wrap items-center gap-2 px-4 pb-6">
+      {!remote && <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />}
+      <Sheet open={toolsOpen} onOpenChange={setToolsOpen}>
+        <SheetContent side="bottom">
+          <SheetHeader>
+            <SheetTitle>게임 도구</SheetTitle>
+            {/* 휴대폰 보기는 게임 보조·치트·게임 설정만(실행·공유·백업은 PC에서) */}
+            <SheetDescription>{remote ? "게임 보조·치트·게임 설정" : "실행·휴대폰으로 보기·백업·게임 보조·치트·게임 설정"}</SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-6">
+            {!remote && (
+              <>
                 <LaunchButton />
                 <ShareButton />
                 <BackupButton />
-                <AssistPanel />
-                <CheatSheet />
-                <GameSettingsSheet />
-              </div>
-            </SheetContent>
-          </Sheet>
-        </>
-      )}
+              </>
+            )}
+            <AssistPanel />
+            <CheatSheet />
+            <GameSettingsSheet />
+          </div>
+        </SheetContent>
+      </Sheet>
     </header>
   );
 }

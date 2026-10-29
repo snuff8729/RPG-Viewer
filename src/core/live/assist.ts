@@ -198,6 +198,60 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
   });
 }
 
+const CONTROL_KEYS = new Set(["v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "seenMessages", "seenPages", "command"]);
+
+/**
+ * 디스크의 control.json(다른 뷰어가 썼을 수도 있다: PC와 휴대폰이 같은 파일을 쓴다).
+ * body = 같은 내용을 controlJson으로 t 없이 다시 만든 것(우리 본문과 같은지 비교용), flags = 기본 필드 밖의 값.
+ */
+export interface ControlFile {
+  t: number; settings: AssistSettings; sets: SeenSets; flags: Record<string, unknown>; command: AssistCommand | null; body: string;
+}
+
+/** control.json 글 → ControlFile. v1이 아니거나 t가 없거나 깨졌으면 null. 예외를 던지지 않는다. */
+export function parseControlFile(text: string | null | undefined): ControlFile | null {
+  if (typeof text !== "string") return null;
+  let c: unknown;
+  try { c = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { return null; }
+  if (!isObj(c) || c.v !== 1 || typeof c.t !== "number" || !Number.isFinite(c.t)) return null;
+  const settings = normalizeAssist(c);
+  const strs = (v: unknown) => arr<unknown>(v).filter((x): x is string => typeof x === "string");
+  const sets: SeenSets = { seenMessages: strs(c.seenMessages), seenPages: strs(c.seenPages) };
+  const flags: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(c)) if (!CONTROL_KEYS.has(k)) flags[k] = v;
+  const m = c.command;
+  const command: AssistCommand | null = isObj(m) && typeof m.id === "string" && COMMAND_KINDS.has(m.kind)
+    ? { id: m.id, kind: m.kind, at: typeof m.at === "number" && Number.isFinite(m.at) ? m.at : c.t, ...(Array.isArray(m.ops) ? { ops: m.ops as CheatOp[] } : {}) }
+    : null;
+  return { t: c.t, settings, sets, flags, command, body: controlJson(settings, sets, command, 0, flags) };
+}
+
+/** 설정 하나하나(배속·본 대사 넘기기·자동 배속·자동 배속 값·단축키) */
+export type AssistKey = keyof AssistSettings;
+const ASSIST_KEYS: readonly AssistKey[] = ["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys"];
+
+/** a와 b에서 값이 다른 설정 키들 */
+export function changedAssistKeys(a: AssistSettings, b: AssistSettings): AssistKey[] {
+  return ASSIST_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+
+/**
+ * 읽고-고쳐-쓰기: 디스크(다른 뷰어가 쓴 것)의 설정에, 이 뷰어에서 아직 쓰지 못한 채 바꾼 키(dirty)만 얹는다.
+ * 그래서 휴대폰에서 배속을, PC에서 단축키를 바꿔도 서로 덮어쓰지 않는다.
+ */
+export function mergeAssist(disk: AssistSettings, local: AssistSettings, dirty: Iterable<AssistKey>): AssistSettings {
+  const out: AssistSettings = { ...disk };
+  for (const k of dirty) if (ASSIST_KEYS.includes(k)) (out as unknown as Record<string, unknown>)[k] = local[k];
+  return normalizeAssist(out);
+}
+
+/** 다른 뷰어가 남긴 명령을 이번 쓰기에 그대로 실을까: 아직 TTL 안이고, 우리가 보낼 명령이 따로 없을 때만(게임은 같은 id를 한 번만 쓴다). */
+export function carryCommand(disk: ControlFile | null, ours: AssistCommand | null, now: number, ttlMs: number): AssistCommand | null {
+  if (ours) return ours;
+  const c = disk?.command ?? null;
+  return c && now - c.at < ttlMs && now - c.at >= -ttlMs ? c : null;
+}
+
 /** 마지막으로 성공한 control.json 쓰기 */
 export interface WrittenControl { t: number; settings: AssistSettings }
 export type AdoptPatch = Partial<Pick<AssistSettings, "speed" | "skipSeen">>;

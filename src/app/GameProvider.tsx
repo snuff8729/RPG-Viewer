@@ -32,7 +32,7 @@ export interface GameContextValue extends GameState {
   openFiles(f: FileList): Promise<void>;
   /** 뷰어 서버가 연 폴더(실제 경로를 안다). */
   openServer(session: ServerSession): Promise<boolean>;
-  /** 휴대폰 보기: PC가 공유한 게임을 읽기 전용으로 연다(최근 목록·실행 경로에 남기지 않는다). */
+  /** 휴대폰 보기: PC가 공유한 게임을 연다(읽기 + 게임 보조·치트·게임 설정 파일만 쓰기, 최근 목록·실행 경로에 남기지 않는다). */
   openRemote(session: ServerSession): Promise<boolean>;
   /** 열린 게임을 닫고 시작 화면으로 돌아간다(주소의 해시도 지운다). */
   close(): void;
@@ -81,7 +81,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [open],
   );
   const openRemote = useCallback(
-    (session: ServerSession) => open(new ServerFolder(session, undefined, { readOnly: true })),
+    (session: ServerSession) => open(new ServerFolder(session, undefined, { remote: true })),
     [open],
   );
   const close = useCallback(() => {

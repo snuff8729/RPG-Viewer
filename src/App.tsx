@@ -54,7 +54,7 @@ function Shell() {
   /** 따로 띄운 플레이 창이면 다시 열 게임 key */
   const [popupKey] = useState(() => popupGameKey(window.location.search));
   useAutoReopen(popupKey);
-  /** 휴대폰 보기(같은 와이파이의 휴대폰·태블릿, 읽기 전용) */
+  /** 휴대폰 보기(같은 와이파이의 휴대폰·태블릿, 게임 보조·치트·게임 설정만 바꿀 수 있다) */
   const remote = isRemoteView();
   const remoteGame = useRemoteGame(remote);
   useShareFollowsGame(!remote && ready);

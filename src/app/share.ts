@@ -1,7 +1,7 @@
 /**
  * 휴대폰 보기(scripts/lanShare.ts) 클라이언트.
  * - PC: 켜기·끄기·새 QR·상태, 연 게임 알리기
- * - 휴대폰: 주소의 `remote=1`로 알아보고(세션 저장소에 남겨 새로 고쳐도 유지), 공유 중인 게임을 읽기 전용으로 연다
+ * - 휴대폰: 주소의 `remote=1`로 알아보고(세션 저장소에 남겨 새로 고쳐도 유지), 공유 중인 게임을 연다(쓰기는 게임 보조·치트·게임 설정 파일만)
  */
 import type { FetchFn, ServerSession } from "./serverFolder";
 
@@ -47,7 +47,7 @@ export async function fetchSharedSession(fetchFn: FetchFn = defaultFetch): Promi
       const name = typeof j.name === "string" ? j.name : "";
       return {
         ok: true,
-        // 휴대폰은 PC의 폴더 경로를 모른다(읽기 전용 폴더는 경로로 다시 열지 않는다).
+        // 휴대폰은 PC의 폴더 경로를 모른다(휴대폰 보기 폴더는 경로로 다시 열지 않는다).
         session: { id: j.id, root: "", name, title: typeof j.title === "string" ? j.title : "", engine: typeof j.engine === "string" ? j.engine : "" },
       };
     }

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import pluginSource from "../../plugin/RPGViewerBridge.js?raw";
 import { useGame } from "./GameProvider";
 import { useAddons } from "./AddonsProvider";
-import { isReadOnlyFolder } from "./serverFolder";
+import { isRemoteFolder } from "./serverFolder";
 import { isWritableFolder, type WritableGameFolder } from "@/core/fs/folder";
 import { buildHistory } from "@/core/live/history";
 import { createAccumulator, type LiveAccumulator } from "@/core/live/accumulator";
@@ -15,8 +15,9 @@ import { logEditPaths } from "./logEdit";
 import type { Coverage, HistoryModel, LiveSnapshot, LogRecord, MissingItem } from "@/core/live/types";
 import type { GameIndex } from "@/core/types";
 import {
-  adoptLiveAssist, ASSIST_MIN_VERSION, controlJson, controlMismatch, DEFAULT_ASSIST, normalizeAssist, resyncDue, seenSets, versionAtLeast,
-  type AssistCommand, type AssistCommandKind, type AssistSettings, type SeenSets, type WrittenControl,
+  adoptLiveAssist, ASSIST_MIN_VERSION, carryCommand, changedAssistKeys, controlJson, controlMismatch, DEFAULT_ASSIST, mergeAssist,
+  normalizeAssist, parseControlFile, resyncDue, seenSets, versionAtLeast,
+  type AssistCommand, type AssistCommandKind, type AssistKey, type AssistSettings, type ControlFile, type SeenSets, type WrittenControl,
 } from "@/core/live/assist";
 import {
   batchResults, CHEAT_MIN_VERSION, makeBatch, splitOps, validCheatOp, type CheatBatch, type CheatOp, type CheatStatus,
@@ -161,6 +162,8 @@ const COMMAND_TTL_MS = 10000;
 /** 치트 응답을 이만큼 못 받으면 응답 없음으로 보고 다음 묶음을 보낸다(플러그인은 10초 넘은 명령을 무시한다). */
 const CHEAT_RESPONSE_MS = COMMAND_TTL_MS + 1000;
 let cheatSeq = 0;
+/** 이 창의 표시: PC와 휴대폰이 같은 밀리초에 보낸 명령도 id가 겹치지 않게 */
+const VIEWER_TAG = Math.random().toString(36).slice(2, 8);
 
 const assistStorageKey = (gameKey: string) => `rpgv.assist.${gameKey}`;
 function loadAssist(gameKey: string | null): AssistSettings {
@@ -171,6 +174,29 @@ function loadAssist(gameKey: string | null): AssistSettings {
   } catch {
     return DEFAULT_ASSIST;
   }
+}
+const dirtyStorageKey = (gameKey: string) => `rpgv.assistDirty.${gameKey}`;
+const ASSIST_KEY_SET: ReadonlySet<string> = new Set<AssistKey>(["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys"]);
+/** 아직 control.json에 쓰지 못한 설정 키(게임별) */
+function loadDirty(gameKey: string | null): Set<AssistKey> {
+  if (gameKey === null) return new Set();
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(dirtyStorageKey(gameKey)) ?? "[]");
+    return new Set(Array.isArray(v) ? v.filter((k): k is AssistKey => typeof k === "string" && ASSIST_KEY_SET.has(k)) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveDirty(gameKey: string | null, keys: ReadonlySet<AssistKey>): void {
+  if (gameKey === null) return;
+  try {
+    if (keys.size === 0) localStorage.removeItem(dirtyStorageKey(gameKey));
+    else localStorage.setItem(dirtyStorageKey(gameKey), JSON.stringify([...keys]));
+  } catch { /* 저장 못 해도 동작 */ }
+}
+/** control.json을 읽는다(없거나 깨졌으면 null). */
+async function readControl(folder: WritableGameFolder, path: string): Promise<ControlFile | null> {
+  try { return parseControlFile(await folder.readText(path)); } catch { return null; }
 }
 function saveAssist(gameKey: string | null, s: AssistSettings): void {
   if (gameKey === null) return;
@@ -331,7 +357,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // DEV 시뮬레이터
   useEffect(() => {
-    if (!import.meta.env.DEV || !wfolder || isReadOnlyFolder(wfolder) || dataRoot === null) return;
+    if (!import.meta.env.DEV || !wfolder || isRemoteFolder(wfolder) || dataRoot === null) return;
     let cleanup: (() => void) | null = null;
     let cancelled = false;
     void import("./devLive").then((m) => {
@@ -413,7 +439,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const statusValue = useMemo<LiveStatusValue>(() => ({ lastSeenT, lastLive, logStats }), [lastSeenT, lastLive, logStats]);
 
-  // ── 게임 보조: 설정(게임별 localStorage) → rpg-viewer/control.json ──
+  // ── 게임 보조: 설정(게임별 localStorage, control.json에 다른 뷰어가 쓴 값이 있으면 그것을 따른다) → rpg-viewer/control.json ──
   const gameKey = data ? gameKeyOf(data) : null;
   const [assistKey, setAssistKey] = useState<string | null>(gameKey);
   const [assistSettings, setAssistSettings] = useState<AssistSettings>(() => loadAssist(gameKey));
@@ -424,8 +450,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setAssistSettings(loadAssist(gameKey));
     setSentCommand(null);
   }
-  // 휴대폰 보기(읽기 전용)는 control.json을 쓰지 않는다 — PC 뷰어가 쓰는 것과 겹치지 않게.
-  const assistSupported = connection === "connected" && wfolder !== null && !isReadOnlyFolder(wfolder)
+  // PC와 휴대폰 보기가 같은 control.json을 쓴다: 쓸 때마다 디스크 파일을 먼저 읽어, 다른 뷰어가 쓴 설정 위에
+  // 이 뷰어에서 바꾼 키만 얹는다(doWrite). 게임이 다른 뷰어의 파일을 적용하면 그 설정을 받아들인다(checkForeignControl).
+  const assistSupported = connection === "connected" && wfolder !== null
     && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
   const controlFile = dataRoot === null ? null : livePaths(dataRoot).controlFile;
   /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) + 치트 창이 열렸을 때 liveActors */
@@ -453,6 +480,26 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   /** controlT가 마지막 쓰기와 어긋나기 시작한 때 / 마지막으로 다시 쓴 때 */
   const mismatchSince = useRef<number | null>(null);
   const lastResyncAt = useRef<number | null>(null);
+  /**
+   * 이 뷰어에서 바꿨지만 아직 control.json에 쓰지 못한 설정 키 — 디스크(다른 뷰어) 설정 위에 이것만 얹는다.
+   * 게임을 켜기 전에 바꾼 설정이 새로 고침 뒤에도 파일에 지지 않도록 localStorage에도 남긴다.
+   */
+  const dirtyKeys = useRef<Set<AssistKey>>(new Set()); // 게임이 정해지면 아래 효과가 읽는다
+  const markDirty = useCallback((keys: Iterable<AssistKey>, on: boolean) => {
+    for (const k of keys) {
+      if (on) dirtyKeys.current.add(k); else dirtyKeys.current.delete(k);
+    }
+    saveDirty(assistLatest.current.gameKey, dirtyKeys.current);
+  }, []);
+  /** 다른 뷰어가 썼는지 보려고 이미 읽어 본 controlT */
+  const foreignCheckedT = useRef<number | null>(null);
+  /** 이 뷰어가 치트 창을 닫았다: 다음 쓰기에는 다른 뷰어의 liveActors를 이어받지 않고 끈다(한 번). */
+  const liveActorsOff = useRef(false);
+  const prevLiveActors = useRef(liveActors);
+  useEffect(() => {
+    if (prevLiveActors.current && !liveActors) liveActorsOff.current = true;
+    prevLiveActors.current = liveActors;
+  }, [liveActors]);
   /** 치트: 보낼 기록들 / 응답을 기다리는 묶음 / 기록별 상태 */
   const cheatQueue = useRef<{ key: string; ops: CheatOp[] }[]>([]);
   const cheatInflight = useRef<CheatBatch | null>(null);
@@ -477,9 +524,32 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     lastResyncAt.current = null;
     cheatQueue.current = [];
     cheatInflight.current = null;
+    dirtyKeys.current = loadDirty(data ? gameKeyOf(data) : null);
+    foreignCheckedT.current = null;
+    liveActorsOff.current = false;
   }, [wfolder, data]);
 
-  /** control.json을 한 번 쓴다. 쓰는 순간의 최신 설정·본 것·명령을 쓴다. 실패는 조용히 넘긴다. */
+  const updateSettings = useCallback((s: AssistSettings) => {
+    setAssistSettings(s);
+    saveAssist(assistLatest.current.gameKey, s);
+    assistLatest.current = { ...assistLatest.current, settings: s };
+  }, []);
+
+  /**
+   * 디스크의 control.json(다른 뷰어가 썼을 수 있다)을 받아들인다: 설정은 이 뷰어에서 아직 못 쓴 키(dirty)만 우리 값으로 두고 나머지는 파일 값.
+   * 마지막 쓰기도 그 파일로 본다(게임이 적용한 controlT와 맞아 다시 쓰지 않는다).
+   */
+  const adoptDisk = useCallback((disk: ControlFile) => {
+    const cur = assistLatest.current.settings;
+    const merged = mergeAssist(disk.settings, cur, dirtyKeys.current);
+    if (changedAssistKeys(merged, cur).length > 0) updateSettings(merged);
+    lastWritten.current = { body: disk.body, t: disk.t, settings: disk.settings };
+  }, [updateSettings]);
+
+  /**
+   * control.json을 한 번 쓴다(읽고-고쳐-쓰기). 먼저 디스크 파일을 읽어, 마지막으로 쓴 뒤 다른 뷰어가 썼으면 그 설정을 받아들이고
+   * 이 뷰어에서 바꾼 키만 얹는다. 본 것·애드온 값은 이 뷰어 것. 실패는 조용히 넘긴다.
+   */
   const doWrite = useCallback(async (force: boolean, perms: Promise<unknown>[]) => {
     const gen = writeGen.current;
     if (perms.length > 0) await Promise.all(perms);
@@ -487,6 +557,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const folderNow = cur.folder;
     const path = cur.controlFile;
     if (!folderNow || !path || !cur.index || writeGen.current !== gen) return;
+    const disk = await readControl(folderNow, path);
+    if (writeGen.current !== gen) return;
+    if (disk && disk.t !== lastWritten.current?.t) adoptDisk(disk);
     let cached = setsCache.current;
     if (!cached || cached.coverage !== cur.coverage || cached.index !== cur.index) {
       cached = { coverage: cur.coverage, index: cur.index, sets: seenSets(cur.coverage, cur.index) };
@@ -495,19 +568,32 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const now = Date.now();
     // 다시 쓰기(force)에는 이미 쓴 명령을 다시 싣지 않는다 — 재시작한 게임이 예전 명령을 새 전투에 쓰지 않도록.
     const fresh = lastCommand.current && now - lastCommand.current.at < COMMAND_TTL_MS ? lastCommand.current : null;
-    const cmd = fresh && !(force && commandWritten.current === fresh.id) ? fresh : null;
-    const settings = cur.settings;
-    const body = controlJson(settings, cached.sets, cmd, 0, cur.flags);
+    const own = fresh && !(force && commandWritten.current === fresh.id) ? fresh : null;
+    // 다른 뷰어가 막 보낸 명령은 게임이 아직 못 읽었을 수 있다 — 우리 명령이 없으면 그대로 다시 싣는다(게임은 같은 id를 한 번만 쓴다).
+    const cmd = force ? own : carryCommand(disk, own, now, COMMAND_TTL_MS);
+    // 치트 창(liveActors)은 뷰어마다 다르다: 다른 뷰어가 켜 둔 것은 이어받고, 이 뷰어가 막 닫았을 때만 끈다.
+    let flags = assistLatest.current.flags;
+    const offNow = liveActorsOff.current;
+    if (flags.liveActors !== true && disk?.flags.liveActors === true && !offNow) flags = { ...flags, liveActors: true };
+    const settings = assistLatest.current.settings;
+    const dirtyNow = [...dirtyKeys.current];
+    const clearDirty = () => {
+      const latest = assistLatest.current.settings;
+      markDirty(dirtyNow.filter((k) => JSON.stringify(latest[k]) === JSON.stringify(settings[k])), false);
+    };
+    const body = controlJson(settings, cached.sets, cmd, 0, flags);
     const prev = lastWritten.current;
-    if (!force && prev?.body === body) return;
-    const t = Math.max(now, (prev?.t ?? 0) + 1);
+    if (!force && prev?.body === body) { clearDirty(); if (offNow) liveActorsOff.current = false; return; }
+    const t = Math.max(now, (prev?.t ?? 0) + 1, (disk?.t ?? 0) + 1);
     let ok = false;
-    try { ok = await folderNow.writeText(path, controlJson(settings, cached.sets, cmd, t, cur.flags)); } catch { ok = false; }
+    try { ok = await folderNow.writeText(path, controlJson(settings, cached.sets, cmd, t, flags)); } catch { ok = false; }
     if (ok && writeGen.current === gen && assistLatest.current.folder === folderNow) {
       lastWritten.current = { body, t, settings };
-      if (cmd) commandWritten.current = cmd.id;
+      if (cmd && cmd === own) commandWritten.current = cmd.id;
+      clearDirty();
+      if (offNow) liveActorsOff.current = false;
     }
-  }, []);
+  }, [adoptDisk, markDirty]);
 
   /** control.json 쓰기를 사슬에 건다. gesture면 지금(클릭 핸들러 안에서) 쓰기 권한을 요청한다. force면 본문이 같아도 쓴다. */
   const requestControlWrite = useCallback((opts: { gesture?: boolean; force?: boolean } = {}) => {
@@ -529,21 +615,34 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     });
   }, [doWrite]);
 
-  const updateSettings = useCallback((s: AssistSettings) => {
-    setAssistSettings(s);
-    saveAssist(assistLatest.current.gameKey, s);
-    assistLatest.current = { ...assistLatest.current, settings: s };
-  }, []);
-
   const setSettings = useCallback((next: AssistSettings) => {
-    updateSettings(normalizeAssist(next));
+    const n = normalizeAssist(next);
+    markDirty(changedAssistKeys(n, assistLatest.current.settings), true);
+    updateSettings(n);
     if (assistLatest.current.supported) requestControlWrite({ gesture: true });
-  }, [updateSettings, requestControlWrite]);
+  }, [markDirty, updateSettings, requestControlWrite]);
+
+  /**
+   * 게임이 다른 뷰어(PC·휴대폰)의 control.json을 적용했으면(controlT가 우리가 쓴 것과 다름) 그 파일을 읽어 설정을 받아들인다.
+   * 다시 쓰지는 않는다 — 이 뷰어가 치트 창을 열어 둔 채(liveActors) 그 파일에 빠졌을 때만 다시 쓴다.
+   */
+  const checkForeignControl = useCallback((controlT: number) => {
+    const gen = writeGen.current;
+    writeChain.current = writeChain.current.then(async () => {
+      const cur = assistLatest.current;
+      if (!cur.folder || !cur.controlFile || writeGen.current !== gen) return;
+      const disk = await readControl(cur.folder, cur.controlFile);
+      if (!disk || disk.t !== controlT || writeGen.current !== gen || disk.t === lastWritten.current?.t) return;
+      adoptDisk(disk);
+      mismatchSince.current = null;
+      if (assistLatest.current.flags.liveActors === true && disk.flags.liveActors !== true) requestControlWrite();
+    }).catch(() => { /* 조용히 */ });
+  }, [adoptDisk, requestControlWrite]);
 
   const sendCommand = useCallback((kind: AssistCommandKind) => {
     if (!assistLatest.current.supported) return;
     const at = Date.now();
-    const command: AssistCommand = { id: `c-${at}`, kind, at };
+    const command: AssistCommand = { id: `c-${at}-${VIEWER_TAG}`, kind, at };
     lastCommand.current = command;
     setSentCommand(command);
     requestControlWrite({ gesture: true });
@@ -553,7 +652,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const pumpCheat = useCallback((gesture: boolean) => {
     if (cheatInflight.current || !assistLatest.current.supported) return;
     const at = Date.now();
-    const r = makeBatch(cheatQueue.current, `x-${at}-${++cheatSeq}`, at);
+    const r = makeBatch(cheatQueue.current, `x-${at}-${++cheatSeq}-${VIEWER_TAG}`, at);
     if (!r) { cheatQueue.current = []; return; }
     cheatQueue.current = r.rest;
     cheatInflight.current = r.batch;
@@ -630,9 +729,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const pending = queued.current !== null || writing.current;
     const patch = adoptLiveAssist(a, lastWritten.current, cur.settings, pending);
     if (patch) {
+      markDirty(Object.keys(patch) as AssistKey[], true);
       updateSettings(normalizeAssist({ ...cur.settings, ...patch }));
       requestControlWrite();
       return;
+    }
+    // 다른 뷰어가 쓴 파일을 게임이 적용했다 → 그 설정을 받아들인다(controlT 하나에 한 번 읽는다).
+    const ct = a && typeof a.controlT === "number" ? a.controlT : null;
+    if (!pending && ct !== null && ct !== lastWritten.current?.t && ct !== foreignCheckedT.current) {
+      foreignCheckedT.current = ct;
+      checkForeignControl(ct);
     }
     const now = Date.now();
     if (!pending && controlMismatch(a, lastWritten.current?.t ?? null)) mismatchSince.current ??= now;
@@ -642,7 +748,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       mismatchSince.current = null;
       requestControlWrite({ force: true });
     }
-  }, [updateSettings, requestControlWrite]);
+  }, [markDirty, updateSettings, requestControlWrite, checkForeignControl]);
 
   useEffect(() => {
     if (!assistSupported) return;

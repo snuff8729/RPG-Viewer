@@ -3,6 +3,7 @@ import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import {
   adoptLiveAssist, commandStatus, commandStatusText, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, liveHotkeys,
   isHpCommand, normalizeAssist, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
+  carryCommand, changedAssistKeys, mergeAssist, parseControlFile,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
 import type { Coverage, PickInfo } from "./types";
@@ -230,5 +231,41 @@ describe("game sync", () => {
     expect(commandStatusText("ignored", "win")).toMatch(/전투 중이 아니거나/);
     expect(commandStatusText("applied", "hpLow")).toBe("적용됐어요");
     expect(commandStatusText("failed", "hpFull")).toBe("실행하지 못했어요");
+  });
+});
+
+describe("shared control.json (PC and phone viewers)", () => {
+  const sets = { seenMessages: ["a"], seenPages: ["p"] };
+  it("parses a written file back to the same body", () => {
+    const s = normalizeAssist({ speed: 4, skipSeen: false });
+    const cmd = { id: "x-1", kind: "cheat" as const, at: 90, ops: [{ op: "gold", value: 5 }] as never };
+    const text = controlJson(s, sets, cmd, 123, { capturePictures: true, liveActors: true });
+    const f = parseControlFile(text);
+    expect(f).not.toBeNull();
+    expect(f?.t).toBe(123);
+    expect(f?.settings).toEqual(s);
+    expect(f?.sets).toEqual(sets);
+    expect(f?.flags).toEqual({ capturePictures: true, liveActors: true });
+    expect(f?.body).toBe(controlJson(s, sets, f?.command ?? null, 0, { capturePictures: true, liveActors: true }));
+  });
+  it("rejects files that are not contract v1 with a t", () => {
+    for (const t of [null, "", "{bad", "[]", JSON.stringify({ v: 2, t: 1 }), JSON.stringify({ v: 1 })]) expect(parseControlFile(t)).toBeNull();
+  });
+  it("merges only the keys this viewer changed onto the other viewer's settings", () => {
+    const disk = normalizeAssist({ speed: 8, skipSeen: false, autoFast: true, autoSpeed: 2 });
+    const local = normalizeAssist({ speed: 1, skipSeen: true, autoFast: false, autoSpeed: 4 });
+    expect(mergeAssist(disk, local, [])).toEqual(disk);
+    expect(mergeAssist(disk, local, ["skipSeen"])).toEqual({ ...disk, skipSeen: true });
+    expect(changedAssistKeys(disk, local).sort()).toEqual(["autoFast", "autoSpeed", "skipSeen", "speed"]);
+    expect(changedAssistKeys(disk, disk)).toEqual([]);
+  });
+  it("carries the other viewer's fresh command when this viewer has none", () => {
+    const disk = parseControlFile(controlJson(DEFAULT_ASSIST, sets, { id: "c-1", kind: "win", at: 1000 }, 1000));
+    expect(disk?.command).toEqual({ id: "c-1", kind: "win", at: 1000 });
+    expect(carryCommand(disk, null, 5000, 10000)).toMatchObject({ id: "c-1" });
+    expect(carryCommand(disk, null, 12000, 10000)).toBeNull();
+    const ours = { id: "c-2", kind: "lose" as const, at: 4000 };
+    expect(carryCommand(disk, ours, 5000, 10000)).toBe(ours);
+    expect(carryCommand(null, null, 5000, 10000)).toBeNull();
   });
 });

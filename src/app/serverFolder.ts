@@ -88,14 +88,17 @@ export class ServerFolder implements WritableGameFolder {
   private id: string;
   private fetchFn: FetchFn;
   private reopening: Promise<boolean> | null = null;
-  /** 휴대폰 보기: 읽기만 한다(쓰기는 시도하지 않고, 서버도 막는다). 세션을 다시 열지도 않는다. */
-  readonly readOnly: boolean;
+  /**
+   * 휴대폰 보기: 읽기 + 게임 보조·치트·게임 설정 파일 둘에만 쓴다(remoteWritable, 서버도 같은 목록만 받는다).
+   * 그 밖의 쓰기·지우기는 보내지 않고 throw. 세션을 다시 열지도 않는다.
+   */
+  readonly remote: boolean;
 
-  constructor(session: ServerSession, fetchFn: FetchFn = defaultFetch, opts: { readOnly?: boolean } = {}) {
+  constructor(session: ServerSession, fetchFn: FetchFn = defaultFetch, opts: { remote?: boolean } = {}) {
     this.session = session;
     this.id = session.id;
     this.fetchFn = fetchFn;
-    this.readOnly = opts.readOnly === true;
+    this.remote = opts.remote === true;
   }
 
   get root(): string { return this.session.root; }
@@ -103,7 +106,7 @@ export class ServerFolder implements WritableGameFolder {
   get sessionId(): string { return this.id; }
 
   private reopen(staleId: string): Promise<boolean> {
-    if (this.readOnly) return Promise.resolve(false);
+    if (this.remote) return Promise.resolve(false);
     if (this.id !== staleId) return Promise.resolve(true);
     this.reopening ??= openFolderOnServer(this.session.root, this.fetchFn).then((r) => {
       this.reopening = null;
@@ -175,22 +178,36 @@ export class ServerFolder implements WritableGameFolder {
   }
 
   async writeText(path: string, text: string): Promise<boolean> {
-    if (this.readOnly) throw new Error(READ_ONLY);
+    if (this.remote && !remoteWritable(this.session.engine, path)) throw new Error(READ_ONLY);
     return (await this.json("write", { path, text }))?.ok === true;
   }
 
   async remove(path: string): Promise<boolean> {
-    if (this.readOnly) throw new Error(READ_ONLY);
+    if (this.remote) throw new Error(READ_ONLY);
     return (await this.json("remove", { path }))?.ok === true;
   }
 
-  async canWrite(): Promise<boolean> { return !this.readOnly; }
-  async requestWrite(): Promise<boolean> { return !this.readOnly; }
+  /** 휴대폰 보기도 true(정해 둔 파일은 쓸 수 있다). 다른 파일은 writeText가 throw. */
+  async canWrite(): Promise<boolean> { return true; }
+  async requestWrite(): Promise<boolean> { return true; }
 }
 
 const READ_ONLY = "휴대폰 보기에서는 쓸 수 없어요";
 
-/** 읽기 전용 폴더(휴대폰 보기)인지 */
-export function isReadOnlyFolder(f: unknown): boolean {
-  return f instanceof ServerFolder && f.readOnly;
+/**
+ * 휴대폰 보기가 쓸 수 있는 파일(게임 루트 기준, MV는 앞에 `www/`): 게임 보조·치트의 control.json, 게임 설정의 addons.json.
+ * scripts/fsApi.ts의 REMOTE_WRITE_FILES와 같아야 한다(서버가 다시 본다).
+ */
+export const REMOTE_WRITE_FILES = ["rpg-viewer/control.json", "rpg-viewer/addons.json"] as const;
+
+/** 휴대폰 보기에서 이 경로에 쓸 수 있는가(대소문자까지 그대로). */
+export function remoteWritable(engine: string, path: string): boolean {
+  if (engine !== "MV" && engine !== "MZ") return false;
+  const base = engine === "MV" ? "www/" : "";
+  return REMOTE_WRITE_FILES.some((f) => path === base + f);
+}
+
+/** 휴대폰 보기로 연 폴더인지(읽기 + 정해 둔 파일 쓰기만) */
+export function isRemoteFolder(f: unknown): boolean {
+  return f instanceof ServerFolder && f.remote;
 }
