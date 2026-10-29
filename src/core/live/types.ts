@@ -38,10 +38,11 @@ export type LogRecord = RecordBase & (
   /**
    * 전투 시작·끝. 1.8.0+: 시작에 troopName·enemies·canEscape·canLose, 끝에 result "abort"(전투 중단)·rewards(승리 보상)·
    * dropped(줄 수 제한으로 안 남긴 전투 로그 줄 수). pics/picsSame: 화면 그림 따라 그리기가 켜졌을 때(message와 같은 모양).
+   * skipped(1.24.0+): 끝 기록에서, 전투 건너뛰기로 전투 화면 없이 이긴 전투.
    */
   | {
     type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" | "abort";
-    troopName?: string; enemies?: string[]; canEscape?: boolean; canLose?: boolean;
+    troopName?: string; enemies?: string[]; canEscape?: boolean; canLose?: boolean; skipped?: true;
     rewards?: { exp: number; gold: number; items: string[] }; dropped?: number; pics?: unknown[]; picsSame?: true;
   }
   /** 1.8.0+: 전투 로그 한 줄(제어 문자 그대로). 이야기 기록이 아니다. pics: 그림이 바뀌었을 때만 */
@@ -121,6 +122,11 @@ export interface LiveAssist {
   /** 본 이벤트 자동 배속·그 빠르기(플러그인 1.22.0+, 단축키 Ctrl+F7·Ctrl+F6으로 바뀔 수 있음) */
   autoFast?: boolean;
   autoSpeed?: number;
+  /** 게임이 적용한 적 만남 설정과 이겨 본 적 종류 수(플러그인 1.24.0+, rpg-viewer/defeated.json) */
+  noRandomEncounter?: boolean;
+  skipBattles?: boolean;
+  skipKnownOnly?: boolean;
+  knownEnemies?: number;
   troopId: number | null;
   lastCommand: string | null;
   /** 게임에 실제로 걸린 단축키(keyCode | 조합 비트, null = 끔, core/live/assist liveHotkeys). 없으면 기본 단축키가 고정인 구버전 플러그인. */

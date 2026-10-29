@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GameIndex, Location, PageEntry, ScriptNode } from "../types";
 import {
   adoptLiveAssist, commandStatus, commandStatusText, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, LEGACY_HOTKEYS, liveHotkeys,
-  ENEMY_HP_COMMAND_MIN_VERSION, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isEnemyHpCommand, isHpCommand, isSaveCommand, normalizeAssist, sameHotkeys, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
+  ENCOUNTER_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isEnemyHpCommand, isHpCommand, isSaveCommand, normalizeAssist, sameHotkeys, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
   carryCommand, changedAssistKeys, mergeAssist, migrateSavedAssist, parseControlFile,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
@@ -89,8 +89,27 @@ describe("controlJson", () => {
     expect(j).toEqual({
       v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
       hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP, ...SAVE, v: 5 }, quickSlot: null,
+      noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
       seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win", at: 100 },
     });
+  });
+  it("적 만남 (1.24.0): written to control.json, read back, unknown values are off", () => {
+    const on = { ...DEFAULT_ASSIST, noRandomEncounter: true, skipBattles: true, skipKnownOnly: true };
+    const text = controlJson(on, { seenMessages: [], seenPages: [] }, null, 7);
+    expect(JSON.parse(text)).toMatchObject({ noRandomEncounter: true, skipBattles: true, skipKnownOnly: true });
+    const parsed = parseControlFile(text)!;
+    expect(parsed.settings).toEqual(on);
+    expect(parsed.flags).toEqual({}); // not mistaken for add-on flags
+    // an older viewer's file (no such fields) and odd values read as off
+    expect(parseControlFile(JSON.stringify({ v: 1, t: 1, speed: 2 }))?.settings).toMatchObject({ noRandomEncounter: false, skipBattles: false, skipKnownOnly: false });
+    expect(normalizeAssist({ noRandomEncounter: "true", skipBattles: 1, skipKnownOnly: null }))
+      .toMatchObject({ noRandomEncounter: false, skipBattles: false, skipKnownOnly: false });
+    // PC turns on 전투 건너뛰기 while the phone changed speed: both kept
+    const disk = { ...DEFAULT_ASSIST, speed: 4 as const };
+    expect(mergeAssist(disk, { ...DEFAULT_ASSIST, skipBattles: true }, changedAssistKeys(DEFAULT_ASSIST, { ...DEFAULT_ASSIST, skipBattles: true })))
+      .toEqual({ ...DEFAULT_ASSIST, speed: 4, skipBattles: true });
+    expect(versionAtLeast("1.23.0", ENCOUNTER_MIN_VERSION)).toBe(false);
+    expect(versionAtLeast("1.24.0", ENCOUNTER_MIN_VERSION)).toBe(true);
   });
   it("sanitizes bad settings/commands", () => {
     const j = JSON.parse(controlJson({ speed: 3, autoSpeed: 1 } as never, null as never, { id: "x", kind: "boom" } as never, NaN));
@@ -121,7 +140,10 @@ describe("normalizeAssist / versionAtLeast", () => {
   it("normalizes stored values", () => {
     expect(normalizeAssist(null)).toEqual(DEFAULT_ASSIST);
     expect(normalizeAssist({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2 }))
-      .toEqual({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS, quickSlot: null });
+      .toEqual({
+        speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
+        noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
+      });
     const hk = { speed: 65, skip: null, win: 121, lose: 122, hpFull: 72, hpLow: 76, ...SAVE };
     expect(normalizeAssist({ ...DEFAULT_ASSIST, hotkeys: hk }).hotkeys).toEqual(hk);
     expect(normalizeAssist({ speed: "4", autoSpeed: 16 })).toEqual(DEFAULT_ASSIST);

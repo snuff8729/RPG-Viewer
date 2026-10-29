@@ -129,6 +129,12 @@ describe("readerItems battle blocks", () => {
     expect(items([bs(1), start(2), end(3, "weird")])[1]).toMatchObject({ result: null, ended: true });
   });
 
+  it("a skipped battle (plugin 1.24.0) says so before its rewards", () => {
+    const skipped = (rewards?: object) => items([bs(1), start(2), end(3, "win", { skipped: true, ...(rewards ? { rewards } : {}) })])[1];
+    expect(skipped({ exp: 10, gold: 0, items: ["포션"] })).toMatchObject({ result: "win", rewards: "전투 건너뜀 · 경험치 10 · 얻은 것: 포션" });
+    expect(skipped()).toMatchObject({ result: "win", rewards: "전투 건너뜀" });
+  });
+
   it("`전투 기록 보기` off leaves battles out entirely", () => {
     expect(items([...recs, msg(7, "after", mapSrc)], null, false).map(i => i.kind)).toEqual(["chapter", "message"]);
   });

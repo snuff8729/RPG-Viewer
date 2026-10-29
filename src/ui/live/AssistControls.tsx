@@ -71,14 +71,16 @@ export function AutoSpeedControl({ size = "sm", short }: { size?: AssistControlS
 }
 
 /** 이름 + 켜고 끄기 한 줄. 줄에서는 이름 왼쪽, 스위치·☆ 오른쪽 끝(☆가 맨 끝). short = 맨 위 줄(이름 바로 옆에 스위치). */
-function SwitchRow({ id, label, title, checked, onChange, favorite, short }: {
+function SwitchRow({ id, label, title, checked, onChange, favorite, short, disabled }: {
   id: string; label: string; title?: string; checked: boolean; onChange(c: boolean): void; favorite?: ReactNode; short?: boolean;
+  /** 보조를 쓸 수 있어도 끌 때(플러그인 버전 등) */
+  disabled?: boolean;
 }) {
   const { supported } = useAssist();
   return (
     <div className={short ? "flex items-center gap-1.5" : "flex items-center gap-2"} title={title}>
       <Label htmlFor={id} className={short ? undefined : "mr-auto"}>{label}</Label>
-      <Switch id={id} disabled={!supported} checked={checked} onCheckedChange={onChange} />
+      <Switch id={id} disabled={!supported || disabled === true} checked={checked} onCheckedChange={onChange} />
       {favorite}
     </div>
   );
@@ -104,6 +106,26 @@ export function AutoFastControl({ favorite, short, id = "assist-auto-fast" }: Co
       id={id} label={short ? assistItemShortLabel("autoFast") : assistItemLabel("autoFast")} title={short ? assistItemLabel("autoFast") : undefined}
       checked={settings.autoFast} favorite={favorite} short={short}
       onChange={(c) => setSettings({ ...settings, autoFast: c })}
+    />
+  );
+}
+
+/** 적 만남 켜고 끄기(플러그인 1.24.0) */
+export type EncounterItemId = "noRandomEncounter" | "skipBattles" | "skipKnownOnly";
+
+/**
+ * 랜덤 전투 끄기 · 전투 건너뛰기 · 잡아 본 적만 켜고 끄기. 잡아 본 적만은 전투 건너뛰기가 켜져 있을 때만 바꿀 수 있다.
+ * 한 화면에 둘 이상 둘 때는 id를 달리 준다.
+ */
+export function EncounterControl({ item, favorite, short, id = `assist-${item}` }: ControlProps & { item: EncounterItemId; id?: string }) {
+  const { settings, setSettings } = useAssist();
+  const { encounterSupported } = useAssistGuards();
+  return (
+    <SwitchRow
+      id={id} label={short ? assistItemShortLabel(item) : assistItemLabel(item)} title={short ? assistItemLabel(item) : undefined}
+      checked={settings[item]} favorite={favorite} short={short}
+      disabled={!encounterSupported || (item === "skipKnownOnly" && !settings.skipBattles)}
+      onChange={(c) => setSettings({ ...settings, [item]: c })}
     />
   );
 }

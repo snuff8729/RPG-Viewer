@@ -13,6 +13,12 @@ export interface AssistSettings {
   speed: 1 | 2 | 4 | 8; skipSeen: boolean; autoFast: boolean; autoSpeed: 2 | 4 | 8; hotkeys: Hotkeys;
   /** 퀵 세이브·퀵 로드 칸(1~). null = 게임의 마지막 세이브 칸(플러그인 1.21.0) */
   quickSlot: number | null;
+  /**
+   * 적 만남(플러그인 1.24.0, 기본 끔). noRandomEncounter: 랜덤 전투가 일어나지 않는다.
+   * skipBattles: 전투 화면 없이 바로 이기고 보상을 받는다(대화가 있는 전투 등은 그대로 싸운다).
+   * skipKnownOnly: skipBattles일 때, 모든 적을 한 번이라도 이겨 본 전투만 건너뛴다.
+   */
+  noRandomEncounter: boolean; skipBattles: boolean; skipKnownOnly: boolean;
 }
 /**
  * 게임 창 단축키 동작. backup·restore(플러그인 1.21.0)는 뷰어가 처리한다(게임 → rpg-viewer/request.json).
@@ -88,7 +94,10 @@ export const HOTKEYS_VERSION = 5;
 const COMBO_KEYS_VERSION = 4;
 /** 체력 단축키 옮기기는 이 판 전의 묶음에만 */
 const HP_KEYS_VERSION = 2;
-export const DEFAULT_ASSIST: AssistSettings = { speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null };
+export const DEFAULT_ASSIST: AssistSettings = {
+  speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
+  noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
+};
 export type HotkeyGroup = "진행" | "전투" | "체력" | "세이브" | "백업";
 export const HOTKEY_GROUPS: readonly HotkeyGroup[] = ["진행", "전투", "체력", "세이브", "백업"];
 /** 단축키 동작(표시 순서·묶음)과 이름. short는 하단 안내 줄에 쓴다. */
@@ -141,6 +150,8 @@ export const HP_COMMAND_MIN_VERSION = "1.12.0";
 export const SAVE_COMMAND_MIN_VERSION = "1.21.0";
 /** 적 체력 명령(enemyHpFull·enemyHpLow)과 그 단축키를 지원하는 플러그인 최소 버전 */
 export const ENEMY_HP_COMMAND_MIN_VERSION = "1.23.0";
+/** 랜덤 전투 끄기·전투 건너뛰기·잡아 본 적만(noRandomEncounter·skipBattles·skipKnownOnly)을 지원하는 플러그인 최소 버전 */
+export const ENCOUNTER_MIN_VERSION = "1.24.0";
 const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>([
   "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow", "cheat", "saveMenu", "loadMenu", "quickSave", "quickLoad",
 ]);
@@ -309,6 +320,9 @@ export function normalizeAssist(v: unknown): AssistSettings {
     autoSpeed: isAutoSpeed(o.autoSpeed) ? o.autoSpeed : DEFAULT_ASSIST.autoSpeed,
     hotkeys: normalizeHotkeys(o.hotkeys),
     quickSlot: isQuickSlot(o.quickSlot) ? o.quickSlot : null,
+    noRandomEncounter: o.noRandomEncounter === true,
+    skipBattles: o.skipBattles === true,
+    skipKnownOnly: o.skipKnownOnly === true,
   };
 }
 
@@ -380,12 +394,16 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
     v: 1, t: Number.isFinite(now) ? now : 0,
     speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: hotkeysForSave(n.hotkeys),
     quickSlot: n.quickSlot,
+    noRandomEncounter: n.noRandomEncounter, skipBattles: n.skipBattles, skipKnownOnly: n.skipKnownOnly,
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
     command: cmd,
   });
 }
 
-const CONTROL_KEYS = new Set(["v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "seenMessages", "seenPages", "command"]);
+const CONTROL_KEYS = new Set([
+  "v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
+  "seenMessages", "seenPages", "command",
+]);
 
 /**
  * 디스크의 control.json(다른 뷰어가 썼을 수도 있다: PC와 휴대폰이 같은 파일을 쓴다).
@@ -413,9 +431,11 @@ export function parseControlFile(text: string | null | undefined): ControlFile |
   return { t: c.t, settings, sets, flags, command, body: controlJson(settings, sets, command, 0, flags) };
 }
 
-/** 설정 하나하나(배속·본 대사 넘기기·자동 배속·자동 배속 값·단축키) */
+/** 설정 하나하나(배속·본 대사 넘기기·자동 배속·자동 배속 값·단축키·퀵 세이브 칸·적 만남) */
 export type AssistKey = keyof AssistSettings;
-const ASSIST_KEYS: readonly AssistKey[] = ["speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot"];
+export const ASSIST_KEYS: readonly AssistKey[] = [
+  "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
+];
 
 /** a와 b에서 값이 다른 설정 키들 */
 export function changedAssistKeys(a: AssistSettings, b: AssistSettings): AssistKey[] {

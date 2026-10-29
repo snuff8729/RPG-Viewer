@@ -167,8 +167,10 @@ export function troopName(r: RecordOf<"battle">, data: GameData): string {
 
 function rewardsText(end: RecordOf<"battle"> | null, data: GameData): string | null {
   const rw = end?.rewards;
-  if (!rw || typeof rw !== "object") return null;
-  const parts: string[] = [];
+  // 전투 건너뛰기(플러그인 1.24.0)로 이긴 전투는 앞에 그렇게 적는다
+  const skipped = end?.skipped === true ? "전투 건너뜀" : null;
+  if (!rw || typeof rw !== "object") return skipped;
+  const parts: string[] = skipped ? [skipped] : [];
   if (typeof rw.exp === "number" && rw.exp > 0) parts.push(`경험치 ${rw.exp}`);
   if (typeof rw.gold === "number" && rw.gold > 0) parts.push(`골드 ${rw.gold}`);
   const items = Array.isArray(rw.items) ? rw.items.filter(s => typeof s === "string" && s).map(s => formatText(s, data)) : [];

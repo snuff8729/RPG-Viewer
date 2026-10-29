@@ -45,6 +45,10 @@
  * 게임 전용 확장(RPGViewerBridge_<id>.js, 이 플러그인 바로 뒤)은
  * RPGViewerBridge.registerExtension으로 붙어 그림 기록에 정보를 더합니다.
  * 화면 그림은 맵과 전투 화면에서만 기록합니다(메뉴 화면은 RPG Viewer에서 따로 켠 경우만).
+ * RPG Viewer의 게임 보조에서 켠 경우만: 랜덤 전투 끄기(걸어도 랜덤 전투가 일어나지 않음),
+ * 전투 건너뛰기(전투 화면 없이 바로 이기고 경험치·골드·떨어뜨린 아이템을 받음. 대화·선택지·
+ * 전투 중단·게임 오버·적 상태 바꾸기·적 변신이 있는 전투는 그대로 싸움), 잡아 본 적만(모든 적을
+ * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
  *
@@ -59,7 +63,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.23.0",
+    VERSION: "1.24.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -94,6 +98,7 @@
   var META = path.join(DIR, "meta.json");
   var CONTROL = path.join(DIR, "control.json");
   var REQUEST = path.join(DIR, "request.json"); // 1.21.0: backup / restore asked by a game window hotkey (the viewer does it)
+  var DEFEATED = path.join(DIR, "defeated.json"); // 1.24.0: enemy ids beaten at least once in this game { v: 1, enemies: [] }
   var MAX_BUFFER = 5000;
 
   // ---------------------------------------------------------------- state
@@ -203,6 +208,16 @@
   var COMBO_MAX_AGE_MS = 1000;
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
   var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
+  // 1.24.0 encounters (control.json noRandomEncounter / skipBattles / skipKnownOnly; all off by default)
+  var encounter = { noRandom: false, skipBattles: false, knownOnly: false };
+  var defeated = null;        // enemyId -> true (rpg-viewer/defeated.json, read on first use)
+  var defeatedCount = 0;
+  var battleSetupPending = false; // BattleManager.setup ran and its Scene_Battle has not started (nor the battle ended)
+  var skippingBattle = false; // inside skipBattle: the end record says skipped
+  // battle event commands that make a battle more than "defeat every enemy": text, choices, number / item input,
+  // scrolling text, Change Enemy State (immortal tricks), Enemy Transform, Abort Battle, Game Over, Return to Title
+  var STORY_BATTLE_CODES = { 101: true, 102: true, 103: true, 104: true, 105: true, 333: true, 336: true, 340: true, 353: true, 354: true };
+  var STORY_SCAN_DEPTH = 5;   // nested Common Event calls looked into
   var seenMessages = Object.create(null), seenPages = Object.create(null);
   // last speed/skipSeen/autoFast/autoSpeed taken from control.json: a rewrite with the same value does not undo a hotkey change
   var ctrlSpeed = null, ctrlSkip = null, ctrlAutoFast = null, ctrlAutoSpeed = null;
@@ -757,6 +772,8 @@
       assist: {
         speed: assist.speed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
         autoFast: assist.autoFast, autoSpeed: assist.autoSpeed,
+        noRandomEncounter: encounter.noRandom, skipBattles: encounter.skipBattles, skipKnownOnly: encounter.knownOnly,
+        knownEnemies: knownEnemyCount(),
         troopId: inBattle && G.$gameTroop && typeof G.$gameTroop._troopId === "number" ? G.$gameTroop._troopId : null,
         canEscape: inBattle && canEscapeNow(),
         canLose: inBattle && !!(G.BattleManager && G.BattleManager._canLose),
@@ -1147,6 +1164,9 @@
       if (ctrlAutoSpeed === null || c.autoSpeed !== ctrlAutoSpeed) assist.autoSpeed = c.autoSpeed;
       ctrlAutoSpeed = c.autoSpeed;
     }
+    encounter.noRandom = c.noRandomEncounter === true;
+    encounter.skipBattles = c.skipBattles === true;
+    encounter.knownOnly = c.skipKnownOnly === true;
     if (Array.isArray(c.seenMessages)) seenMessages = stringSet(c.seenMessages);
     if (Array.isArray(c.seenPages)) seenPages = stringSet(c.seenPages);
     var cap = c.capturePictures === true;
@@ -1385,6 +1405,184 @@
       e.setHp(kind === "enemyHpFull" ? mhp : Math.max(1, Math.floor(mhp * 0.01)));
     }
     refreshBattleStatus();
+  }
+
+  // ---------------------------------------------------------------- encounters (1.24.0)
+  function loadDefeated() {
+    if (defeated !== null) return defeated;
+    defeated = Object.create(null);
+    defeatedCount = 0;
+    if (fs.existsSync(DEFEATED)) {
+      var d = null;
+      try { d = JSON.parse(stripBom(String(fs.readFileSync(DEFEATED, "utf8")))); } catch (e) { reportError(e); }
+      var list = d && Array.isArray(d.enemies) ? d.enemies : [];
+      for (var i = 0; i < list.length; i++) {
+        if (isCount(list[i]) && defeated[list[i]] !== true) { defeated[list[i]] = true; defeatedCount++; }
+      }
+    }
+    return defeated;
+  }
+
+  function knownEnemyCount() {
+    try { loadDefeated(); } catch (e) { reportError(e); }
+    return defeatedCount;
+  }
+
+  function enemyIdOf(e) {
+    if (!e) return 0;
+    var id = typeof e.enemyId === "function" ? e.enemyId() : e._enemyId;
+    return isCount(id) ? id : 0;
+  }
+
+  // Remembers enemy ids as beaten; rpg-viewer/defeated.json is rewritten only when one is new.
+  function noteDefeated(ids) {
+    var d = loadDefeated(), added = false;
+    for (var i = 0; i < ids.length; i++) {
+      if (isCount(ids[i]) && d[ids[i]] !== true) { d[ids[i]] = true; defeatedCount++; added = true; }
+    }
+    if (!added) return;
+    var list = [];
+    for (var k in d) list.push(Number(k));
+    list.sort(function (a, b) { return a - b; });
+    ensureDir();
+    fs.writeFileSync(DEFEATED, JSON.stringify({ v: 1, enemies: list }));
+  }
+
+  // Enemies of the troop that are down (appeared and dead): the ones a victory counts.
+  function deadEnemyIds() {
+    var tr = G.$gameTroop, out = [];
+    var list = tr && typeof tr.deadMembers === "function" ? tr.deadMembers() : (tr && typeof tr.members === "function" ? tr.members() : []);
+    for (var i = 0; list && i < list.length; i++) {
+      var e = list[i];
+      if (!e) continue;
+      var dead = typeof e.isDead === "function" ? e.isDead() : !(typeof e.isAlive === "function" && e.isAlive());
+      if (dead) { var id = enemyIdOf(e); if (id) out.push(id); }
+    }
+    return out;
+  }
+
+  function listHasStory(list, depth, seenCe) {
+    if (!list || typeof list.length !== "number") return false;
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (!c) continue;
+      if (STORY_BATTLE_CODES[c.code] === true) return true;
+      if (c.code === 117 && depth < STORY_SCAN_DEPTH && c.parameters) {
+        var id = c.parameters[0];
+        var ce = G.$dataCommonEvents && isCount(id) ? G.$dataCommonEvents[id] : null;
+        if (ce && seenCe[id] !== true) {
+          seenCe[id] = true;
+          if (listHasStory(ce.list, depth + 1, seenCe)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // A troop whose battle events talk, ask, change enemy states, transform, abort or end the game is fought normally.
+  function storyBattle(troopId) {
+    var dt = G.$dataTroops && isCount(troopId) ? G.$dataTroops[troopId] : null;
+    if (!dt) return true;
+    var pages = dt.pages || [], seenCe = {};
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i] && listHasStory(pages[i].list, 0, seenCe)) return true;
+    }
+    return false;
+  }
+
+  // null when the battle just set up may be skipped, else why not ("engine", "story", "party", "unknown").
+  function skipBlock() {
+    var BM = G.BattleManager, tr = G.$gameTroop, party = G.$gameParty;
+    if (!BM || !tr || !party || typeof BM.makeRewards !== "function" || typeof BM.gainRewards !== "function" ||
+        typeof BM.endBattle !== "function" || typeof tr.members !== "function" || typeof tr.aliveMembers !== "function") return "engine";
+    if (storyBattle(tr._troopId)) return "story";
+    if (typeof party.aliveMembers !== "function" || party.aliveMembers().length === 0) return "party";
+    if (encounter.knownOnly) {
+      var d = loadDefeated(), ms = tr.members();
+      for (var i = 0; ms && i < ms.length; i++) {
+        if (d[enemyIdOf(ms[i])] !== true) return "unknown";
+      }
+    }
+    return null;
+  }
+
+  function returnFalse() { return false; }
+
+  // The battle just set up ends here as a victory instead of opening Scene_Battle: every appeared enemy goes down,
+  // the engine's own makeRewards / gainRewards give exp (battle / reserve member rates as usual), gold and rolled
+  // drops, and endBattle(0) runs the event's win branch, the victory count and our end record. No battle BGM, ME
+  // or level-up message (the toast names who levelled up). Once started it always ends as a win: nothing waits.
+  function skipBattle() {
+    var BM = G.BattleManager, tr = G.$gameTroop, party = G.$gameParty;
+    var cb = BM._eventCallback, cbCalled = false, wrapped = null;
+    if (typeof cb === "function") {
+      wrapped = function () { cbCalled = true; return cb.apply(this, arguments); };
+      BM._eventCallback = wrapped;
+    }
+    var members = typeof party.allMembers === "function" ? party.allMembers() : (typeof party.members === "function" ? party.members() : []);
+    var levels = [], quiet = [], i;
+    skippingBattle = true;
+    try {
+      var enemies = tr.aliveMembers();
+      for (i = 0; i < enemies.length; i++) {
+        var e = enemies[i];
+        e.addNewState(e.deathStateId());
+        if (typeof e.refresh === "function") e.refresh();
+      }
+      for (i = 0; members && i < members.length; i++) {
+        var m = members[i];
+        levels.push(m ? m.level : 0);
+        if (m && !Object.prototype.hasOwnProperty.call(m, "shouldDisplayLevelUp")) { m.shouldDisplayLevelUp = returnFalse; quiet.push(m); }
+      }
+      BM.makeRewards();
+      BM.gainRewards();
+    } catch (e1) {
+      reportError(e1);
+    } finally {
+      for (i = 0; i < quiet.length; i++) delete quiet[i].shouldDisplayLevelUp;
+    }
+    try {
+      BM.endBattle(0);
+    } catch (e2) {
+      reportError(e2);
+    } finally {
+      skippingBattle = false;
+      battleSetupPending = false;
+      BM._phase = null; // like BattleManager.updateBattleEnd after the scene pops
+      if (wrapped !== null) {
+        if (BM._eventCallback === wrapped) BM._eventCallback = cb;
+        if (!cbCalled) { try { cb(0); } catch (e3) { reportError(e3); } }
+      }
+    }
+    var parts = [], rw = null;
+    try { rw = battleRewards(BM); } catch (e4) { reportError(e4); }
+    if (rw) {
+      if (rw.exp > 0) parts.push("경험치 " + rw.exp);
+      if (rw.gold > 0) parts.push("골드 " + rw.gold);
+      if (rw.items.length) parts.push(rw.items.join(", "));
+    }
+    var ups = [];
+    for (i = 0; members && i < members.length && i < levels.length; i++) {
+      try {
+        if (members[i] && members[i].level > levels[i] && typeof members[i].name === "function") ups.push(members[i].name());
+      } catch (e5) { reportError(e5); }
+    }
+    if (ups.length) parts.push("레벨 업 " + ups.join(", "));
+    showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : ""));
+  }
+
+  // SceneManager.push(Scene_Battle) right after BattleManager.setup (random encounter, Battle Processing, symbol
+  // encounter plugins): true when the battle was skipped and the scene must not be pushed.
+  function maybeSkipBattle(sceneClass) {
+    if (!encounter.skipBattles || !battleSetupPending) return false;
+    var SB = G.Scene_Battle;
+    if (!SB || typeof sceneClass !== "function" || !(sceneClass === SB || sceneClass.prototype instanceof SB)) return false;
+    var why = skipBlock();
+    if (why === "story") showMessage("대화가 있는 전투라 그대로 싸워요");
+    else if (why === "unknown") showMessage("처음 보는 적이 있어 그대로 싸워요");
+    if (why !== null) return false;
+    skipBattle();
+    return true;
   }
 
   function refreshBattleStatus() {
@@ -3347,10 +3545,32 @@
       };
     });
 
+    // 1.24.0 랜덤 전투 끄기: steps do not count down and no random encounter starts while it is on
+    hook(GP, "Game_Player", "updateEncounterCount", function (orig) {
+      return function () {
+        if (encounter.noRandom) return;
+        return orig.apply(this, arguments);
+      };
+    });
+    hook(GP, "Game_Player", "executeEncounter", function (orig) {
+      return function () {
+        if (encounter.noRandom) return false;
+        return orig.apply(this, arguments);
+      };
+    });
+    // 1.24.0 전투 건너뛰기: the battle scene is not opened, the battle is won right here
+    hook(G.SceneManager, "SceneManager", "push", function (orig) {
+      return function (sceneClass) {
+        try { if (maybeSkipBattle(sceneClass)) return; } catch (e) { reportError(e); }
+        return orig.apply(this, arguments);
+      };
+    });
+
     var BM = G.BattleManager;
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
         var r = orig.apply(this, arguments);
+        battleSetupPending = true;
         beginBattle(this, troopId);
         return r;
       };
@@ -3376,7 +3596,9 @@
             var rw = null;
             try { rw = battleRewards(this); } catch (er) { reportError(er); }
             if (rw) fields.rewards = rw;
+            try { noteDefeated(deadEnemyIds()); } catch (ed) { reportError(ed); } // 1.24.0 잡아 본 적
           }
+          if (skippingBattle) fields.skipped = true; // 1.24.0 전투 건너뛰기
           if (battleLog && battleLog.dropped > 0) fields.dropped = battleLog.dropped;
           if (capturePictures) {
             finishHeld(); // a waiting message takes its own snapshot first (the dedupe follows log order)
@@ -3388,12 +3610,14 @@
           emit("battle", fields);
         } catch (e) { reportError(e); }
         battleLog = null;
+        battleSetupPending = false;
         return orig.apply(this, arguments);
       };
     });
     var SB = G.Scene_Battle && G.Scene_Battle.prototype;
     hook(SB, "Scene_Battle", "start", function (orig) {
       return function () {
+        battleSetupPending = false;
         var r = orig.apply(this, arguments);
         // 1.18.0: a battle whose BattleManager.setup this plugin never saw (set up before it loaded, or by a plugin
         // that replaced BattleManager.setup without calling it) still gets its start record
