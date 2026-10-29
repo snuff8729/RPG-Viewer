@@ -9,11 +9,14 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "diagnose": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/diagnose-game.ts"
+    "diagnose": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/diagnose-game.ts",
+    "mask": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/mask-game.ts",
+    "unmask": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias-hooks.mjs scripts/unmask-game.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
+    "acorn": "^8.19.0",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.5.0",

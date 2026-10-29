@@ -18,6 +18,12 @@ description: 새 RPG Maker 게임을 뷰어에 맞추기 — 승인된 게임 �
 - 저장소 규칙: 구현은 서브에이전트가, 메인 세션은 검토만. 검증이 끝나면 master에 바로 머지하고 사용자에게는 **쉬운 한국어로 쓰임새만** 보고한다. 테스트는 합성(가짜) 데이터로만 만든다.
   Repo rules: subagents implement, main reviews; merge verified work to master; report to the user in plain Korean; tests use synthetic fixtures only.
 - UI는 shadcn 컴포넌트만. `src/core`는 순수 함수이고 예외를 던지지 않는다.
+- **가린 사본 / Masked mirror**: 사용자가 `npm run mask`로 만든 가린 사본 경로를 주면(폴더에 `AI-README.md`가 있음) 원본 대신 **그 사본에서만** 작업한다.
+  먼저 `AI-README.md`와 `REPORT.md`를 읽는다. `T_` + 16진수 14자리는 가려진 게임 글이다 — **절대 풀거나 추측하지 않는다**. 같은 글은 어디서나 같은 토큰이므로
+  어댑터 manifest·`bridge.js`·`viewer.ts`에 그림 이름·플러그인 이름·매개변수 값으로 토큰을 그대로 써도 된다. 그림·소리 파일은 빈 파일이다.
+  토큰이 든 파일은 보고에 적어 두면 사용자가 머지 전에 `npm run unmask -- "<원본 게임 폴더>" <파일...>`로 원래 글로 바꾼다(에이전트는 원본을 열지 않는다).
+  If the user gives a masked mirror path (has `AI-README.md`), work only from it. `T_` + 14 hex = hidden text; never try to decode it.
+  Tokens may appear in adapter manifests / bridge files as-is; list those files so the user can run `npm run unmask` before merging.
 
 ## 1. 진단 / Diagnose
 
