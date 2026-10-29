@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import pluginSource from "../../plugin/RPGViewerBridge.js?raw";
 import { useGame } from "./GameProvider";
 import { useAddons } from "./AddonsProvider";
+import { isReadOnlyFolder } from "./serverFolder";
 import { isWritableFolder, type WritableGameFolder } from "@/core/fs/folder";
 import { buildHistory } from "@/core/live/history";
 import { createAccumulator, type LiveAccumulator } from "@/core/live/accumulator";
@@ -330,7 +331,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // DEV 시뮬레이터
   useEffect(() => {
-    if (!import.meta.env.DEV || !wfolder || dataRoot === null) return;
+    if (!import.meta.env.DEV || !wfolder || isReadOnlyFolder(wfolder) || dataRoot === null) return;
     let cleanup: (() => void) | null = null;
     let cancelled = false;
     void import("./devLive").then((m) => {
@@ -423,7 +424,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setAssistSettings(loadAssist(gameKey));
     setSentCommand(null);
   }
-  const assistSupported = connection === "connected" && wfolder !== null && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
+  // 휴대폰 보기(읽기 전용)는 control.json을 쓰지 않는다 — PC 뷰어가 쓰는 것과 겹치지 않게.
+  const assistSupported = connection === "connected" && wfolder !== null && !isReadOnlyFolder(wfolder)
+    && versionAtLeast(live?.pluginVersion, ASSIST_MIN_VERSION);
   const controlFile = dataRoot === null ? null : livePaths(dataRoot).controlFile;
   /** 켜진 애드온이 control.json에 싣는 값(예: 화면 그림 기록) + 치트 창이 열렸을 때 liveActors */
   const { controlFlags: addonFlags } = useAddons();
