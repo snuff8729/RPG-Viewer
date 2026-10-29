@@ -1,4 +1,5 @@
 import { locationKey } from "@/core/index/locations";
+import { extendsArray } from "@/core/live/lineage";
 import { formatText } from "@/core/text/escape";
 import { switchName, variableName } from "@/core/text/names";
 import type { GameData } from "@/core/types";
@@ -8,16 +9,54 @@ import type { LogRecord, RecordOf, StateChange } from "@/core/live/types";
 export function choiceTexts(path: LogRecord[], data: GameData, fallback?: (r: RecordOf<"choice">) => string[] | null): Map<number, string> {
   const last = new Map<string, string[]>();
   const out = new Map<number, string>();
-  for (const r of path) {
-    if (r.type === "choices" && r.src) {
-      last.set(`${locationKey(r.src)}#${r.cmd}`, Array.isArray(r.options) ? r.options : []);
-    } else if (r.type === "choice") {
-      const opts = (r.src ? last.get(`${locationKey(r.src)}#${r.cmd}`) : undefined) ?? fallback?.(r) ?? null;
-      const raw = r.picked >= 0 ? opts?.[r.picked] : undefined;
-      out.set(r.seq, raw !== undefined ? formatText(raw, data) : pickedFallbackText(r.picked));
-    }
-  }
+  for (const r of path) choiceTextStep(r, data, fallback, last, out);
   return out;
+}
+
+function choiceTextStep(
+  r: LogRecord, data: GameData, fallback: ((r: RecordOf<"choice">) => string[] | null) | undefined,
+  last: Map<string, string[]>, out: Map<number, string>,
+): void {
+  if (r.type === "choices" && r.src) {
+    last.set(`${locationKey(r.src)}#${r.cmd}`, Array.isArray(r.options) ? r.options : []);
+  } else if (r.type === "choice") {
+    const opts = (r.src ? last.get(`${locationKey(r.src)}#${r.cmd}`) : undefined) ?? fallback?.(r) ?? null;
+    const raw = r.picked >= 0 ? opts?.[r.picked] : undefined;
+    out.set(r.seq, raw !== undefined ? formatText(raw, data) : pickedFallbackText(r.picked));
+  }
+}
+
+/**
+ * choiceTexts(path, data)를 이어 만든다: path가 앞의 것에 덧붙기만 했으면(줄기 표시, core/live/lineage) 새 기록만 본다.
+ * 결과는 choiceTexts와 같다. 바뀌지 않았으면 같은 Map, 바뀌면 새 Map.
+ */
+export class ChoiceTextsCache {
+  private src: readonly LogRecord[] | null = null;
+  private data: GameData | null = null;
+  private last = new Map<string, string[]>();
+  private all = new Map<number, string>();
+  private out = new Map<number, string>();
+
+  get(path: LogRecord[], data: GameData): Map<number, string> {
+    if (this.data !== data || !extendsArray(this.src, path)) {
+      this.last = new Map();
+      this.all = new Map();
+      for (const r of path) choiceTextStep(r, data, undefined, this.last, this.all);
+      this.out = new Map(this.all);
+    } else {
+      const n = this.all.size;
+      let changed = false;
+      for (let i = this.src!.length; i < path.length; i++) {
+        const r = path[i];
+        if (r.type === "choice") changed = true;
+        choiceTextStep(r, data, undefined, this.last, this.all);
+      }
+      if (changed || this.all.size !== n) this.out = new Map(this.all);
+    }
+    this.src = path;
+    this.data = data;
+    return this.out;
+  }
 }
 
 /** 옵션 문구를 모를 때: 취소(-2)는 `취소`, 그 밖은 `{n}번째 선택지`. */

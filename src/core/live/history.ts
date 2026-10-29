@@ -1,5 +1,6 @@
 import { locationKey } from "../index/locations";
 import type { Location } from "../types";
+import { extendsArray } from "./lineage";
 import type { BranchInfo, HistoryItem, HistoryModel, LogRecord, RecordOf, StateChange } from "./types";
 
 export const NOISY_WINDOW_MS = 60_000;
@@ -22,6 +23,21 @@ function bySeq(records: LogRecord[]): LogRecord[] {
   const valid = allValid ? records : records.filter(isValid);
   if (ordered) return valid;
   return (allValid ? valid.slice() : valid).sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * bySeq(records)와 같다. prev가 앞의 bySeq 결과이고 records가 그것에 덧붙기만 했으면(줄기 표시, core/live/lineage)
+ * 새로 붙은 기록만 확인한다(줄기 표시가 있는 prev는 bySeq가 받은 배열을 그대로 돌려준 것 — 모두 유효하고 seq 순이다).
+ */
+function bySeqFrom(records: LogRecord[], prev: LogRecord[] | null): LogRecord[] {
+  if (!prev || !extendsArray(prev, records)) return bySeq(records);
+  let last = prev.length > 0 ? prev[prev.length - 1].seq : -Infinity;
+  for (let i = prev.length; i < records.length; i++) {
+    const r = records[i];
+    if (!isValid(r) || r.seq < last) return bySeq(records);
+    last = r.seq;
+  }
+  return records;
 }
 
 /** 이야기 기록(이어짐 판단에 쓰인다): 대화·스크롤·선택지·선택·그림. */
@@ -130,8 +146,23 @@ export function isContinuation(model: HistoryModel, branchId: number): boolean {
  * 이어진 갈래 id를 주면 그 대표 갈래의 결과와 같다.
  */
 export function branchPath(records: LogRecord[], model: HistoryModel, branchId: number): LogRecord[] {
-  const self = model.branches.get(representative(model, branchId));
-  if (!self || !Array.isArray(records)) return [];
+  const lim = branchLimits(model, branchId);
+  if (!lim || !Array.isArray(records)) return [];
+  const { run, limits } = lim;
+  return bySeq(records).filter(r => inBranchPath(r, run, limits));
+}
+
+/** branchPath에 들어가는 기록인가(유효한 기록, branchLimits의 run·limits) */
+export function inBranchPath(r: LogRecord, run: number, limits: ReadonlyMap<number, number>): boolean {
+  if (r.run !== run) return false;
+  const l = limits.get(r.branch);
+  return l !== undefined && r.seq <= l;
+}
+
+/** branchPath가 고르는 기록의 회차와 갈래별 seq 한계(대표 갈래·이어진 후손 = Infinity, 조상 = 자식의 fromSeq). 갈래가 없으면 null. */
+export function branchLimits(model: HistoryModel, branchId: number): { run: number; limits: Map<number, number> } | null {
+  const self = model?.branches?.get(representative(model, branchId));
+  if (!self) return null;
   const limits = new Map<number, number>();
   // 대표 갈래와 이어진 후손들
   const stack = [self.id];
@@ -149,7 +180,7 @@ export function branchPath(records: LogRecord[], model: HistoryModel, branchId: 
     limits.set(parent.id, isContinuation(model, cur.id) ? Infinity : cur.fromSeq);
     cur = parent;
   }
-  return bySeq(records).filter(r => r.run === self.run && limits.has(r.branch) && r.seq <= limits.get(r.branch)!);
+  return { run: self.run, limits };
 }
 
 /**
@@ -305,7 +336,7 @@ function cloneFoldState(s: FoldState): FoldState {
   };
 }
 
-function foldEnv(records: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean): FoldEnv {
+function foldEnv(records: LogRecord[], model: HistoryModel, opts: FoldOptions, nested: boolean, known?: Set<number>): FoldEnv {
   const noisy = opts?.noisy instanceof Set ? opts.noisy : noisyVariables(records);
   // 갈래 지점: `${parent}:${fromSeq}` → 그 지점에서 갈라진 자식 갈래들(이어진 갈래는 갈래 지점이 아니다)
   const forkChildren = new Map<string, number[]>();
@@ -318,7 +349,7 @@ function foldEnv(records: LogRecord[], model: HistoryModel, opts: FoldOptions, n
   }
   // 갈래 지점의 갈래들은 대표 갈래 id로 보인다
   const rep = (id: number) => (model ? representative(model, id) : id);
-  const pathBranches = new Set(records.map(r => rep(r.branch)));
+  const pathBranches = known ?? new Set(records.map(r => rep(r.branch)));
   return {
     model, opts, noisy, nested, forkChildren, rep, pathBranches,
     uncertain: (seq: number) => opts?.uncertainSeqs?.has(seq) ?? false,
@@ -483,6 +514,8 @@ export interface FoldCache {
   state: FoldState;
   modelKey: string;
   branchesKey: string;
+  /** records의 대표 갈래들(이어 접을 때 새 기록만 더한다) */
+  pathBranches?: Set<number>;
   noisy: Set<number>;
   uncertain: Set<number> | undefined;
   changed: Set<number> | undefined;
@@ -538,16 +571,23 @@ function samePrefix(prev: LogRecord[], next: LogRecord[], n: number): boolean {
  * opts.noisy가 없으면(경로에서 계산) 이어 쓰지 않는다.
  */
 export function foldTimelineFrom(path: LogRecord[], model: HistoryModel, opts: FoldOptions, prev: FoldCache | null): FoldResult {
-  const records = bySeq(Array.isArray(path) ? path : []);
-  const env = foldEnv(records, model, opts, false);
+  const records = bySeqFrom(Array.isArray(path) ? path : [], prev?.records ?? null);
   const keyM = modelKey(model);
+  // 경로가 앞의 것에 덧붙기만 했으면(줄기 표시, core/live/lineage) 앞부분 비교·경로 갈래 모으기를 새 기록만으로 한다
+  const grown = !!prev && extendsArray(prev.records, records);
+  let known: Set<number> | undefined;
+  if (grown && prev && prev.modelKey === keyM && prev.pathBranches) {
+    known = new Set(prev.pathBranches);
+    for (let i = prev.records.length; i < records.length; i++) known.add(model ? representative(model, records[i].branch) : records[i].branch);
+  }
+  const env = foldEnv(records, model, opts, false, known);
   const keyB = [...env.pathBranches].sort((a, b) => a - b).join(",");
   const limit = prev && prev.done > 0 ? prev.records[prev.done - 1].seq : -Infinity;
   const resumable = !!prev && opts?.noisy instanceof Set
     && prev.modelKey === keyM && prev.branchesKey === keyB && prev.hidden === (opts?.isHiddenImage ?? null)
     && sameSet(prev.noisy, env.noisy)
     && sameUpTo(prev.uncertain, opts?.uncertainSeqs, limit) && sameUpTo(prev.changed, opts?.changedSeqs, limit)
-    && samePrefix(prev.records, records, prev.done);
+    && (grown || samePrefix(prev.records, records, prev.done));
   let state: FoldState;
   let from = 0;
   if (resumable && prev) {
@@ -564,7 +604,7 @@ export function foldTimelineFrom(path: LogRecord[], model: HistoryModel, opts: F
   return {
     items: out.items, stable, resumed: resumable,
     cache: {
-      done, records, state, modelKey: keyM, branchesKey: keyB, noisy: env.noisy,
+      done, records, state, modelKey: keyM, branchesKey: keyB, noisy: env.noisy, pathBranches: env.pathBranches,
       uncertain: opts?.uncertainSeqs, changed: opts?.changedSeqs, hidden: opts?.isHiddenImage ?? null,
     },
   };

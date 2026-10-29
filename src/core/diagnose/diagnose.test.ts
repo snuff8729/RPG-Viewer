@@ -170,6 +170,16 @@ describe("diagnoseGame with a play log", () => {
   ];
   const report = diagnoseGame(g.data, g.plugins, g.files, log, { pluginSources: g.pluginSources, adapters: g.adapters });
 
+  it("counts the runs a 1.24.0+ plugin left out of a frequent plugin command (skipped)", () => {
+    const freq: LogRecord[] = [
+      rec({ type: "plugin", src: null, cmd: 0, code: 356, text: "CulPartLV 1102", name: "CulPartLV" }),
+      rec({ type: "plugin", src: null, cmd: 0, code: 356, text: "CulPartLV 1102", name: "CulPartLV", skipped: 40 }),
+      rec({ type: "plugin", src: null, cmd: 0, code: 356, text: "Rare 1", name: "Rare", skipped: "x" }),
+    ];
+    const r = diagnoseGame(g.data, g.plugins, g.files, freq, { pluginSources: g.pluginSources, adapters: g.adapters });
+    expect(find(r, "log-plugin-commands")?.evidence).toEqual(["CulPartLV ×42"]);
+  });
+
   it("checks log pictures, plugin commands, sprite roles and battle lines", () => {
     expect(find(report, "log-missing-pictures")?.evidence).toEqual(["ghost_pic ×1"]);
     expect(find(report, "log-plugin-commands")?.evidence).toEqual(["WeirdCmd ×6"]);

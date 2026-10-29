@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Gauge, WandSparkles } from "lucide-react";
 import type { PopoutModule } from "@/app/popout";
+import { LiveFreeze } from "@/app/LiveProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AssistTab } from "./AssistTab";
 import { CheatContent, onOpenCheatRequest } from "./cheat/CheatSheet";
@@ -25,6 +26,7 @@ export function ReaderFill() {
 /**
  * PC 플레이 화면 도구 칸: 탭 `치트 | 보조 | 읽기`(마지막 탭 기억). 치트·보조는 칸 안에 그대로(덮개 없이) 그린다.
  * 탭을 바꿔도 남아야 하는 것(치트 기록·보조 응답 글)은 여기서 가진다. 읽기는 늘 살려 두고 숨기기만 한다(읽은 위치 유지).
+ * 숨긴 동안은 기록·게임 상태를 멈춰 두어(LiveFreeze) 새 기록마다 긴 기록 전체로 읽기 항목을 다시 만들지 않는다.
  * 떼어 낸 탭은 "따로 창에서 보는 중"만 보인다(치트를 두 곳에서 동시에 켜지 않는다).
  * 다른 곳에서 치트를 열어 달라고 하면(openCheatSheet) 치트 탭으로 바꾼다(떼어 냈으면 그 창을 앞으로).
  */
@@ -36,6 +38,8 @@ export function ToolsColumn() {
   const cheatOut = useModulePoppedOut("cheat");
   const assistOut = useModulePoppedOut("assist");
   const readerOut = useModulePoppedOut("reader");
+  // 같은 요소를 계속 넘겨 이 칸이 다시 그려져도 읽기는 LiveFreeze가 정할 때만 다시 그린다
+  const reader = useMemo(() => <ReaderFill />, []);
 
   const cheatOutRef = useRef(cheatOut);
   useEffect(() => { cheatOutRef.current = cheatOut; });
@@ -62,7 +66,7 @@ export function ToolsColumn() {
         {assistOut ? <PoppedOutNotice module="assist" /> : <AssistTab session={assistSession} active={tab === "assist"} className="max-w-xl p-3" />}
       </TabsContent>
       <TabsContent value="read" forceMount className="min-h-0 data-[state=inactive]:hidden">
-        {readerOut ? <PoppedOutNotice module="reader" /> : <ReaderFill />}
+        {readerOut ? <PoppedOutNotice module="reader" /> : <LiveFreeze active={tab === "read"}>{reader}</LiveFreeze>}
       </TabsContent>
     </Tabs>
   );

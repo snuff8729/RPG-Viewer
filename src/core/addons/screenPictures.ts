@@ -138,32 +138,39 @@ export function withoutMenuScreens(path: LogRecord[], keepMenu: boolean, menu?: 
  */
 export function picturesBySeq(path: LogRecord[]): Map<number, ScreenPicture[]> {
   const out = new Map<number, ScreenPicture[]>();
-  let cur: ScreenPicture[] | null = null;
-  for (const r of Array.isArray(path) ? path : []) {
-    try {
-      if (!r || typeof r !== "object") continue;
-      const o = r as unknown as Record<string, unknown>;
-      if (r.type === "branchStart") { cur = null; continue; }
-      if (r.type === "choices") {
-        const p = parsePics(o.pics);
-        if (p) cur = p;
-        continue;
-      }
-      // 1.8.0 전투: 시작·끝은 pics/picsSame, 전투 로그 줄은 그림이 바뀌었을 때만 pics. 둘 다 없으면 묶음은 그대로(지도에 안 넣음)
-      if (r.type === "battle" || r.type === "battlelog" || r.type === "screen") {
-        const p = parsePics(o.pics);
-        if (p) cur = p;
-        if (cur && (p || o.picsSame === true)) out.set(r.seq, cur);
-        continue;
-      }
-      if (r.type !== "message") continue;
-      const p = parsePics(o.pics);
-      if (p) cur = p;
-      else if (o.picsSame !== true) cur = null;
-      if (cur) out.set(r.seq, cur);
-    } catch { /* 깨진 기록은 건너뛴다 */ }
-  }
+  const st = newPicturesState();
+  for (const r of Array.isArray(path) ? path : []) picturesStep(st, r, out);
   return out;
+}
+
+/** picturesBySeq를 기록 하나씩 이어 하는 상태(지금 묶음) */
+export interface PicturesState { cur: ScreenPicture[] | null }
+export const newPicturesState = (): PicturesState => ({ cur: null });
+
+/** picturesBySeq의 기록 하나. 예외를 던지지 않는다. */
+export function picturesStep(st: PicturesState, r: LogRecord, out: Map<number, ScreenPicture[]>): void {
+  try {
+    if (!r || typeof r !== "object") return;
+    const o = r as unknown as Record<string, unknown>;
+    if (r.type === "branchStart") { st.cur = null; return; }
+    if (r.type === "choices") {
+      const p = parsePics(o.pics);
+      if (p) st.cur = p;
+      return;
+    }
+    // 1.8.0 전투: 시작·끝은 pics/picsSame, 전투 로그 줄은 그림이 바뀌었을 때만 pics. 둘 다 없으면 묶음은 그대로(지도에 안 넣음)
+    if (r.type === "battle" || r.type === "battlelog" || r.type === "screen") {
+      const p = parsePics(o.pics);
+      if (p) st.cur = p;
+      if (st.cur && (p || o.picsSame === true)) out.set(r.seq, st.cur);
+      return;
+    }
+    if (r.type !== "message") return;
+    const p = parsePics(o.pics);
+    if (p) st.cur = p;
+    else if (o.picsSame !== true) st.cur = null;
+    if (st.cur) out.set(r.seq, st.cur);
+  } catch { /* 깨진 기록은 건너뛴다 */ }
 }
 
 /** 두 묶음이 같은 화면인가 */
@@ -464,10 +471,9 @@ export function snapshotCounts(records: LogRecord[]): Map<ScreenPicture[], numbe
  * 대사가 5개보다 적으면 판정하지 않는다.
  */
 export function hudKeys(counts: Map<ScreenPicture[], number>, screen: ScreenSize, sizeOf?: SizeOf | null): Set<string> {
-  const out = new Set<string>();
   try {
     let total = 0;
-    const seen = new Map<string, { n: number; p: ScreenPicture }>();
+    const seen: HudTally = new Map();
     for (const [pics, n] of counts) {
       total += n;
       for (const p of pics) {
@@ -476,6 +482,19 @@ export function hudKeys(counts: Map<ScreenPicture[], number>, screen: ScreenSize
         if (e) e.n += n; else seen.set(k, { n, p });
       }
     }
+    return hudKeysOfTally(seen, total, screen, sizeOf);
+  } catch {
+    return new Set();
+  }
+}
+
+/** 화면 장식 열쇠 → 그 열쇠의 그림이 보인 대사 수와 (갈래 순으로) 처음 본 그림 */
+export type HudTally = Map<string, { n: number; p: ScreenPicture }>;
+
+/** hudKeys를 미리 모은 수(tally, total = 대사 묶음 수 합)로 판정한다(core/addons/pictureScans가 이어 모은다). */
+export function hudKeysOfTally(seen: HudTally, total: number, screen: ScreenSize, sizeOf?: SizeOf | null): Set<string> {
+  const out = new Set<string>();
+  try {
     if (total < HUD_MIN_SNAPSHOTS) return out;
     for (const [k, { n, p }] of seen) {
       if (n / total < HUD_SHARE) continue;
@@ -629,20 +648,26 @@ export function sceneOf(pics: ScreenPicture[] | null | undefined, ctx: PictureCo
 /** 대사별 화면 그림 묶음 → 대사별 보이는 화면(같은 묶음은 한 번만 계산한다) */
 export function scenesBySeq(pictures: Map<number, ScreenPicture[]>, ctx: PictureContext): Map<number, ScreenScene> {
   const out = new Map<number, ScreenScene>();
-  const cache = new Map<ScreenPicture[], { known: ScreenSize | null; scene: ScreenScene }[]>();
-  for (const [seq, pics] of pictures) {
-    // 1.18.2: 그 대사 때 게임의 실제 화면 크기로 나눈다(같은 묶음·같은 크기는 한 번만)
-    const known = knownScreenAt(ctx, seq);
-    const list = cache.get(pics) ?? [];
-    let hit = list.find(x => sameSize(x.known, known));
-    if (!hit) {
-      hit = { known, scene: withScreen(sceneOf(pics, known ? { ...ctx, screen: known } : ctx), known) };
-      list.push(hit);
-      cache.set(pics, list);
-    }
-    out.set(seq, hit.scene);
-  }
+  const cache: SceneCache = new Map();
+  for (const [seq, pics] of pictures) out.set(seq, sceneOfCached(pics, ctx, seq, cache));
   return out;
+}
+
+/** 그림 묶음(같은 배열) → 화면 크기별 보이는 화면 */
+export type SceneCache = Map<ScreenPicture[], { known: unknown; scene: ScreenScene }[]>;
+
+/** seq 대사의 묶음 pics → 보이는 화면. 같은 묶음·같은 화면 크기는 cache에서(scenesBySeq 한 칸). cache는 같은 ctx에만 쓴다. */
+export function sceneOfCached(pics: ScreenPicture[], ctx: PictureContext, seq: number, cache: SceneCache): ScreenScene {
+  // 1.18.2: 그 대사 때 게임의 실제 화면 크기로 나눈다(같은 묶음·같은 크기는 한 번만)
+  const known = knownScreenAt(ctx, seq);
+  const list = cache.get(pics) ?? [];
+  let hit = list.find(x => sameSize(x.known as ScreenSize | null, known));
+  if (!hit) {
+    hit = { known, scene: withScreen(sceneOf(pics, known ? { ...ctx, screen: known } : ctx), known) };
+    list.push(hit);
+    cache.set(pics, list);
+  }
+  return hit.scene;
 }
 
 // ---------------------------------------------------------------- 실제 화면 크기(1.18.2)
@@ -664,15 +689,21 @@ export function screenSizeMarks(records: LogRecord[]): ScreenSizeMark[] {
   const out: ScreenSizeMark[] = [];
   try {
     for (const r of Array.isArray(records) ? records : []) {
-      if (!r || typeof r !== "object" || typeof r.seq !== "number") continue;
-      const o = r as unknown as Record<string, unknown>;
-      const w = realDim(o.sw), h = realDim(o.sh);
-      if (w === null || h === null) continue;
-      out.push({ seq: r.seq, size: { width: w, height: h } });
+      const m = screenSizeMarkOf(r);
+      if (m) out.push(m);
     }
     out.sort((a, b) => a.seq - b.seq);
   } catch { /* 모은 데까지 */ }
   return out;
+}
+
+/** 기록 하나의 화면 크기 표시(screenSizeMarks 한 칸). 없으면 null. */
+export function screenSizeMarkOf(r: LogRecord): ScreenSizeMark | null {
+  if (!r || typeof r !== "object" || typeof r.seq !== "number") return null;
+  const o = r as unknown as Record<string, unknown>;
+  const w = realDim(o.sw), h = realDim(o.sh);
+  if (w === null || h === null) return null;
+  return { seq: r.seq, size: { width: w, height: h } };
 }
 
 /** live.json의 screen(1.18.2+ { w, h }) → 화면 크기. 없거나 이상하면 null. */

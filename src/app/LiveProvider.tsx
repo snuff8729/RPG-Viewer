@@ -6,6 +6,7 @@ import { isRemoteFolder } from "./serverFolder";
 import { isWritableFolder, type WritableGameFolder } from "@/core/fs/folder";
 import { buildHistory } from "@/core/live/history";
 import { createAccumulator, type LiveAccumulator } from "@/core/live/accumulator";
+import { newLineage, tagLineage } from "@/core/live/lineage";
 import { conditionsKey } from "@/core/live/interactable";
 import { computeMissing } from "@/core/live/missing";
 import { withActorNames } from "@/core/live/actorNames";
@@ -115,6 +116,8 @@ interface TailEntry {
   caughtUp: boolean;
   /** LogTail reset 횟수 */
   epoch: number;
+  /** 내보내는 기록 사본의 줄기 표시(core/live/lineage): 같은 줄기의 사본은 앞의 것에 덧붙기만 했다. 기록을 비우면 새 줄기. */
+  lineage: number;
   /** 읽은 위치를 지운 epoch(파생 순간에 지운다) */
   clearedEpoch: number;
   /** rpg-viewer/seen-archive.json(갈래 영구 삭제로 지운 기록의 진행도). 기록보다 먼저 읽는다. */
@@ -297,7 +300,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const tail = new LogTail(wfolder, paths.logFile);
     const acc = createAccumulator(data);
     const gen = ++genCounter.current;
-    const entry: TailEntry = { acc, gen, gameKey: gameKeyOf(data), caughtUp: false, epoch: 0, clearedEpoch: 0, archive: null, merged: null };
+    const entry: TailEntry = { acc, gen, gameKey: gameKeyOf(data), caughtUp: false, epoch: 0, lineage: newLineage(), clearedEpoch: 0, archive: null, merged: null };
     let archiveRead = false;
     accRef.current = entry;
     let bad = 0;
@@ -324,7 +327,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           if (res.changed) {
             // 새 기록만 누적기에 붙인다. reset이면 비우고 다시 쌓는다.
             // reset이면 epoch를 올린다 — 읽은 위치는 다음 파생 순간에 지운다(아래 파생 스로틀).
-            if (res.reset) { acc.reset(); bad = 0; entry.epoch++; }
+            if (res.reset) { acc.reset(); bad = 0; entry.epoch++; entry.lineage = newLineage(); }
             acc.append(res.records);
             bad += res.badLines;
             if (res.eof) entry.caughtUp = true;
@@ -382,7 +385,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // 누적기 → 파생값 스냅숏: 스로틀(최대 DERIVE_MS에 한 번, 마지막 변경 뒤 반드시 한 번).
   // 변경마다 타이머를 다시 걸지만 대기 시간은 "마지막 파생 + DERIVE_MS"까지라 미뤄지지 않는다.
-  // records는 누적기 내부 배열(이후 append로 바뀜)이라 파생 순간에 slice() 사본을 내보낸다(초당 최대 한 번 O(n)).
+  // records는 누적기 내부 배열(이후 append로 바뀜)이라 파생 순간에 slice() 사본을 내보낸다(초당 최대 한 번 O(n), 포인터 복사라 빠르다).
+  // 사본에는 줄기 표시를 붙여, 기록 전체를 훑는 화면(읽기 등)이 새로 붙은 기록만 이어 계산하게 한다.
   // model/coverage/noisy는 누적기가 version마다 만든 불변 사본이다.
   // 스냅숏은 (누적기 gen, version)으로 구분한다.
   const lastDeriveAt = useRef(0);
@@ -402,7 +406,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       const v = acc.version;
       setDerived((prev) => (prev && prev.gen === gen && prev.version === v && prev.caughtUp === caughtUp && prev.epoch === epoch
         ? prev
-        : { gen, version: v, records: acc.records.slice(), model: acc.model(), coverage: mergedCoverage(cur), noisy: acc.noisy(), caughtUp, epoch }));
+        : { gen, version: v, records: tagLineage(acc.records.slice(), cur.lineage), model: acc.model(), coverage: mergedCoverage(cur), noisy: acc.noisy(), caughtUp, epoch }));
     }, wait);
     return () => clearTimeout(id);
   }, [tailGen, tailVersion, tailCaughtUp]);

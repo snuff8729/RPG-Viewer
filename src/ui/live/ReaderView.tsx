@@ -1,12 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
-import { picturesBySeq, scenesBySeq, withoutMenuScreens } from "@/core/addons/screenPictures";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
-import { branchPath, representative } from "@/core/live/history";
+import { representative } from "@/core/live/history";
+import { BranchPathCache, MenuFilterCache, PathFactsCache, ScenesCache } from "@/core/live/readerPath";
 import { lastSeqOf, ReaderItemsBuilder } from "@/core/live/reader";
-import { hasLayeredPictures, pictureVarIds } from "@/core/live/pictureStack";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { ChevronsDown, Info, Settings2, X } from "lucide-react";
 import { openGameSettings } from "../addons/gameSettingsOpen";
@@ -24,7 +23,7 @@ import { BranchPicker } from "./BranchPicker";
 import { ChoiceFlowView } from "./ChoiceFlowView";
 import { ChoiceNowCard } from "./ChoiceNowCard";
 import { NowNextCard } from "./NowNextCard";
-import { choiceTexts } from "./historyText";
+import { ChoiceTextsCache } from "./historyText";
 import { gameKeyOf, initialReadSeq, saveReadSeq } from "./readPosition";
 import {
   extendDown, extendUp, grownRange, initialView, rangeShowing, readStats, sameRange, tailRange, trimToTail,
@@ -43,6 +42,7 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 
 const PAGE = 300;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
+const EMPTY_IDS: number[] = [];
 
 /** 입력 중이거나 목록·대화상자 안에 포커스가 있으면 Space/↓를 가로채지 않는다. */
 function typingTarget(t: EventTarget | null): boolean {
@@ -120,10 +120,15 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // 메뉴 화면 그림 기록(예전 기록)은 어댑터의 `메뉴 화면 그림도 기록`을 켰을 때만
   const { menuPicturesShown } = useAddons();
   const menuEvents = useMemo(() => menuCommonEventsOf(data?.menuCommonEvents, data?.commonEvents, data?.afterMenuCommonEvent), [data]);
+  // 기록 전체를 훑는 것(갈래 경로·메뉴 그림 빼기·대사별 그림·선택 문구 등)은 새로 붙은 기록만으로 이어 만든다(core/live/readerPath)
+  const [caches] = useState(() => ({
+    branchPath: new BranchPathCache(), menu: new MenuFilterCache(), facts: new PathFactsCache(), scenes: new ScenesCache(), choices: new ChoiceTextsCache(),
+  }));
   const path = useMemo(
-    () => (branch === null ? [] : withoutMenuScreens(branchPath(records, model, branch), menuPicturesShown, menuEvents)),
-    [records, model, branch, menuPicturesShown, menuEvents],
+    () => (branch === null ? [] : caches.menu.get(caches.branchPath.get(records, model, branch), menuPicturesShown, menuEvents)),
+    [caches, records, model, branch, menuPicturesShown, menuEvents],
   );
+  const facts = useMemo(() => (data ? caches.facts.get(path, data) : null), [caches, path, data]);
   const { overrides } = usePluginOverrides();
   const [showAllPlugins] = usePluginShowAll();
   const [battlesShown] = useBattlesShown();
@@ -133,14 +138,18 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const picturesOn = useAddons().isOn("screenPictures");
   const [screenShown, setScreenShown] = useScreenPicturesShown();
   // 그림 표시 명령 기록이 있으면(그림 따라 그리기가 꺼졌어도) 그림 명령으로 화면을 다시 쌓아 보인다
-  const hasPictureRecords = useMemo(() => path.some(r => r.type === "picture" && r.op === undefined && !!r.name), [path]);
+  const hasPictureRecords = facts?.hasPictureRecords ?? false;
   const pictureCtx = usePictureContext(records, picturesOn, hasPictureRecords);
   // 대사마다 보이는 이벤트 그림·스탠딩(화면 장식·숨김·가려진 그림 제외)
-  const pictures = useMemo(() => (picturesOn && pictureCtx ? scenesBySeq(picturesBySeq(path), pictureCtx) : null), [picturesOn, pictureCtx, path]);
+  const factsPictures = facts?.pictures ?? null;
+  const pictures = useMemo(
+    () => (picturesOn && pictureCtx && factsPictures ? caches.scenes.get(factsPictures, pictureCtx) : null),
+    [caches, picturesOn, pictureCtx, factsPictures],
+  );
   // 변수로 정한 그림 위치: 지금 게임의 같은 갈래 기록이면 지금 변수 값으로.
   // 그 그림 명령이 읽는 변수가 바뀔 때만 다시 만든다(다른 변수는 매초 바뀌어도 항목 전체를 다시 만들지 않는다).
   const liveBranch = liveNow?.branch ?? null;
-  const varIds = useMemo(() => (data ? pictureVarIds(path, data) : []), [data, path]);
+  const varIds = facts?.varIds ?? EMPTY_IDS;
   const varsKey = liveNow && varIds.length > 0
     ? JSON.stringify(Object.fromEntries(varIds.map((id) => [String(id), liveNow.variables?.[String(id)]])))
     : "";
@@ -153,15 +162,15 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const [builder] = useState(() => new ReaderItemsBuilder());
   const items = useMemo(() => {
     if (!data || branch === null) return [];
-    const all = builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, choiceTexts(path, data), overrides, pictures, {
+    const all = builder.build(path, model, { uncertainSeqs, changedSeqs, noisy, isHiddenImage: pictureCtx?.hidden ?? null }, data, caches.choices.get(path, data), overrides, pictures, {
       battles: battlesShown, notices: noticesShown, hiddenNoticeKinds, compose: { ctx: pictureCtx, vars },
     });
     // 기술 플러그인 명령은 `플러그인 명령 모두 보기`를 켰을 때만, 기록 사이 화면 그림(1.10.0)은 `그림 보기`를 켰을 때만
     return all.filter(it => (showAllPlugins || it.kind !== "plugin" || !it.tech) && (screenShown || (it.kind !== "screen" && it.kind !== "cutin")));
-  }, [builder, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
+  }, [builder, caches, data, branch, path, model, noisy, uncertainSeqs, changedSeqs, overrides, showAllPlugins, pictures, battlesShown, noticesShown, hiddenNoticeKinds, screenShown, pictureCtx, vars]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
-  const layered = useMemo(() => !picturesOn && hasLayeredPictures(path), [picturesOn, path]);
+  const layered = !picturesOn && (facts?.layered ?? false);
   const closeHint = () => { setHintClosed(true); dismissLayeredHint(gameKey); };
   const total = items.length;
 

@@ -33,7 +33,8 @@ export type LogRecord = RecordBase & (
   }
   /** 이벤트가 실행한 플러그인 명령(MV 356 / MZ 357, 플러그인 1.3.0+). text: 356은 명령 글, 357은 플러그인·명령 이름과 문자열 인자 */
   /** 1.5.0+: name = 명령 이름(MV 첫 토큰·MZ 명령), args = MV 나머지 토큰 / MZ 인자 객체, plugin = MZ 플러그인 이름 */
-  | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string; plugin?: string; name?: string; args?: string[] | Record<string, unknown> }
+  /** 1.24.0+ skipped: 같은 자리 명령이 잦아(1분에 3번 이상) 앞 기록 뒤로 남기지 않은 실행 수 */
+  | { type: "plugin"; src: Location | null; cmd: number; code: number; text: string; plugin?: string; name?: string; args?: string[] | Record<string, unknown>; skipped?: number }
   | { type: "transfer"; mapId: number; x: number; y: number }
   /**
    * 전투 시작·끝. 1.8.0+: 시작에 troopName·enemies·canEscape·canLose, 끝에 result "abort"(전투 중단)·rewards(승리 보상)·

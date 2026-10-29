@@ -1,5 +1,6 @@
 /** 휴대폰 너비 플레이 화면: 아래 탭(보조·치트·맵·읽기) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
 import type { LogRecord } from "@/core/live/types";
+import { extendsArray } from "@/core/live/lineage";
 
 export type PlayTab = "assist" | "cheat" | "map" | "read";
 
@@ -54,6 +55,25 @@ export function countLines(records: readonly Pick<LogRecord, "type">[]): number 
   let n = 0;
   for (const r of records) if (r.type === "message" || r.type === "scroll") n++;
   return n;
+}
+
+/** countLines를 이어 센다: 기록이 앞의 것에 덧붙기만 했으면(줄기 표시, core/live/lineage) 새 기록만 센다. */
+export class LineCounter {
+  private src: readonly Pick<LogRecord, "type">[] | null = null;
+  private n = 0;
+
+  count(records: readonly Pick<LogRecord, "type">[]): number {
+    if (!extendsArray(this.src, records)) {
+      this.n = countLines(records);
+    } else {
+      for (let i = this.src!.length; i < records.length; i++) {
+        const t = records[i].type;
+        if (t === "message" || t === "scroll") this.n++;
+      }
+    }
+    this.src = records;
+    return this.n;
+  }
 }
 
 /** 다른 탭을 보는 동안 늘어난 대사 수. 기록이 처음부터 다시 읽혀 줄었으면 0. */
