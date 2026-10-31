@@ -1,6 +1,6 @@
 import type { GameFolder } from "@/core/fs/folder";
 import type { GameData } from "@/core/types";
-import { decodeImage } from "./decrypt";
+import { decodeAudio, decodeImage } from "./decrypt";
 import { classifiedName } from "./pictureFolders";
 
 export type AssetKind = "faces" | "pictures" | "tilesets" | "characters" | "system";
@@ -38,6 +38,7 @@ export interface AssetStoreOptions {
 export class AssetStore {
   private cache = new Map<string, Entry>();
   private images = new Map<string, Promise<ImageBitmap | null>>();
+  private audioClips = new Map<string, Promise<Blob | null>>();
 
   private folder: GameFolder;
   private data: GameData;
@@ -77,6 +78,40 @@ export class AssetStore {
   /** 그림 Blob. 없거나 읽기 실패면 null. */
   load(kind: AssetKind, name: string): Promise<Blob | null> {
     return this.fetch(kind, name).then((r) => (r.status === "ok" ? r.blob : null));
+  }
+
+  /** 로컬·LAN·원격 모두 GameFolder의 바이너리 읽기를 쓴다. 오디오 캐시는 최근 24개만. */
+  audio(folder: string, name: string): Promise<Blob | null> {
+    // 기록에 들어 있는 경로도 게임 루트 밖으로 나가지 않게 한다(브라우저 폴더 포함).
+    const safe = (s: string) => s.length > 0 && !/[\\\0:]/.test(s) && s.split("/").every(p => p !== "" && p !== "." && p !== "..");
+    if (!safe(folder) || !safe(name)) return Promise.resolve(null);
+    const key = `${folder}/${name}`;
+    const cached = this.audioClips.get(key);
+    if (cached) {
+      this.audioClips.delete(key);
+      this.audioClips.set(key, cached);
+      return cached;
+    }
+    let failed = false;
+    const promise = (async () => {
+      const root = this.data.dataRoot.replace(/(^|\/)data\/?$/i, "$1");
+      for (const ext of [".ogg", ".m4a", ".rpgmvo", ".ogg_", ".m4a_", ".rpgmvm"]) {
+        try {
+          const path = `${root}audio/${folder}/${name}${ext}`;
+          const buf = this.folder.readBinaryStrict ? await this.folder.readBinaryStrict(path) : await this.folder.readBinary(path);
+          if (!buf) continue;
+          const audio = decodeAudio(buf, this.data.system?.encryptionKey);
+          if (audio) return new Blob([audio.bytes], { type: audio.type });
+        } catch { failed = true; }
+      }
+      return null;
+    })().then(blob => {
+      if (!blob && failed && this.audioClips.get(key) === promise) this.audioClips.delete(key);
+      return blob;
+    });
+    this.audioClips.set(key, promise);
+    if (this.audioClips.size > 24) this.audioClips.delete(this.audioClips.keys().next().value!);
+    return promise;
   }
 
   /** 캔버스에 그릴 이미지(이름별 캐시). 없음·디코드 실패나 createImageBitmap이 없는 환경이면 null. 읽기 실패는 캐시하지 않는다. */

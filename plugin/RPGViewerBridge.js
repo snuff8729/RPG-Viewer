@@ -12,7 +12,7 @@
  * 플러그인 명령이나 파라미터는 없습니다.
  * 게임 창 단축키(RPG Viewer에서 바꿀 수 있음, Ctrl·Shift·Alt 조합 가능):
  * 진행 — F6 배속(×1→×2→×4→×8), Ctrl+F6 자동 배속 빠르기(×2→×4→×8),
- *   Shift+F6 이동 속도(×1→×1.5→×2→×3, 맵의 플레이어·동료·운전 중 탈것, 1.25.0).
+ *   Shift+F6 이동 속도(×1→×1.5→×2→×3, 맵의 플레이어·동료·운전 중 탈것, 1.27.0).
  *   F7 본 대사 자동 넘기기 켜고 끄기, Ctrl+F7 본 이벤트 자동 배속 켜고 끄기.
  * 전투 중 — F10 이기기, F11 지기, Ctrl+F10 도망,
  *   Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1%(살아 있는 적 전원, 1%는 쓰러뜨리지 않음).
@@ -51,8 +51,12 @@
  * 전투 건너뛰기(전투 화면 없이 바로 이기고 경험치·골드·떨어뜨린 아이템을 받음. 대화·선택지·
  * 전투 중단·게임 오버·적 상태 바꾸기·적 변신이 있는 전투는 그대로 싸움), 잡아 본 적만(모든 적을
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
+ * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
+ * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
+ * 1.26.0: 대사 직전·표시 중의 AudioManager.playSe·playVoice 소리도 대사와 연결해 기록합니다.
+ * 병렬 이벤트 소리와 playStaticSe(커서·결정 등 UI 효과음)는 연결하지 않습니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -65,7 +69,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.25.0",
+    VERSION: "1.27.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -112,7 +116,9 @@
   // (closed at flush or before the next non-state record): [{ t, src, cmd, changes, at }].
   var pendingGroups = [];
   var groupByKey = {};
-  var currentCtx = null;      // { src, cmd } of the command being executed
+  var currentCtx = null;      // { src, cmd, interp } of the command being executed
+  var pendingVoices = [], voiceMessage = null, voiceCall = null;
+  var voiceFolders = {}, voiceFolderCount = 0;
   var childParentSrc = null;  // source of the interpreter running setupChild (while it runs)
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
@@ -457,6 +463,7 @@
     if (hold) pushHeld(rec, typeof hold === "number" ? hold : PICS_HOLD_MS);
     else pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
+    return rec;
   }
 
   function pushHeld(rec, ms) {
@@ -482,7 +489,7 @@
   }
 
   // Dialogue-flow records reach disk at the end of the current frame instead of the next 250ms tick.
-  var IMMEDIATE = { message: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
+  var IMMEDIATE = { message: true, voice: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
   var flushScheduled = false;
   var MIN_FLUSH_GAP_MS = 50, lastFlushT = 0;
   function runScheduled() {
@@ -616,6 +623,7 @@
   }
 
   function startBranch(reason, newRun, parentBranch, fromSeq) {
+    clearVoices();
     releasePending(true); // belongs to the branch that is ending
     closeState();
     finishHeld();
@@ -633,6 +641,7 @@
 
   // Continue the stamped run/branch (no branchStart) when it has no story records after the stamp.
   function resumeBranch(r, b) {
+    clearVoices();
     releasePending(true);
     closeState();
     finishHeld();
@@ -1515,43 +1524,104 @@
     return null;
   }
 
+  // 1.25.0: only live during command301, including its synchronous Scene_Battle push.
+  var battleEventContext = null;
+
+  // Ranges keep the original list indices: seen keys must never use a sliced branch's indices.
+  function battleBranches(list, index) {
+    var out = [null, null, null], c = list && list[index];
+    if (!c || c.code !== 301) return out;
+    var indent = c.indent, active = null, i;
+    for (i = index + 1; i < list.length; i++) {
+      c = list[i];
+      if (!c) continue;
+      if (c.indent > indent) continue;
+      if (active) { active.to = i; active = null; }
+      if (c.indent !== indent || c.code < 601 || c.code > 603) break; // includes 604 (engine no-op)
+      active = { from: i + 1, to: list.length };
+      out[c.code - 601] = active;
+    }
+    return out;
+  }
+
+  function branchHasUnseen(list, from, to, src, depth, seenCe) {
+    if (!list || typeof list.length !== "number") return false;
+    var key = locKey(src);
+    for (var i = from; i < to; i++) {
+      var c = list[i];
+      if (!c) continue;
+      // choices (102) are not in seenMessages (viewer sends message/scroll keys only): counting them would never be "seen"
+      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) return true;
+      if (c.code === 117 && depth < STORY_SCAN_DEPTH && c.parameters) {
+        var id = c.parameters[0];
+        var ce = G.$dataCommonEvents && isCount(id) ? G.$dataCommonEvents[id] : null;
+        if (ce && ce.list && (seenCe[id] == null || seenCe[id] > depth + 1)) {
+          // Skip cycles / repeated calls unless a shallower call exposes more of the depth budget.
+          seenCe[id] = depth + 1;
+          var unseen = branchHasUnseen(ce.list, 0, ce.list.length, { source: "common", commonEventId: id }, depth + 1, seenCe);
+          if (unseen) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function battleSkipOutcome() {
+    var out = { result: 0, unseen: [false, false, false] }, ctx = battleEventContext, BM = G.BattleManager;
+    if (!ctx || ctx.interp._list !== ctx.list || Object.keys(seenMessages).length === 0) return out;
+    var branches = battleBranches(ctx.list, ctx.index);
+    for (var i = 0; i < branches.length; i++) {
+      if (!branches[i]) continue;
+      var seenCe = {};
+      if (ctx.src && ctx.src.source === "common") seenCe[ctx.src.commonEventId] = 0;
+      out.unseen[i] = branchHasUnseen(ctx.list, branches[i].from, branches[i].to, ctx.src, 0, seenCe);
+    }
+    if (out.unseen[2] && BM._canLose) out.result = 2;
+    else if (out.unseen[1] && BM._canEscape) out.result = 1;
+    return out;
+  }
+
   function returnFalse() { return false; }
 
-  // The battle just set up ends here as a victory instead of opening Scene_Battle: every appeared enemy goes down,
+  // The battle just set up ends here instead of opening Scene_Battle. For a win every appeared enemy goes down,
   // the engine's own makeRewards / gainRewards give exp (battle / reserve member rates as usual), gold and rolled
   // drops, and endBattle(0) runs the event's win branch, the victory count and our end record. No battle BGM, ME
-  // or level-up message (the toast names who levelled up). Once started it always ends as a win: nothing waits.
-  function skipBattle() {
+  // or level-up message (the toast names who levelled up). Escape / lose only end the battle: no party or rewards
+  // changes. The callback receives the chosen result even if another plugin's endBattle forgets to call it.
+  function skipBattle(result, unseen) {
     var BM = G.BattleManager, tr = G.$gameTroop, party = G.$gameParty;
     var cb = BM._eventCallback, cbCalled = false, wrapped = null;
     if (typeof cb === "function") {
       wrapped = function () { cbCalled = true; return cb.apply(this, arguments); };
       BM._eventCallback = wrapped;
     }
-    var members = typeof party.allMembers === "function" ? party.allMembers() : (typeof party.members === "function" ? party.members() : []);
+    var members = result !== 0 ? [] : (typeof party.allMembers === "function" ? party.allMembers() : (typeof party.members === "function" ? party.members() : []));
     var levels = [], quiet = [], i;
     skippingBattle = true;
     try {
-      var enemies = tr.aliveMembers();
-      for (i = 0; i < enemies.length; i++) {
-        var e = enemies[i];
-        e.addNewState(e.deathStateId());
-        if (typeof e.refresh === "function") e.refresh();
+      if (result === 0) {
+        var enemies = tr.aliveMembers();
+        for (i = 0; i < enemies.length; i++) {
+          var e = enemies[i];
+          e.addNewState(e.deathStateId());
+          if (typeof e.refresh === "function") e.refresh();
+        }
+        for (i = 0; members && i < members.length; i++) {
+          var m = members[i];
+          levels.push(m ? m.level : 0);
+          if (m && !Object.prototype.hasOwnProperty.call(m, "shouldDisplayLevelUp")) { m.shouldDisplayLevelUp = returnFalse; quiet.push(m); }
+        }
+        BM.makeRewards();
+        BM.gainRewards();
       }
-      for (i = 0; members && i < members.length; i++) {
-        var m = members[i];
-        levels.push(m ? m.level : 0);
-        if (m && !Object.prototype.hasOwnProperty.call(m, "shouldDisplayLevelUp")) { m.shouldDisplayLevelUp = returnFalse; quiet.push(m); }
-      }
-      BM.makeRewards();
-      BM.gainRewards();
     } catch (e1) {
       reportError(e1);
     } finally {
       for (i = 0; i < quiet.length; i++) delete quiet[i].shouldDisplayLevelUp;
     }
     try {
-      BM.endBattle(0);
+      if (result === 1) BM._escaped = true; // end record and engine escape count (1 without this means abort)
+      BM.endBattle(result);
     } catch (e2) {
       reportError(e2);
     } finally {
@@ -1560,8 +1630,16 @@
       BM._phase = null; // like BattleManager.updateBattleEnd after the scene pops
       if (wrapped !== null) {
         if (BM._eventCallback === wrapped) BM._eventCallback = cb;
-        if (!cbCalled) { try { cb(0); } catch (e3) { reportError(e3); } }
+        if (!cbCalled) { try { cb(result); } catch (e3) { reportError(e3); } }
       }
+    }
+    var hint = "";
+    if (unseen && unseen[0] && result !== 0) hint += " · 승리 장면은 아직 안 봄";
+    if (unseen && unseen[2] && result !== 2) hint += " · 패배 장면은 아직 안 봄";
+    if (unseen && unseen[1] && result !== 1) hint += " · 도망 장면은 아직 안 봄";
+    if (result !== 0) {
+      showMessage((result === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면") + hint);
+      return;
     }
     var parts = [], rw = null;
     try { rw = battleRewards(BM); } catch (e4) { reportError(e4); }
@@ -1577,7 +1655,7 @@
       } catch (e5) { reportError(e5); }
     }
     if (ups.length) parts.push("레벨 업 " + ups.join(", "));
-    showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : ""));
+    showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : "") + hint);
   }
 
   // SceneManager.push(Scene_Battle) right after BattleManager.setup (random encounter, Battle Processing, symbol
@@ -1590,7 +1668,8 @@
     if (why === "story") showMessage("대화가 있는 전투라 그대로 싸워요");
     else if (why === "unknown") showMessage("처음 보는 적이 있어 그대로 싸워요");
     if (why !== null) return false;
-    skipBattle();
+    var outcome = battleSkipOutcome();
+    skipBattle(outcome.result, outcome.unseen);
     return true;
   }
 
@@ -1986,6 +2065,7 @@
   }
 
   function tick() {
+    try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
     try { pollControl(); } catch (ec) { reportError(ec); }
     try { if (htmlWatch) htmlWatch.check(); } catch (eh) { reportError(eh); }
     try { flush(); } catch (e) { reportError(e); }
@@ -3277,6 +3357,83 @@
     return false;
   }
 
+  // 1.26.0: only the foreground interpreter chain can lend a sound to dialogue.
+  // Keep the list identity too: the map interpreter is reused for the next event.
+  function voiceRoot(interp) {
+    var root = inBattleNow() && G.$gameTroop ? G.$gameTroop._interpreter : G.$gameMap && G.$gameMap._interpreter;
+    return root && inChain(root, interp) ? root : null;
+  }
+  function clearVoices() { pendingVoices = []; voiceMessage = null; }
+  function takeVoices(interp) {
+    var root = voiceRoot(interp), sounds = [], t = now();
+    for (var i = 0; i < pendingVoices.length; i++) {
+      var e = pendingVoices[i];
+      if (root && e.root === root && e.list === root._list && e.epoch === root._rpgvVoiceRun && t - e.t <= 2000) sounds.push(e.sound);
+    }
+    pendingVoices = [];
+    return sounds;
+  }
+  function noteVoice(sound) {
+    if (run === null || !sound || typeof sound.name !== "string" || !sound.name) return;
+    var interp = currentCtx && currentCtx.interp;
+    var root = interp ? voiceRoot(interp) : null;
+    if (interp && !root) return;
+    var busy = voiceMessage && (voiceMessage.opening || (messageBusy() && messageHasText()));
+    if (busy) {
+      if (interp && (root !== voiceMessage.root || root._list !== voiceMessage.list || root._rpgvVoiceRun !== voiceMessage.epoch)) return;
+      emit("voice", { msg: voiceMessage.seq, folder: sound.folder, name: sound.name,
+        volume: sound.volume, pitch: sound.pitch, pan: sound.pan });
+    } else {
+      if (!interp || messageBusy()) return;
+      voiceMessage = null;
+      var t = now();
+      pendingVoices = pendingVoices.filter(function (e) { return t - e.t <= 2000; });
+      if (pendingVoices.length >= 32) pendingVoices.shift();
+      pendingVoices.push({ root: root, list: root._list, epoch: root._rpgvVoiceRun, t: t, sound: sound });
+    }
+  }
+  function ensureVoiceHooks() {
+    var am = G.AudioManager;
+    if (!am) return;
+    // Voice plugins choose their folder in createBuffer; observe it without changing playback.
+    if (typeof am.createBuffer === "function" && !am.createBuffer._rpgvVoiceHook) {
+      hook(am, "AudioManager", "createBuffer", function (orig) {
+        var wrapped = function (folder) {
+          if (voiceCall && typeof folder === "string") voiceCall.folder = folder.replace(/^audio\//, "").replace(/\/$/, "");
+          return orig.apply(this, arguments);
+        };
+        wrapped._rpgvVoiceHook = true;
+        return wrapped;
+      });
+    }
+    ["playSe", "playVoice"].forEach(function (method) {
+      if (typeof am[method] !== "function" || am[method]._rpgvVoiceHook) return;
+      hook(am, "AudioManager", method, function (orig) {
+        var wrapped = function (sound) {
+          if (voiceCall) return orig.apply(this, arguments); // playVoice may delegate to playSe
+          var key = method + "/" + (sound && sound.name);
+          var call = { folder: has(voiceFolders, key) ? voiceFolders[key] : (method === "playSe" ? "se" : "voice") };
+          voiceCall = call;
+          try {
+            var result = orig.apply(this, arguments);
+            // Cached plugin buffers may skip createBuffer on replay; remember the folder we observed.
+            if (!has(voiceFolders, key)) voiceFolderCount++;
+            if (voiceFolderCount > 256) { voiceFolders = {}; voiceFolderCount = 1; }
+            voiceFolders[key] = call.folder;
+            if (!/^(bgm|bgs|me)$/i.test(call.folder) && sound && typeof sound.name === "string") {
+              var num = function (v, fallback) { return typeof v === "number" && isFinite(v) ? v : fallback; };
+              try { noteVoice({ folder: call.folder, name: sound.name, volume: num(sound.volume, 90),
+                pitch: num(sound.pitch, 100), pan: num(sound.pan, 0) }); } catch (e) { reportError(e); }
+            }
+            return result;
+          } finally { voiceCall = null; }
+        };
+        wrapped._rpgvVoiceHook = true;
+        return wrapped;
+      });
+    });
+  }
+
   function notePlugin(interp, code) {
     if (run === null) return;
     var i = cmdAt(interp, code);
@@ -3338,6 +3495,7 @@
         var r = orig.apply(this, arguments);
         try {
           this._rpgvSrc = null;
+          this._rpgvVoiceRun = (this._rpgvVoiceRun || 0) + 1;
           this._rpgvPar = null;      // parallel or not: decided at its first plugin command
           this._rpgvPlugins = null;  // plugin commands recorded during this run
           this._rpgvSrc = resolveSource(list, eventId);
@@ -3361,9 +3519,10 @@
 
     hook(GI, "Game_Interpreter", "executeCommand", function (orig) {
       return function () {
+        try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
         var prev = currentCtx;
         var ctx = null;
-        try { ctx = { src: srcOf(this), cmd: this._index }; } catch (e) { reportError(e); }
+        try { ctx = { src: srcOf(this), cmd: this._index, interp: this }; } catch (e) { reportError(e); }
         currentCtx = ctx;
         try {
           return orig.apply(this, arguments);
@@ -3388,14 +3547,18 @@
               face: p[0] == null ? "" : String(p[0]),
               faceIndex: typeof p[1] === "number" ? p[1] : 0,
               speaker: p[4] == null ? "" : String(p[4]),
-              text: joinedText(this._list, i + 1, 401)
+              text: joinedText(this._list, i + 1, 401),
+              voice: takeVoices(this)
             };
             // capturing: the pictures are read once the text starts drawing (Window_Message.updateMessage),
             // after same-frame erases and sprite-level hides have applied
-            emit("message", mrec, capturePictures);
+            var recorded = emit("message", mrec, capturePictures);
+            var root = voiceRoot(this);
+            voiceMessage = recorded ? { seq: recorded.seq, root: root, list: root && root._list, epoch: root && root._rpgvVoiceRun, opening: true } : null;
           }
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
+        if (voiceMessage) voiceMessage.opening = false;
         try { if (pendingMsgKey !== null && !messageHasText()) pendingMsgKey = null; } catch (e2) { pendingMsgKey = null; reportError(e2); }
         return r;
       };
@@ -3435,6 +3598,9 @@
     });
 
     var GM = G.Game_Message && G.Game_Message.prototype;
+    hook(GM, "Game_Message", "clear", function (orig) {
+      return function () { clearVoices(); return orig.apply(this, arguments); };
+    });
     hook(GM, "Game_Message", "setChoiceCallback", function (orig) {
       return function (callback) {
         var args = arguments;
@@ -3562,6 +3728,7 @@
         var was = false;
         try {
           was = !!this.isTransferring();
+          if (was) clearVoices();
           if (was && run === null && deferredNewGame && !inTitleScene()) startBranch("newGame", meta.nextRun++, null, null);
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
@@ -3585,7 +3752,21 @@
         return orig.apply(this, arguments);
       };
     });
-    // 1.24.0 전투 건너뛰기: the battle scene is not opened, the battle is won right here
+    // MV uses this._params, MZ passes params; preserve both by forwarding arguments unchanged.
+    // Both install _eventCallback before pushing Scene_Battle; it writes _branch[_indent] for 601/602/603.
+    hook(GI, "Game_Interpreter", "command301", function (orig) {
+      return function () {
+        var prev = battleEventContext;
+        battleEventContext = null;
+        try { battleEventContext = { interp: this, list: this._list, index: this._index, src: srcOf(this) }; } catch (e) { reportError(e); }
+        try {
+          return orig.apply(this, arguments);
+        } finally {
+          battleEventContext = prev;
+        }
+      };
+    });
+    // 1.25.0 전투 건너뛰기: resolve the result before any battle scene opens.
     hook(G.SceneManager, "SceneManager", "push", function (orig) {
       return function (sceneClass) {
         try { if (maybeSkipBattle(sceneClass)) return; } catch (e) { reportError(e); }
@@ -3596,6 +3777,7 @@
     var BM = G.BattleManager;
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
+        clearVoices();
         var r = orig.apply(this, arguments);
         battleSetupPending = true;
         beginBattle(this, troopId);
@@ -3613,6 +3795,7 @@
     };
     hook(BM, "BattleManager", "endBattle", function (orig) {
       return function (result) {
+        clearVoices();
         try {
           var names = ["win", "escape", "lose"];
           var fields = { phase: "end", troopId: G.$gameTroop ? G.$gameTroop._troopId : 0 };
@@ -3680,6 +3863,7 @@
       };
     });
     try { ensureActionHook(); } catch (eh) { reportError(eh); }
+    try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
     try { ensureNoticeHooks(); } catch (en) { reportError(en); }
 
     // 1.10.0 screen watch: every image of the picture folder passes through these

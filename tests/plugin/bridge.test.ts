@@ -81,7 +81,7 @@ describe("RPGViewerBridge", () => {
       expect(msg).toEqual({
         v: 1, seq: 2, t: 1_000_000, run: 1, branch: 1, type: "message",
         src: { source: "map", mapId: 1, eventId: 3, page: 1 }, cmd: 0,
-        face: "Actor1", faceIndex: 2, speaker: engine === "MZ" ? "Harold" : "", text: "a\nb",
+        face: "Actor1", faceIndex: 2, speaker: engine === "MZ" ? "Harold" : "", text: "a\nb", voice: [],
       });
     });
   }
@@ -1053,7 +1053,7 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.25.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.27.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
@@ -1331,7 +1331,7 @@ describe("RPGViewerBridge", () => {
     };
     const pressOkCount = (w: any, frames: number) => { for (let i = 0; i < frames; i++) w.updateInput(); return w.advanced; };
 
-    describe("walk speed (1.25.0)", () => {
+    describe("walk speed (1.27.0)", () => {
       for (const engine of ["MV", "MZ"] as const) {
         it(`multiplies player and follower distance once, preserving dash and event speeds (${engine})`, () => {
           h = newGame(engine);
@@ -2152,13 +2152,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.25\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.27\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.25.0");
+    expect(h.bridge.VERSION).toBe("1.27.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

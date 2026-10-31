@@ -11,6 +11,8 @@ import {
 import { AssetStore } from "../../src/core/assets/assets";
 import { loadGame } from "../../src/core/loader/loadGame";
 import { ServerFolder, openFolderOnServer, pickFolderOnServer, type FetchFn } from "../../src/app/serverFolder";
+import { AUDIO_KEY, encryptedAudio, oggFixture } from "../helpers/audioFixture";
+import type { GameData } from "../../src/core/types";
 
 let tmp: string;
 let game: string;
@@ -217,6 +219,18 @@ describe("fs endpoints", () => {
 });
 
 describe("loading a game through the server", () => {
+  it("loads encrypted audio through the local binary endpoint", async () => {
+    touch("My Game/www/audio/se/대사.rpgmvo", Buffer.from(encryptedAudio(oggFixture())));
+    const srv = await startServer();
+    try {
+      const fetchFn = fetchVia(srv.port);
+      const opened = await openFolderOnServer(game, fetchFn);
+      if (!opened.ok || !("session" in opened)) throw new Error("open failed");
+      const data = { dataRoot: "www/data", system: { encryptionKey: AUDIO_KEY } } as GameData;
+      const clip = await new AssetStore(new ServerFolder(opened.session, fetchFn), data).audio("se", "대사");
+      expect(new Uint8Array((await clip!.arrayBuffer()))).toEqual(oggFixture());
+    } finally { await srv.close(); }
+  });
   it("loads the MV fixture via ServerFolder", async () => {
     const dest = path.join(tmp, "fixture-mv");
     fs.cpSync(path.resolve(__dirname, "../fixtures/sample-mv"), dest, { recursive: true });

@@ -236,6 +236,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Player.prototype.isDashing = function () { return !!this._dashing; };
   Game_Player.prototype.isTransferring = function () { return this._transferring; };
   Game_Player.prototype.updateEncounterCount = function () { this._encounterCount = (this._encounterCount ?? 3) - 1; };
+  Game_Player.prototype.makeEncounterCount = function () { this._encounterCount = 3; };
+  Game_Player.prototype.makeEncounterTroopId = function () { return this.encounterTroopId ?? 1; };
   Game_Player.prototype.executeEncounter = function () {
     if ((this._encounterCount ?? 3) > 0) return false;
     this._encounterCount = 3;
@@ -325,6 +327,31 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     this._index++;
     return true;
   };
+  // Battle Processing: MV reads _params, MZ receives params. The callback is installed before push,
+  // and the interpreter's current indent is still that of 301 when a synchronous skip calls it.
+  Game_Interpreter.prototype.command301 = function (params?: any[]) {
+    const p = engine === "MZ" ? params! : this._params;
+    if (!g.$gameParty.inBattle()) {
+      const troopId = p[0] === 0 ? p[1] : p[0] === 1 ? g.$gameVariables.value(p[1]) : g.$gamePlayer.makeEncounterTroopId();
+      if (g.$dataTroops[troopId]) {
+        g.BattleManager.setup(troopId, p[2], p[3]);
+        g.BattleManager.setEventCallback((n: number) => { this._branch[this._indent] = n; });
+        g.$gamePlayer.makeEncounterCount();
+        g.SceneManager.push(g.Scene_Battle);
+      }
+    }
+    return true;
+  };
+  Game_Interpreter.prototype.skipBranch = function () {
+    while (this._list[this._index + 1]?.indent > this._indent) this._index++;
+  };
+  for (const [code, result] of [[601, 0], [602, 1], [603, 2]]) {
+    Game_Interpreter.prototype["command" + code] = function () {
+      if (this._branch[this._indent] !== result) this.skipBranch();
+      return true;
+    };
+  }
+  // 604 has no handler in either engine: executeCommand simply advances past it.
   Game_Interpreter.prototype.command101 = function (params?: any[]) {
     const p = params ?? this._params;
     const m = g.$gameMessage;
@@ -364,6 +391,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Interpreter.prototype.command231 = function () { return true; };
   Game_Interpreter.prototype.command232 = function () { return true; };
   Game_Interpreter.prototype.command235 = function () { return true; };
+  Game_Interpreter.prototype.command250 = function (params?: any[]) { g.AudioManager.playSe((params ?? this._params)[0]); return true; };
   Game_Interpreter.prototype.pluginCalls = 0;
   Game_Interpreter.prototype.command356 = function () { this.pluginCalls++; return true; };
   if (engine === "MZ") Game_Interpreter.prototype.command357 = function () { this.pluginCalls++; return true; };
@@ -664,6 +692,11 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     Game_CharacterBase, Game_Follower, Game_Vehicle,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Game_Enemy, Game_Actor, Game_Actors, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
     SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture, Bitmap,
+    AudioManager: {
+      createBuffer(folder: string, name: string) { return { folder, name }; },
+      playSe(sound: any) { return this.createBuffer("se", sound.name); },
+      playStaticSe(sound: any) { return this.createBuffer("se", sound.name); },
+    },
     $dataCommonEvents: [null], $dataTroops: [null],
     $dataActors: [null], $dataItems: [null], $dataWeapons: [null], $dataArmors: [null], $dataSkills: [null], $dataStates: [null],
     $dataSystem: null,
