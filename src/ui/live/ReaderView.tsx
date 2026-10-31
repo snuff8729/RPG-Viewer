@@ -33,10 +33,11 @@ import { NowNextCard } from "./NowNextCard";
 import { ChoiceTextsCache } from "./historyText";
 import { gameKeyOf, initialReadSeq, saveReadSeq } from "./readPosition";
 import {
-  extendDown, extendUp, grownRange, initialView, rangeShowing, readStats, sameRange, tailRange, trimToTail,
+  extendDown, extendUp, grownRange, initialView, isPictureRow, rangeShowing, readStats, sameRange, tailRange, trimToTail, visibleReaderIndex,
   type InitialView, type ReadRange, type ReadStats,
 } from "./readerWindow";
 import { ReaderItemView } from "./ReaderItemView";
+import { ReaderItemStateContext } from "./readerItemState";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
 import { usePluginOverrides } from "./pluginDisplay";
 import { ReaderHideContext } from "./readerHide";
@@ -50,7 +51,8 @@ import { ReaderVoiceProvider } from "./ReaderVoiceProvider";
 import { useReaderAutoVoice } from "./useReaderAutoVoice";
 import { loadVoiceAuto, saveVoiceAuto } from "./voiceAuto";
 
-const PAGE = 300;
+const PAGE = 150;
+const MAX_WINDOW = 3 * PAGE;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
 const EMPTY_IDS: number[] = [];
 /** 읽기 항목은 전투·알림을 모두 만들고 보일지는 숨김 규칙이 정한다 */
@@ -66,7 +68,7 @@ function typingTarget(t: EventTarget | null): boolean {
 }
 
 /** 구간이 바뀐 뒤(다음 커밋) 할 스크롤 */
-type AfterRange = { kind: "anchor"; h: number; top: number } | { kind: "key"; key: string } | { kind: "bottom" };
+type AfterRange = { kind: "anchor"; key: string; offset: number } | { kind: "key"; key: string } | { kind: "bottom" };
 
 /** 그리는 구간과 처음 위치(갈래마다 처음 한 번 initialView로 정한다). total은 구간을 맞춰 둔 항목 수. */
 type View = InitialView & { total: number };
@@ -80,14 +82,18 @@ function hasFocus(): boolean {
  * 항목이 처음 생기면 initialView(포커스가 없으면 다 읽은 경우도 사용자 동작 전까지 읽음 표시 안 함),
  * 항목 수가 바뀌면 grownRange. 바뀔 게 없으면 v 그대로.
  */
-function syncView(v: View | null, total: number, stats: ReadStats, readSeq: number): View | null {
+function syncView(v: View | null, total: number, stats: ReadStats, readSeq: number, trim: boolean): View | null {
   if (v === null) {
     if (total === 0) return null;
     const iv = initialView(total, stats, readSeq, PAGE);
     return { total, ...iv, armed: iv.armed && hasFocus() };
   }
   if (v.total === total) return v;
-  return { ...v, total, range: grownRange(v.range, v.total, total, PAGE) };
+  const grown = grownRange(v.range, v.total, total, PAGE, MAX_WINDOW);
+  // While reading older lines, an append must not discard the visible head.
+  const range = !trim && total > v.total && grown.start > v.range.start
+    ? { start: v.range.start, end: Math.min(grown.end, v.range.start + MAX_WINDOW) } : grown;
+  return { ...v, total, range };
 }
 
 /**
@@ -180,6 +186,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   }, [liveBranch, varsKey]);
   // 기록이 갈래 끝에 덧붙기만 했으면(보통) 앞에서 만든 항목을 두고 새 기록만 더 만든다(이어 만들기).
   // 갈래·설정·앞의 기록이 바뀌면 처음부터. 결과는 처음부터 만든 것과 언제나 같다.
+  const [itemState] = useState(() => new Map<string, boolean | number>());
   const [builder] = useState(() => new ReaderItemsBuilder());
   const built = useMemo(() => {
     if (!data || branch === null) return [];
@@ -203,17 +210,17 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // (앞부분이 같으면 이어 계산한다 — 규칙·경계가 바뀔 때만 처음부터)
   const displayCfg = useMemo<DisplayConfig>(() => ({
     heads: displayHeads,
-    drop: screenShown ? null : (it) => it.kind === "screen" || it.kind === "cutin",
     match: (it) => matchHide(it, compiledHide),
     // 종류 숨기기(기술 플러그인 명령 등)는 자리 없이 뺀다 — 문장 숨기기만 `숨긴 문구 N줄` 자리를 남긴다
     silent: (rule) => compiledHide.rules[rule]?.kind === "type",
-  }), [displayHeads, screenShown, compiledHide]);
+  }), [displayHeads, compiledHide]);
   const items = useMemo(() => caches.display.get(built, displayCfg), [caches, built, displayCfg]);
   // 그림을 겹쳐 캐릭터를 그리는 게임인데 그림 따라 그리기가 꺼져 있으면 한 번 안내한다(게임마다 닫기 기억)
   const [hintClosed, setHintClosed] = useState(() => layeredHintDismissed(gameKey));
   const layered = !picturesOn && (facts?.layered ?? false);
   const closeHint = () => { setHintClosed(true); dismissLayeredHint(gameKey); };
-  const total = items.length;
+  const pictureHiddenEnd = useMemo(() => items.findLastIndex(item => !isPictureRow(item)) + 1, [items]);
+  const total = screenShown ? items.length : pictureHiddenEnd;
 
   // 읽은 위치(마운트 때 저장소+조상 갈래에서 한 번 읽는다 — 갈래가 바뀌면 FullReader가 새로 마운트한다)
   const [readSeq, setReadSeq] = useState(() => (branch === null ? -1 : initialReadSeq(gameKey, branch, path, model)));
@@ -223,13 +230,16 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   }, [readSeq, gameKey, branch]);
 
   // 마지막으로 읽은 항목 위치와 그 뒤 새 대사 수(↻ 다시 본 대화는 세지 않는다)
-  const stats = useMemo(() => readStats(items, readSeq), [items, readSeq]);
+  const stats = useMemo(() => readStats(items, readSeq, screenShown), [items, readSeq, screenShown]);
   const { lastReadIdx, firstUnreadIdx, unread } = stats;
 
   // 그리는 구간 [start, end). 처음 항목이 생길 때 한 번 정하고, 항목 수가 바뀌면 grownRange로 맞춘다(렌더 중 갱신).
   // armed가 false면 사용자가 스크롤하거나 다음을 누르기 전까지 읽음 표시를 하지 않는다.
+  const [atBottom, setAtBottom] = useState(true);
+  const follow = useRef(false);
+  const autoRef = useRef(autoFollow);
   const [view, setView] = useState<View | null>(null);
-  const cur = syncView(view, total, stats, readSeq);
+  const cur = syncView(view, total, stats, readSeq, autoFollow || (atBottom && hasFocus()));
   if (cur !== view) setView(cur);
   const range = cur?.range ?? EMPTY_RANGE;
   const armed = cur?.armed ?? false;
@@ -238,12 +248,14 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const scroller = useRef<HTMLDivElement>(null);
   useReaderAutoVoice(scroller, items, voiceAuto, isHidden);
   const content = useRef<HTMLDivElement>(null);
-  const [atBottom, setAtBottom] = useState(true);
+  const earlierSentinel = useRef<HTMLDivElement>(null);
+  const laterSentinel = useRef<HTMLDivElement>(null);
+  const scrollDirection = useRef(1);
+  const previousTop = useRef(0);
+  const bottomRef = useRef(true);
   /** 맨 아래 + 다 읽음 + 구간이 끝까지 — 새 항목이 오면 따라간다 */
-  const follow = useRef(false);
   const positioned = useRef(false);
   // 자동으로 맨 아래로: 켜면 새 항목이 올 때마다 위치·창 포커스·양과 상관없이 끝으로 간다
-  const autoRef = useRef(autoFollow);
   useLayoutEffect(() => { autoRef.current = autoFollow; }, [autoFollow]);
   const prevLen = useRef(0);
   const armedRef = useRef(false);
@@ -251,13 +263,18 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
 
   const scrollToBottom = useCallback(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) { el.scrollTop = el.scrollHeight; previousTop.current = el.scrollTop; }
+    bottomRef.current = true;
     setAtBottom(true);
   }, []);
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight <= 80);
+    const delta = el.scrollTop - previousTop.current;
+    if (Math.abs(delta) > 1) scrollDirection.current = Math.sign(delta);
+    previousTop.current = el.scrollTop;
+    bottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    setAtBottom(bottomRef.current);
   }, []);
   /** 항목을 읽기 영역 위쪽(margin px 아래)으로. 그 항목이 없으면 false */
   const scrollToKey = useCallback((key: string, margin = 8): boolean => {
@@ -265,6 +282,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     const target = el?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
     if (!el || !target) return false;
     el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - margin;
+    previousTop.current = el.scrollTop;
     onScroll();
     return true;
   }, [onScroll]);
@@ -323,7 +341,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     for (const n of nodes.current) {
       const r = n.getBoundingClientRect();
       if (r.bottom > root.top && r.top < root.bottom) seen.current.add(n);
-      if (r.bottom > root.top && r.bottom <= root.bottom + 1) {
+      if (r.height > 0 && r.bottom > root.top && r.bottom <= root.bottom + 1) {
         const s = Number(n.dataset.seq);
         if (Number.isInteger(s) && s > max) max = s;
       }
@@ -347,7 +365,12 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const runAfter = useCallback((a: AfterRange) => {
     const el = scroller.current;
     if (!el) return;
-    if (a.kind === "anchor") { el.scrollTop = a.top + (el.scrollHeight - a.h); onScroll(); }
+    if (a.kind === "anchor") {
+      const target = el.querySelector<HTMLElement>('[data-key="' + CSS.escape(a.key) + '"]');
+      if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - a.offset;
+      previousTop.current = el.scrollTop;
+      onScroll();
+    }
     else if (a.kind === "key") scrollToKey(a.key);
     else scrollToBottom();
   }, [onScroll, scrollToKey, scrollToBottom]);
@@ -423,7 +446,10 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (follow.current || autoRef.current) el.scrollTop = el.scrollHeight;
+      if (follow.current || (autoRef.current && bottomRef.current)) {
+        el.scrollTop = el.scrollHeight;
+        previousTop.current = el.scrollTop;
+      }
       onScroll();
     });
     ro.observe(el);
@@ -431,11 +457,49 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     return () => ro.disconnect();
   }, [onScroll]);
 
-  const showEarlier = () => {
+  // Anchor to a retained DOM row, rather than total height (both edges can change).
+  const extendWindow = useCallback((direction: "up" | "down") => {
+    const next = direction === "up" ? extendUp(range, PAGE, MAX_WINDOW) : extendDown(range, total, PAGE, MAX_WINDOW);
     const el = scroller.current;
-    applyRange(extendUp(range, PAGE), el ? { kind: "anchor", h: el.scrollHeight, top: el.scrollTop } : null);
-  };
-  const showLater = () => applyRange(extendDown(range, total, PAGE), null);
+    let anchor: AfterRange | null = null;
+    if (el) {
+      const root = el.getBoundingClientRect();
+      const retained = new Set(items.slice(next.start, next.end).map(item => item.key));
+      const candidates = [...el.querySelectorAll<HTMLElement>("[data-key]")].filter(node => retained.has(node.dataset.key!) && node.getBoundingClientRect().height > 0);
+      const node = candidates.find(node => node.getBoundingClientRect().bottom > root.top) ?? candidates.at(-1);
+      if (node) anchor = { kind: "anchor", key: node.dataset.key!, offset: node.getBoundingClientRect().top - root.top };
+    }
+    // Loading history must not trigger the resize observer's tail-follow behavior.
+    follow.current = false;
+    applyRange(next, anchor);
+  }, [range, total, items, applyRange]);
+  const showEarlier = useCallback(() => extendWindow("up"), [extendWindow]);
+  const showLater = useCallback(() => extendWindow("down"), [extendWindow]);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !cur || typeof IntersectionObserver === "undefined") return;
+    const edges = { up: false, down: false };
+    let loading = false, frame = 0;
+    const load = () => {
+      frame = 0;
+      if (loading || !positioned.current || after.current || (!hasFocus() && !armedRef.current)) return;
+      if (edges.up && scrollDirection.current < 0 && range.start > 0) { loading = true; showEarlier(); }
+      else if (edges.down && scrollDirection.current >= 0 && range.end < total) { loading = true; showLater(); }
+    };
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target === earlierSentinel.current) edges.up = entry.isIntersecting;
+        if (entry.target === laterSentinel.current) edges.down = entry.isIntersecting;
+      }
+      load();
+    }, { root: el, rootMargin: Math.round(el.clientHeight / 2) + "px 0px" });
+    // Re-check an already-intersecting edge when the user reverses direction.
+    const onEdgeScroll = () => { if (!frame) frame = requestAnimationFrame(load); };
+    el.addEventListener("scroll", onEdgeScroll, { passive: true });
+    if (earlierSentinel.current) observer.observe(earlierSentinel.current);
+    if (laterSentinel.current) observer.observe(laterSentinel.current);
+    return () => { observer.disconnect(); el.removeEventListener("scroll", onEdgeScroll); cancelAnimationFrame(frame); };
+  }, [cur, range.start, range.end, total, showEarlier, showLater]);
 
   /** 맨 아래로: 끝 구간으로 옮기고 전부 읽음 처리 */
   const goBottom = useCallback(() => {
@@ -479,7 +543,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
       const s = lastSeqOf(items[idx]);
       if (s !== null) markRead(s);
       let n = -1;
-      for (let j = idx + 1; j < items.length; j++) if (lastSeqOf(items[j]) !== null) { n = j; break; }
+      for (let j = idx + 1; j < items.length; j++) if (lastSeqOf(items[j]) !== null && (screenShown || !isPictureRow(items[j]))) { n = j; break; }
       idx = n;
     }
     if (idx < 0) { goBottom(); return; }
@@ -489,7 +553,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     }
     // 구간 밖이면 그 항목 둘레로 구간을 옮긴 뒤 올린다
     applyRange(rangeShowing(range, idx, total, PAGE), { kind: "key", key: keyFrom(idx) });
-  }, [firstUnreadIdx, items, total, range, keyFrom, arm, markRead, applyRange, goBottom, onScroll]);
+  }, [screenShown, firstUnreadIdx, items, total, range, keyFrom, arm, markRead, applyRange, goBottom, onScroll]);
 
   useEffect(() => {
     let spaceDown = false;
@@ -513,14 +577,15 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   // ── 바로 가기(목차·북마크) ───────────────────────────────────
   const [tocOpen, setTocOpen] = useState(false);
   /** idx 항목으로 간다: 구간을 그 둘레로 다시 잡고 그 항목을 위로. 자동으로 맨 아래로는 끈다. */
-  const jumpToIdx = useCallback((idx: number) => {
-    if (idx < 0 || idx >= total) return;
+  const jumpToIdx = useCallback((requested: number) => {
+    const idx = visibleReaderIndex(items, requested, screenShown);
+    if (idx < 0) return;
     setTocOpen(false);
     if (autoRef.current) onAutoFollow(false);
     autoRef.current = false;
     follow.current = false;
     applyRange(rangeShowing(range, idx, total, PAGE), { kind: "key", key: keyFrom(idx) });
-  }, [total, range, keyFrom, applyRange, onAutoFollow]);
+  }, [items, screenShown, total, range, keyFrom, applyRange, onAutoFollow]);
   const jumpToSeq = useCallback((seq: number) => jumpToIdx(indexOfSeq(items, seq)), [items, jumpToIdx]);
   const goFirst = useCallback(() => jumpToIdx(0), [jumpToIdx]);
   /** 읽던 곳: 첫 안 읽은 항목(다 읽었으면 맨 끝) */
@@ -582,7 +647,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const lines = useMemo(() => items.slice(rangeStart, rangeEnd).map((item, i) => {
     const seq = lastSeqOf(item);
     return (
-      <div key={item.key}>
+      <div key={item.key} data-reader-picture-row={isPictureRow(item) ? "" : undefined}>
         <div data-key={item.key} data-seq={seq ?? undefined} ref={seq === null ? undefined : observeNode} className="group/line flex items-start gap-1">
           <div className="min-w-0 flex-1"><ReaderItemView item={item} /></div>
           {seq !== null && <ReaderLineMenu item={item} onAction={onLineAction} />}
@@ -655,7 +720,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         </Alert>
       )}
       <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} data-reader-scroll onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className={cn("min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]", !screenShown && "[&_[data-reader-picture-row]]:hidden")}>
         {/* 휴대폰: 아래에 떠 있는 버튼에 마지막 줄이 가리지 않게 아래 여백을 둔다 */}
         <div ref={content} className={cn("mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed", mobile && "pb-20")}>
           {empty ? (
@@ -663,13 +728,13 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
           ) : (
             <>
               {range.start > 0 && (
-                <div className="flex justify-center">
+                <div ref={earlierSentinel} className="flex justify-center">
                   <Button variant="outline" size="sm" onClick={showEarlier}>이전 대사 더 보기</Button>
                 </div>
               )}
-              <ReaderHideContext.Provider value={isHidden}>{lines}</ReaderHideContext.Provider>
+              <ReaderItemStateContext.Provider value={itemState}><ReaderHideContext.Provider value={isHidden}>{lines}</ReaderHideContext.Provider></ReaderItemStateContext.Provider>
               {!atEnd && (
-                <div className="flex justify-center">
+                <div ref={laterSentinel} className="flex justify-center">
                   <Button variant="outline" size="sm" onClick={showLater}>다음 대사 더 보기</Button>
                 </div>
               )}

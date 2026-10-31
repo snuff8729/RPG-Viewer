@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import type { ReaderItem } from "@/core/live/reader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,10 +7,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EyeOff, Volume2 } from "lucide-react";
+import { useReaderItemState } from "./readerItemState";
 import { useReaderVoice } from "./readerVoiceContext";
 import { FaceImage } from "../script/FaceImage";
 import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
-import { useAsset } from "../script/useAssetUrl";
+import { useAssetBitmap } from "../script/useAssetBitmap";
+import { PictureViewport } from "../addons/PictureViewport";
 import { PluginLine } from "./PluginLine";
 import { NEVER_HIDDEN, ReaderHideContext, useLineHidden } from "./readerHide";
 import { sameShot, type ScreenShot } from "@/core/addons/screenPictures";
@@ -40,14 +42,30 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
 }
 
 function Picture({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
+  if (!item.name) return item.caption ? <TextPictureNote caption={item.caption} pictureId={item.pictureId} className="text-center" /> : null;
+  return <PictureViewport><PictureBody item={item} /></PictureViewport>;
+}
+
+function PictureBody({ item }: { item: Extract<ReaderItem, { kind: "picture" }> }) {
   const { name } = item;
-  const a = useAsset("pictures", name);
-  if (!name) return item.caption ? <TextPictureNote caption={item.caption} pictureId={item.pictureId} className="text-center" /> : null;
+  const a = useAssetBitmap("pictures", name);
   if (a.status === "loading") return <Skeleton className="h-40 w-full" />;
   if (a.status !== "ok") {
     return <AssetPlaceholder view={a} kind="pictures" name={name} pictureId={item.pictureId} className="mx-auto w-fit max-w-full" />;
   }
-  return <img src={a.url} alt={name} title={name} loading="lazy" decoding="async" className="max-h-[60vh] w-full object-contain" />;
+  return <PictureCanvas image={a.image} name={name} />;
+}
+
+function PictureCanvas({ image, name }: { image: ImageBitmap; name: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    canvas.width = image.width; canvas.height = image.height;
+    canvas.getContext("2d")?.drawImage(image, 0, 0);
+    return () => { canvas.width = canvas.height = 0; };
+  }, [image]);
+  return <canvas ref={ref} width={0} height={0} role="img" aria-label={name} title={name} className="max-h-[60vh] w-full object-contain" />;
 }
 
 /** 화면 그림 따라 그리기: 이 대사에서 새로 보일 이벤트 그림·스탠딩(`그림 보기`를 껐으면 숨긴다). */
@@ -59,7 +77,7 @@ function Screen({ shot }: { shot: ScreenShot }) {
 /** 컷인(대사 사이에 잠깐 띄웠다 지운 그림, `그림 보기`를 껐으면 숨긴다). 전투 안에서는 전투 기록을 접어도 보인다. */
 function Cutin({ item }: { item: Extract<ReaderItem, { kind: "cutin" }> }) {
   const [shown] = useScreenPicturesShown();
-  return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} /></div> : null;
+  return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} stateKey={item.key} /></div> : null;
 }
 
 /** 플러그인 명령 줄(보일지는 숨김 규칙이 정한다 — 명령별 메뉴 대신 읽기 줄 메뉴) */
@@ -69,8 +87,9 @@ function ReaderPlugin({ item }: { item: Extract<ReaderItem, { kind: "plugin" }> 
 
 /** 숨김 규칙으로 숨긴 줄이 이어진 자리: `숨긴 문구 N줄`, 누르면 잠깐 펼쳐 본다 */
 function HiddenLines({ item }: { item: Extract<ReaderItem, { kind: "hidden" }> }) {
+  const [open, setOpen] = useReaderItemState<boolean>("hidden:" + item.key, false);
   return (
-    <Collapsible>
+    <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
         <Button variant="ghost" size="xs" className="text-muted-foreground">
           <EyeOff />
@@ -118,7 +137,7 @@ function LogLine({ line }: { line: BattleLogItem }) {
  * (줄의 화면 그림은 접혀 있어도 보인다).
  */
 function BattleBody({ item }: { item: BattleReaderItem }) {
-  const [logOpen, setLogOpen] = useState(false);
+  const [logOpen, setLogOpen] = useReaderItemState<boolean>("battle-log:" + item.key, false);
   // 숨김 규칙에 맞는 안쪽 줄(전투 로그·알림·대사 등)은 뺀다
   const hidden = useLineHidden();
   const inner = item.items.filter(x => !hidden(x));
@@ -159,6 +178,7 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
 
 /** 전투 한 번: 머리(적 무리·결과) + 안의 대사·그림, `전투 기록 N줄`로 로그 펼치기. 다시 본 같은 전투는 통째로 접는다. */
 function BattleBlock({ item }: { item: BattleReaderItem }) {
+  const [open, setOpen] = useReaderItemState<boolean>("battle:" + item.key, false);
   const label = item.result ? BATTLE_RESULT_LABEL[item.result] : item.ended ? "끝남" : "진행 중";
   const variant = item.result === "win" ? "default" : item.result === "lose" ? "destructive" : "secondary";
   return (
@@ -171,7 +191,7 @@ function BattleBlock({ item }: { item: BattleReaderItem }) {
       {(item.repeat === 0 ? item.items.length > 0 || item.logLines > 0 || item.rewards || item.screen || item.endScreen : true) && (
         <CardContent>
           {item.repeat > 0 ? (
-            <Collapsible>
+            <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="text-muted-foreground">펼쳐 보기</Button>
               </CollapsibleTrigger>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { standViewOf, type PictureView, type ScreenPicture, type ScreenSize } from "@/core/addons/screenPictures";
 import { imageAlphaStats } from "./imageStats";
+import { usePicturesNearViewport } from "./pictureViewportContext";
 
 /** 읽기 그림 그리기에 함께 쓰는 것: 그림 불러오기(usePictureImages)와 스탠딩·컷인을 잘라 그릴 화면 부분(standView). */
 
@@ -11,34 +12,40 @@ const NO_IMAGES = new Map<string, ImageBitmap>();
 /** 그림들을 읽어 이름 → 이미지·상태. retry로 실패한 것을 다시 읽는다. */
 export function usePictureImages(names: string[]) {
   const { assets } = useGame();
+  const enabled = usePicturesNearViewport();
   const key = names.join("\n");
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<{ key: string; images: Map<string, ImageBitmap>; status: Map<string, Status> }>(
-    () => ({ key: "", images: new Map(), status: new Map() }),
+  const [state, setState] = useState<{ assets: unknown; key: string; images: Map<string, ImageBitmap>; status: Map<string, Status> }>(
+    () => ({ assets, key: "", images: new Map(), status: new Map() }),
   );
+  if (!enabled && state.key) setState({ assets, key: "", images: new Map(), status: new Map() });
   useEffect(() => {
-    if (!assets) return;
+    if (!assets || !enabled) return;
     let cancelled = false;
     const list = key ? key.split("\n") : [];
+    const releases: (() => void)[] = [];
     for (const name of list) {
       assets.fetch("pictures", name).then(async (r) => {
-        const img = r.status === "ok" ? await assets.image("pictures", name) : null;
+        if (cancelled) return;
+        const lease = r.status === "ok" ? assets.acquireImage("pictures", name) : null;
+        if (lease) releases.push(lease.release);
+        const img = lease ? await lease.value : null;
         if (cancelled) return;
         const st: Status = r.status === "ok" ? (img ? "ok" : "missing") : r.status;
         setState((prev) => {
-          const base = prev.key === `${key}#${attempt}` ? prev : { key: `${key}#${attempt}`, images: new Map(), status: new Map() };
+          const base = prev.assets === assets && prev.key === `${key}#${attempt}` ? prev : { assets, key: `${key}#${attempt}`, images: new Map(), status: new Map() };
           const images = new Map(base.images), status = new Map(base.status);
           if (img) images.set(name, img);
           status.set(name, st);
-          return { key: base.key, images, status };
+          return { assets, key: base.key, images, status };
         });
       }, () => {
         if (!cancelled) setState((prev) => ({ ...prev, status: new Map(prev.status).set(name, "failed") }));
       });
     }
-    return () => { cancelled = true; };
-  }, [assets, key, attempt]);
-  const current = state.key === `${key}#${attempt}` ? state : null;
+    return () => { cancelled = true; releases.forEach(release => release()); };
+  }, [assets, key, attempt, enabled]);
+  const current = enabled && state.assets === assets && state.key === `${key}#${attempt}` ? state : null;
   return {
     images: current?.images ?? NO_IMAGES,
     status: (name: string): Status => current?.status.get(name) ?? "loading",

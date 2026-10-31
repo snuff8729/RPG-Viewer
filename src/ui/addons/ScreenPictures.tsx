@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
@@ -9,25 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
 import { HidePicturesMenu } from "./HidePicturesMenu";
+import { PictureViewport } from "./PictureViewport";
+import { usePicturesNearViewport } from "./pictureViewportContext";
 import { standView, usePictureImages, type View } from "./pictureImages";
 
 /** 그림 블렌드 모드 → 캔버스 합성(0 보통, 1 더하기, 2 곱하기, 3 스크린) */
 const COMPOSITE: GlobalCompositeOperation[] = ["source-over", "lighter", "multiply", "screen"];
-
-const tonedCache = new WeakMap<ImageBitmap, Map<string, CanvasImageSource>>();
-
-/** 색조 [r, g, b, gray]를 입힌 사본(엔진처럼 회색만큼 채도를 빼고 r·g·b를 더한다, 그림·색조별 캐시). 그릴 수 없으면 원본. */
-function toned(img: ImageBitmap, tone: [number, number, number, number]): CanvasImageSource {
-  const k = tone.join(",");
-  let byTone = tonedCache.get(img);
-  if (!byTone) { byTone = new Map(); tonedCache.set(img, byTone); }
-  const hit = byTone.get(k);
-  if (hit) return hit;
-  const out = tonedCopy(img, tone);
-  if (byTone.size > 8) byTone.clear();
-  byTone.set(k, out);
-  return out;
-}
 
 function tonedCopy(img: ImageBitmap, tone: [number, number, number, number]): CanvasImageSource {
   try {
@@ -61,9 +48,13 @@ function ScreenCanvas({ pictures, view, images, className }: {
   pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; className?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
+  const active = usePicturesNearViewport();
+  useLayoutEffect(() => {
     const canvas = ref.current;
-    const ctx = canvas?.getContext("2d");
+    if (!canvas) return;
+    if (!active) { canvas.width = canvas.height = 0; return; }
+    canvas.width = view.width; canvas.height = view.height;
+    const ctx = canvas.getContext("2d");
     if (!canvas || !ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -82,14 +73,16 @@ function ScreenCanvas({ pictures, view, images, className }: {
         // 화면 사각형(standView의 standViewOf)과 같은 크기 기준: 기록의 크기(없으면 그림 파일 크기)에 crop 부분 또는 그림 전체
         const d = pictureDraw(p, { w: img.width, h: img.height });
         if (!d) continue;
-        const src = p.tone ? toned(img, p.tone) : img;
-        ctx.drawImage(src, d.sx, d.sy, d.sw, d.sh, d.dx, d.dy, d.dw, d.dh);
+        const src = p.tone ? tonedCopy(img, p.tone) : img;
+        try { ctx.drawImage(src, d.sx, d.sy, d.sw, d.sh, d.dx, d.dy, d.dw, d.dh); }
+        finally { if (src instanceof HTMLCanvasElement) src.width = src.height = 0; }
       } catch { /* 그 그림만 건너뛴다 */ } finally {
         ctx.restore();
       }
     }
-  }, [pictures, images, view.left, view.top, view.width, view.height]);
-  return <canvas ref={ref} width={view.width} height={view.height} className={className} />;
+    return () => { canvas.width = canvas.height = 0; };
+  }, [active, pictures, images, view.left, view.top, view.width, view.height]);
+  return <canvas ref={ref} width={0} height={0} className={className} />;
 }
 
 
@@ -103,9 +96,13 @@ function groupText(g: StandGroup): { label: string; title: string | null } {
 }
 
 /** 그림 한 장(누르면 크게 보기) */
-export function ShotButton({ pictures, view, images, stand, title, names, caption }: {
+export function ShotButton({ pictures, view: nextView, images, stand, title, names, caption }: {
   pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; stand: boolean; title: string; names: string[]; caption?: string;
 }) {
+  // Keep crop geometry while bitmap leases are released/reloaded.
+  const [retained, setRetained] = useState(nextView);
+  if (images.size > 0 && (nextView.left !== retained.left || nextView.top !== retained.top || nextView.width !== retained.width || nextView.height !== retained.height)) setRetained(nextView);
+  const view = images.size > 0 ? nextView : retained;
   const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
   return (
     <Dialog>
@@ -137,6 +134,10 @@ export function ShotButton({ pictures, view, images, stand, title, names, captio
  * 누르면 크게 본다. 게임 폴더에 없는 그림은 아래에 이름을 적는다.
  */
 export function ScreenPictures({ shot }: { shot: ScreenShot }) {
+  return <PictureViewport><ScreenPicturesBody shot={shot} /></PictureViewport>;
+}
+
+function ScreenPicturesBody({ shot }: { shot: ScreenShot }) {
   const { data } = useGame();
   // 1.18.2: 그때 게임의 실제 화면 크기(모르면 게임 설정에서 짐작한 크기)
   const size = shot.screen ?? data?.screenSize ?? DEFAULT_SCREEN;

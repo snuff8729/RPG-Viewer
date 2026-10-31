@@ -19,16 +19,20 @@ export function useMapTiles(mapId: number | null): TilesState {
   useEffect(() => {
     if (!folder || !data || !assets || mapId == null) return;
     let alive = true;
+    const releases: (() => void)[] = [];
     const k = [folder, data, assets, mapId];
     void (async () => {
       const loaded = await loadMapTiles(folder, data, mapId);
       if (!loaded) { if (alive) setState({ key: k, value: { status: "failed" } }); return; }
-      const sheets = await Promise.all(loaded.tileset.names.map((n) => assets.image("tilesets", n)));
+      if (!alive) return;
+      const leases = loaded.tileset.names.map(n => assets.acquireImage("tilesets", n));
+      releases.push(...leases.map(lease => lease.release));
+      const sheets = await Promise.all(leases.map(lease => lease.value));
       if (!alive) return;
       const ok = sheets.some((s) => s !== null);
       setState({ key: k, value: ok ? { status: "ready", tiles: { ...loaded, sheets } } : { status: "failed" } });
     })();
-    return () => { alive = false; };
+    return () => { alive = false; releases.forEach(release => release()); };
   }, [folder, data, assets, mapId]);
 
   if (!folder || !data || !assets || mapId == null) return { status: "failed" };

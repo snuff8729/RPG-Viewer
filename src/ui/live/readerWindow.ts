@@ -9,9 +9,10 @@ export interface ReadStats {
   unread: number;
 }
 
-export function readStats(items: ReaderItem[], readSeq: number): ReadStats {
+export function readStats(items: ReaderItem[], readSeq: number, picturesShown = true): ReadStats {
   let lastReadIdx = -1, firstUnreadIdx = -1, unread = 0;
   items.forEach((it, i) => {
+    if (!picturesShown && isPictureRow(it)) return;
     const s = lastSeqOf(it);
     if (s === null) return;
     if (s <= readSeq) { lastReadIdx = i; return; }
@@ -80,20 +81,20 @@ export function clampRange(r: ReadRange, total: number, page: number): ReadRange
  * 새 항목은 page개까지만(구간이 짧으면 2×page 길이까지는) 붙인다 — 나머지는 `다음 대사 더 보기`로.
  * 구간이 이미 길어도(이전 대사 더 보기) 첫 새 항목(prev)은 늘 그려진다. 끝에 붙어 있지 않으면 그대로.
  */
-export function grownRange(r: ReadRange, prev: number, total: number, page: number): ReadRange {
-  if (total <= prev || r.end !== prev) return clampRange(r, total, page);
+export function grownRange(r: ReadRange, prev: number, total: number, page: number, max = 3 * page): ReadRange {
+  if (total <= prev || r.end !== prev) return capRange(clampRange(r, total, page), max, "down");
   const end = Math.min(total, Math.max(r.end, r.start + 2 * page, prev + page));
-  return end === r.end ? r : { start: r.start, end };
+  return capRange(end === r.end ? r : { start: r.start, end }, max, "down");
 }
 
 /** 이전 대사 더 보기 */
-export function extendUp(r: ReadRange, page: number): ReadRange {
-  return { start: Math.max(0, r.start - page), end: r.end };
+export function extendUp(r: ReadRange, page: number, max = 3 * page): ReadRange {
+  return capRange({ start: Math.max(0, r.start - page), end: r.end }, max, "up");
 }
 
 /** 다음 대사 더 보기 */
-export function extendDown(r: ReadRange, total: number, page: number): ReadRange {
-  return { start: r.start, end: Math.min(total, r.end + page) };
+export function extendDown(r: ReadRange, total: number, page: number, max = 3 * page): ReadRange {
+  return capRange({ start: r.start, end: Math.min(total, r.end + page) }, max, "down");
 }
 
 /** idx 항목이 구간 밖이면 그 항목을 중심으로 새 구간 [idx-CONTEXT, idx+page). 안이면 그대로. */
@@ -106,4 +107,24 @@ export function rangeShowing(r: ReadRange, idx: number, total: number, page: num
 export function trimToTail(r: ReadRange, total: number, page: number): ReadRange {
   const start = Math.max(r.start, total - page);
   return start === r.start && r.end === total ? r : { start, end: total };
+}
+
+/** Drop the opposite edge of a window, keeping object identity when already bounded. */
+export function capRange(r: ReadRange, max: number, direction: "up" | "down"): ReadRange {
+  if (r.end - r.start <= max) return r;
+  return direction === "down" ? { start: r.end - max, end: r.end } : { start: r.start, end: r.start + max };
+}
+
+/** Standalone picture rows are hidden without rebuilding the full reader list. */
+export function isPictureRow(item: ReaderItem): boolean {
+  return item.kind === "screen" || item.kind === "cutin";
+}
+
+/** Resolve jumps past picture rows hidden by the display toggle, as when they were filtered out. */
+export function visibleReaderIndex(items: readonly ReaderItem[], idx: number, picturesShown: boolean): number {
+  if (idx < 0 || idx >= items.length) return -1;
+  if (picturesShown || !isPictureRow(items[idx])) return idx;
+  for (let i = idx + 1; i < items.length; i++) if (!isPictureRow(items[i])) return i;
+  for (let i = idx - 1; i >= 0; i--) if (!isPictureRow(items[i])) return i;
+  return -1;
 }
