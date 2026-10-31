@@ -2,6 +2,7 @@ import type { GameFolder } from "@/core/fs/folder";
 import type { GameData } from "@/core/types";
 import { decodeAudio, decodeImage } from "./decrypt";
 import { classifiedName } from "./pictureFolders";
+import { ResourceCache, type ResourceLease } from "./resourceCache";
 
 export type AssetKind = "faces" | "pictures" | "tilesets" | "characters" | "system";
 
@@ -23,21 +24,20 @@ function extensionsFor(data: GameData): string[] {
   return data.engine === "MZ" ? [".png_", ".rpgmvp", ".png"] : [".rpgmvp", ".png_", ".png"];
 }
 
-interface Entry {
-  promise: Promise<AssetResult>;
-  /** 읽기 실패로 끝난 시각(실패한 경우만). */
-  failedAt?: number;
-}
-
 export interface AssetStoreOptions {
   now?: () => number;
+  /** Decoded bytes (width * height * 4); active leases may temporarily exceed this. */
+  imageBudget?: number;
+  /** Compressed image Blob bytes retained between requests. */
+  blobBudget?: number;
   /** 백오프 대기. 테스트에서 바꿔 끼운다. */
   wait?: (ms: number) => Promise<void>;
 }
 
 export class AssetStore {
-  private cache = new Map<string, Entry>();
-  private images = new Map<string, Promise<ImageBitmap | null>>();
+  private cache: ResourceCache<AssetResult>;
+  private images: ResourceCache<ImageBitmap | null>;
+  private failures = new Map<string, number>();
   private audioClips = new Map<string, Promise<Blob | null>>();
 
   private folder: GameFolder;
@@ -46,6 +46,10 @@ export class AssetStore {
   private wait: (ms: number) => Promise<void>;
 
   constructor(folder: GameFolder, data: GameData, opts: AssetStoreOptions = {}) {
+    this.cache = new ResourceCache(opts.blobBudget ?? 128 * 1024 * 1024,
+      r => r.status === "ok" ? r.blob.size : 0, undefined, r => r.status !== "failed");
+    this.images = new ResourceCache(opts.imageBudget ?? 256 * 1024 * 1024,
+      img => img ? img.width * img.height * 4 : 0, img => img?.close(), img => img !== null);
     this.folder = folder;
     this.data = data;
     this.now = opts.now ?? (() => Date.now());
@@ -59,20 +63,18 @@ export class AssetStore {
   fetch(kind: AssetKind, name: string): Promise<AssetResult> {
     if (name === "") return Promise.resolve({ status: "missing" });
     const key = `${kind}/${name}`;
-    const entry = this.cache.get(key);
-    if (entry && entry.failedAt === undefined) return entry.promise;
-    const delay = entry?.failedAt !== undefined ? entry.failedAt + RETRY_BACKOFF_MS - this.now() : 0;
-    const next: Entry = { promise: Promise.resolve({ status: "missing" }) };
-    next.promise = (delay > 0 ? this.wait(delay) : Promise.resolve())
-      .then(() => this.read(kind, name))
-      .catch((): AssetResult => ({ status: "failed" }))
-      .then((r) => {
-        // 실패는 결과로 남기지 않는다: 다음 요청이 (백오프를 지켜) 새로 읽는다.
-        if (r.status === "failed" && this.cache.get(key) === next) next.failedAt = this.now();
-        return r;
-      });
-    this.cache.set(key, next);
-    return next.promise;
+    return this.cache.get(key, async () => {
+      const failedAt = this.failures.get(key);
+      const delay = failedAt === undefined ? 0 : failedAt + RETRY_BACKOFF_MS - this.now();
+      if (delay > 0) await this.wait(delay);
+      const result = await this.read(kind, name).catch((): AssetResult => ({ status: "failed" }));
+      this.failures.delete(key);
+      if (result.status === "failed") {
+        this.failures.set(key, this.now());
+        if (this.failures.size > 2048) this.failures.delete(this.failures.keys().next().value!);
+      }
+      return result;
+    });
   }
 
   /** 그림 Blob. 없거나 읽기 실패면 null. */
@@ -114,23 +116,14 @@ export class AssetStore {
     return promise;
   }
 
-  /** 캔버스에 그릴 이미지(이름별 캐시). 없음·디코드 실패나 createImageBitmap이 없는 환경이면 null. 읽기 실패는 캐시하지 않는다. */
-  image(kind: AssetKind, name: string): Promise<ImageBitmap | null> {
-    if (name === "") return Promise.resolve(null);
-    const key = `${kind}/${name}`;
-    const cached = this.images.get(key);
-    if (cached) return cached;
-    const p: Promise<ImageBitmap | null> = this.fetch(kind, name)
-      .then((r) => {
-        if (r.status === "failed") {
-          if (this.images.get(key) === p) this.images.delete(key);
-          return null;
-        }
-        return r.status === "ok" && typeof createImageBitmap === "function" ? createImageBitmap(r.blob) : null;
-      })
-      .catch(() => null);
-    this.images.set(key, p);
-    return p;
+  /** Pin a shared bitmap, including its in-flight decode. Release when the consumer leaves. */
+  acquireImage(kind: AssetKind, name: string): ResourceLease<ImageBitmap | null> {
+    return this.images.acquire(kind + "/" + name, async () => {
+      if (!name) return null;
+      const r = await this.fetch(kind, name);
+      if (r.status !== "ok" || typeof createImageBitmap !== "function") return null;
+      try { return await createImageBitmap(r.blob); } catch { return null; }
+    });
   }
 
   /**

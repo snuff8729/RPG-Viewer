@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ReaderItem } from "@/core/live/reader";
-import { clampRange, extendDown, extendUp, grownRange, initialView, rangeShowing, readStats, sameRange, tailRange, trimToTail } from "./readerWindow";
+import { capRange, clampRange, extendDown, extendUp, grownRange, initialView, rangeShowing, readStats, sameRange, tailRange, trimToTail, visibleReaderIndex } from "./readerWindow";
 
 const msg = (seq: number, repeat?: number): ReaderItem => ({ kind: "message", key: `r${seq}`, seq, speaker: "", face: "", faceIndex: 0, lines: ["x"], src: null, cmd: null, ...(repeat ? { repeat } : {}) });
 const chapter = (k: string): ReaderItem => ({ kind: "chapter", key: k, text: "— 숲 —" });
@@ -54,7 +54,7 @@ describe("range helpers", () => {
     const up = extendUp(extendUp(tailRange(1000, 300), 300), 300); // [100, 1000) — 2×page 넘음
     expect(up).toEqual({ start: 100, end: 1000 });
     const g = grownRange(up, 1000, 9000, 300);
-    expect(g).toEqual({ start: 100, end: 1300 });
+    expect(g).toEqual({ start: 400, end: 1300 });
     expect(g.start <= 1000 && 1000 < g.end).toBe(true);
   });
   it("grownRange: detached range stays", () => {
@@ -85,5 +85,55 @@ describe("range helpers", () => {
     expect(clampRange({ start: 0, end: 10 }, 0, 300)).toEqual({ start: 0, end: 0 });
     expect(sameRange({ start: 1, end: 2 }, { start: 1, end: 2 })).toBe(true);
     expect(sameRange({ start: 1, end: 2 }, { start: 1, end: 3 })).toBe(false);
+  });
+});
+
+
+describe("bounded reading window", () => {
+  it("caps the opposite edge and preserves identity below the limit", () => {
+    const r = { start: 100, end: 1000 };
+    expect(capRange(r, 900, "up")).toBe(r);
+    expect(capRange(r, 450, "down")).toEqual({ start: 550, end: 1000 });
+    expect(capRange(r, 450, "up")).toEqual({ start: 100, end: 550 });
+  });
+  it("stays bounded over repeated loads down, then back up to the beginning", () => {
+    let r = { start: 0, end: 150 };
+    for (let n = 0; n < 100; n++) {
+      r = extendDown(r, 5000, 150);
+      expect(r.end - r.start).toBeLessThanOrEqual(450);
+    }
+    expect(r).toEqual({ start: 4550, end: 5000 });
+    for (let n = 0; n < 100; n++) {
+      r = extendUp(r, 150);
+      expect(r.end - r.start).toBeLessThanOrEqual(450);
+    }
+    expect(r).toEqual({ start: 0, end: 450 });
+  });
+  it("caps live growth while retaining the first newly appended item", () => {
+    const r = grownRange({ start: 0, end: 450 }, 450, 10000, 150);
+    expect(r).toEqual({ start: 150, end: 600 });
+    expect(r.start <= 450 && r.end > 450).toBe(true);
+    expect(trimToTail(r, 600, 150)).toEqual({ start: 450, end: 600 });
+  });
+  it("honors a supplied cap in either direction", () => {
+    expect(extendDown({ start: 0, end: 300 }, 1000, 150, 350)).toEqual({ start: 100, end: 450 });
+    expect(extendUp({ start: 400, end: 700 }, 150, 350)).toEqual({ start: 250, end: 600 });
+  });
+  it("keeps picture hiding out of the first-unread and read-position stats", () => {
+    const screen: ReaderItem = { kind: "screen", key: "r1", seq: 1, screen: { kind: "stand", pictures: [] } };
+    expect(readStats([screen, msg(2)], -1, false)).toEqual({ lastReadIdx: -1, firstUnreadIdx: 1, unread: 1 });
+    expect(readStats([msg(0), screen], 1, false)).toEqual({ lastReadIdx: 0, firstUnreadIdx: -1, unread: 0 });
+  });
+});
+
+
+describe("jumps with pictures hidden", () => {
+  const screen: ReaderItem = { kind: "screen", key: "r1", seq: 1, screen: { kind: "stand", pictures: [] } };
+  it("uses the next visible item, or the preceding one at the tail", () => {
+    expect(visibleReaderIndex([msg(0), screen, msg(2)], 1, false)).toBe(2);
+    expect(visibleReaderIndex([msg(0), screen], 1, false)).toBe(0);
+    expect(visibleReaderIndex([msg(0), screen], 1, true)).toBe(1);
+    expect(visibleReaderIndex([screen], 0, false)).toBe(-1);
+    expect(visibleReaderIndex([], 0, true)).toBe(-1);
   });
 });

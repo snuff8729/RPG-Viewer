@@ -466,17 +466,18 @@ export function MapCanvas({
     return [...s].sort();
   }, [events]);
   const charKey = charNames.join("\n");
-  const [chars, setChars] = useState<{ key: string; map: Map<string, ImageBitmap | null> } | null>(null);
+  const [chars, setChars] = useState<{ assets: unknown; key: string; map: Map<string, ImageBitmap | null> } | null>(null);
   useEffect(() => {
     if (!assets) return;
     let alive = true;
     const names = charKey ? charKey.split("\n") : [];
-    void Promise.all(names.map((n) => assets.image("characters", n))).then((bmps) => {
-      if (alive) setChars({ key: charKey, map: new Map(names.map((n, i) => [n, bmps[i]])) });
+    const leases = names.map(n => assets.acquireImage("characters", n));
+    void Promise.all(leases.map(lease => lease.value)).then((bmps) => {
+      if (alive) setChars({ assets, key: charKey, map: new Map(names.map((n, i) => [n, bmps[i]])) });
     });
-    return () => { alive = false; };
+    return () => { alive = false; leases.forEach(lease => lease.release()); };
   }, [assets, charKey]);
-  const charsReady = chars?.key === charKey ? chars.map : null;
+  const charsReady = chars?.assets === assets && chars?.key === charKey ? chars.map : null;
 
   // 바탕은 맵·타일셋·움직이지 않는 이벤트·캐릭터 그림이 바뀔 때만 다시 그린다(돌아다니는 NPC 위치는 키에 없다)
   const sk = staticKey(events);

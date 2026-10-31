@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { useReaderItemState } from "../live/readerItemState";
 import { useGame } from "@/app/GameProvider";
 import { DEFAULT_SCREEN, type ScreenShot } from "@/core/addons/screenPictures";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,8 @@ import { Toggle } from "@/components/ui/toggle";
 import { HidePicturesMenu } from "./HidePicturesMenu";
 import { PictureLoadNotes, ShotButton } from "./ScreenPictures";
 import { standView, usePictureImages } from "./pictureImages";
+import { PictureViewport } from "./PictureViewport";
+import { usePicturesNearViewport } from "./pictureViewportContext";
 import { isFlatImage } from "./imageStats";
 
 /** `재생` 때 장면을 넘기는 간격(ms) */
@@ -17,19 +20,24 @@ const FRAME_MS = 120;
  * 이벤트 그림이 있는 컷인(화면을 덮는 것)은 화면 그대로, 아니면 모든 장면이 차지하는 부분으로 잘라(장면을 넘겨도 크기가 그대로).
  * 한 가지 색으로만 덮은 장면 하나뿐인 것(화면 전환용 검은·흰 그림)은 보이지 않는다.
  */
-export function CutinPictures({ frames, best }: { frames: ScreenShot[]; best: number }) {
+export function CutinPictures({ frames, best, stateKey }: { frames: ScreenShot[]; best: number; stateKey: string }) {
+  return <PictureViewport><CutinPicturesBody frames={frames} best={best} stateKey={stateKey} /></PictureViewport>;
+}
+
+function CutinPicturesBody({ frames, best, stateKey }: { frames: ScreenShot[]; best: number; stateKey: string }) {
+  const active = usePicturesNearViewport();
   const { data } = useGame();
   const guessed = data?.screenSize ?? DEFAULT_SCREEN;
   const names = useMemo(() => [...new Set(frames.flatMap((f) => f.pictures.map((p) => p.name)))], [frames]);
   const { images, status, retry } = usePictureImages(names);
-  const [index, setIndex] = useState(() => Math.max(0, Math.min(best, frames.length - 1)));
+  const [index, setIndex] = useReaderItemState("cutin:" + stateKey, Math.max(0, Math.min(best, frames.length - 1)));
   const [playing, setPlaying] = useState(false);
   const count = frames.length;
   useEffect(() => {
-    if (!playing || count < 2) return;
+    if (!active || !playing || count < 2) return;
     const h = window.setInterval(() => setIndex((i) => (i + 1) % count), FRAME_MS);
     return () => window.clearInterval(h);
-  }, [playing, count]);
+  }, [active, playing, count, setIndex]);
   // `그림 숨기기` 메뉴용: 모든 장면의 겹
   const all = useMemo<ScreenShot | null>(() => {
     if (count === 0) return null;

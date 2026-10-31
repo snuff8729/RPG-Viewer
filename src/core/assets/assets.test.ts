@@ -44,9 +44,11 @@ describe("AssetStore", () => {
     expect(await head(await skinStore.load("system", "Window"))).toEqual(PNG_SIG);
     expect(skinStore.fetch("system", "Window")).toBe(skinStore.fetch("system", "Window"));
   });
-  it("image() is null when missing or when createImageBitmap is unavailable", async () => {
-    expect(await store.image("characters", "nope")).toBeNull();
-    expect(await store.image("tilesets", "")).toBeNull();
+  it("acquireImage() is null when missing or when createImageBitmap is unavailable", async () => {
+    const missing = store.acquireImage("characters", "nope"), empty = store.acquireImage("tilesets", "");
+    expect(await missing.value).toBeNull();
+    expect(await empty.value).toBeNull();
+    missing.release(); empty.release();
   });
   it("returns null for missing", async () => expect(await store.load("pictures", "nope")).toBeNull());
   it("returns null for empty name", async () => expect(await store.load("faces", "")).toBeNull());
@@ -215,10 +217,14 @@ describe("AssetStore missing vs failed", () => {
   it("image() does not cache a read failure", async () => {
     let fail = true;
     const s = await setup(flaky(() => fail));
-    const first = s.store.image("faces", "People1");
-    expect(await first).toBeNull();
+    const first = s.store.acquireImage("faces", "People1");
+    expect(await first.value).toBeNull();
+    first.release();
     fail = false;
     s.advance(RETRY_BACKOFF_MS);
-    expect(s.store.image("faces", "People1")).not.toBe(first);
+    const second = s.store.acquireImage("faces", "People1");
+    expect(second.value).not.toBe(first.value);
+    await second.value;
+    second.release();
   });
 });
