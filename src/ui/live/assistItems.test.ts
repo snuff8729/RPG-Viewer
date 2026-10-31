@@ -13,11 +13,15 @@ describe("assist favorites bar items", () => {
     }
   });
   it("uses short names in the bar", () => {
+    expect(ASSIST_FAVORITE_IDS).toContain("walkSpeed");
+    expect(assistFavoriteLabel("walkSpeed")).toBe("이동 속도");
+    expect(assistFavoriteShortLabel("walkSpeed")).toBe("이동 속도");
     expect(assistFavoriteShortLabel("skipSeen")).toBe("넘기기");
     expect(assistFavoriteShortLabel("enemyHpFull")).toBe("적 HP 100%");
     expect(assistFavoriteShortLabel("restore")).toBe("복원");
   });
   it("hides battle controls outside battle, keeps order", () => {
+    expect(visibleAssistFavorites(["walkSpeed", "win", "speed"], false)).toEqual(["walkSpeed", "speed"]);
     expect(visibleAssistFavorites(["speed", "win", "hpFull", "escape"], false)).toEqual(["speed", "hpFull"]);
     expect(visibleAssistFavorites(["speed", "win", "hpFull", "escape"], true)).toEqual(["speed", "win", "hpFull", "escape"]);
   });

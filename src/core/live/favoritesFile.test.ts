@@ -12,6 +12,9 @@ describe("assist favorites ids / defaults", () => {
     expect(DEFAULT_ASSIST_FAVORITES).toEqual(["speed", "skipSeen", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow"]);
     for (const id of DEFAULT_ASSIST_FAVORITES) expect(ASSIST_FAVORITE_IDS).toContain(id);
     expect(isAssistFavoriteId("backup")).toBe(true);
+    expect(isAssistFavoriteId("walkSpeed")).toBe(true);
+    const saved = serializeFavoritesFile({ assist: ["speed", "walkSpeed"], cheat: null }, 3);
+    expect(parseFavoritesFile(saved)?.assist).toEqual(["speed", "walkSpeed"]);
     expect(isAssistFavoriteId("autoSpeed")).toBe(false);
     expect(isAssistFavoriteId(null)).toBe(false);
   });

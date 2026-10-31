@@ -16,7 +16,7 @@ import type { GameFolder } from "../fs/folder";
 
 /** 맨 위 줄에 올릴 수 있는 보조 기능. autoFast = 본 이벤트 자동 배속(켜기 + 빠르기 autoSpeed). */
 export type AssistFavoriteId =
-  | "speed" | "skipSeen" | "autoFast"
+  | "speed" | "walkSpeed" | "skipSeen" | "autoFast"
   | "noRandomEncounter" | "skipBattles" | "skipKnownOnly"
   | "win" | "lose" | "escape" | "enemyHpFull" | "enemyHpLow"
   | "hpFull" | "hpLow"
@@ -25,7 +25,7 @@ export type AssistFavoriteId =
 
 /** 모든 보조 즐겨찾기 후보(보조 탭에 보이는 순서) */
 export const ASSIST_FAVORITE_IDS: readonly AssistFavoriteId[] = [
-  "speed", "skipSeen", "autoFast",
+  "speed", "walkSpeed", "skipSeen", "autoFast",
   "noRandomEncounter", "skipBattles", "skipKnownOnly",
   "win", "lose", "escape", "enemyHpFull", "enemyHpLow",
   "hpFull", "hpLow",

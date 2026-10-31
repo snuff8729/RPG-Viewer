@@ -10,6 +10,7 @@ let h: Harness;
  */
 const CTRL = 256, SHIFT = 512;
 const SAVE_KEYS = {
+  walkSpeed: 117 | SHIFT,
   autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL, enemyHpFull: 36 | CTRL, enemyHpLow: 35 | CTRL,
   quickSave: 83 | CTRL, quickLoad: 76 | CTRL, saveMenu: 83 | CTRL | SHIFT, loadMenu: 76 | CTRL | SHIFT,
   backup: 66 | CTRL, restore: 66 | CTRL | SHIFT,
@@ -1052,14 +1053,14 @@ describe("RPGViewerBridge", () => {
     expect(h.fs.existsSync(LIVE_PATH + ".tmp")).toBe(false);
     const src = { source: "map", mapId: 1, eventId: 1, page: 0 };
     expect(h.readLive()).toEqual({
-      v: 1, t: 1_000_000, pluginVersion: "1.26.0", run: 1, branch: 1, seq: 4,
+      v: 1, t: 1_000_000, pluginVersion: "1.27.0", run: 1, branch: 1, seq: 4,
       mapId: 1, x: 3, y: 4, running: src, runningCmd: 1,
       events: [{ eventId: 1, page: 0 }, { eventId: 2, page: -1 }],
       switches: [3], variables: { 4: 9 }, selfSwitches: ["1,2,B"],
       items: { 1: 2 }, weapons: { 3: 1 }, armors: {}, gold: 120, party: [1, 4],
       choice: { src, cmd: 0, options: ["Go", "Stay"] }, inBattle: false,
       assist: {
-        speed: 1, effectiveSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8,
+        speed: 1, walkSpeed: 1, effectiveSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8,
         noRandomEncounter: false, skipBattles: false, skipKnownOnly: false, knownEnemies: 0, troopId: null, canEscape: false, canLose: false,
         lastCommand: null, controlT: null, capturePictures: false, captureMenuScenes: false, captureNotices: false, notices: [], htmlNotices: false, extensions: [],
         hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, hpFull: 36, hpLow: 35, ...SAVE_KEYS },
@@ -1329,6 +1330,119 @@ describe("RPGViewerBridge", () => {
       return interp;
     };
     const pressOkCount = (w: any, frames: number) => { for (let i = 0; i < frames; i++) w.updateInput(); return w.advanced; };
+
+    describe("walk speed (1.27.0)", () => {
+      for (const engine of ["MV", "MZ"] as const) {
+        it(`multiplies player and follower distance once, preserving dash and event speeds (${engine})`, () => {
+          h = newGame(engine);
+          onMap(h);
+          const player = h.g.$gamePlayer;
+          const follower = new h.g.Game_Follower();
+          const event = h.addMapEvent(1, [[cmd(0)]]);
+          event.setMoveSpeed(5);
+          expect(player.distancePerFrame()).toBe(1 / 16);
+          for (const walkSpeed of [1, 1.5, 2, 3]) {
+            writeControl(h, { walkSpeed });
+            poll(h);
+            for (const dash of [false, true]) {
+              player._dashing = dash;
+              follower.update();
+              const before = JSON.stringify([player, follower, event]);
+              const base = dash ? 1 / 8 : 1 / 16;
+              expect(player.distancePerFrame()).toBe(base * walkSpeed);
+              expect(follower.distancePerFrame()).toBe(base * walkSpeed);
+              expect(event.distancePerFrame()).toBe(1 / 8);
+              expect(JSON.stringify([player, follower, event])).toBe(before);
+              expect(player.moveSpeed()).toBe(4);
+            }
+            expect(assistOf(h)).toMatchObject({ walkSpeed, speed: 1, effectiveSpeed: 1 });
+          }
+          // An event move route changes the base speed; disabling assist reveals exactly that speed.
+          player._dashing = false;
+          player.setMoveSpeed(3);
+          expect(player.distancePerFrame()).toBe(3 / 32);
+          writeControl(h, { walkSpeed: 1 });
+          poll(h);
+          expect(player.distancePerFrame()).toBe(1 / 32);
+          expect(player.moveSpeed()).toBe(3);
+        });
+
+        it(`keeps boat, ship and airship base speeds, caps at one tile, runs only on the map (${engine})`, () => {
+          h = newGame(engine);
+          onMap(h);
+          writeControl(h, { walkSpeed: 3, speed: 4 });
+          poll(h);
+          const player = h.g.$gamePlayer;
+          const follower = new h.g.Game_Follower();
+          for (const [type, speed] of [["boat", 4], ["ship", 5], ["airship", 6]] as const) {
+            const vehicle = new h.g.Game_Vehicle(type);
+            player.setMoveSpeed(vehicle.moveSpeed()); // Game_Player.getOnVehicle
+            expect(player.distancePerFrame()).toBe(3 * Math.pow(2, speed) / 256);
+            expect(vehicle.distancePerFrame()).toBe(Math.pow(2, speed) / 256);
+            expect(vehicle.moveSpeed()).toBe(speed);
+          }
+          player.setMoveSpeed(8); // custom/event-set high speed
+          follower.update();
+          expect(player.distancePerFrame()).toBe(1);
+          expect(follower.distancePerFrame()).toBe(1);
+          expect(player.moveSpeed()).toBe(8);
+          player.setMoveSpeed(4);
+          follower.update();
+          for (const scene of [new h.g.Scene_Title(), new h.g.Scene_Battle(), {}, null]) {
+            h.g.SceneManager._scene = scene;
+            expect(player.distancePerFrame()).toBe(1 / 16);
+            expect(follower.distancePerFrame()).toBe(1 / 16);
+          }
+          onMap(h);
+          expect(player.distancePerFrame()).toBe(3 / 16);
+          expect(assistOf(h)).toMatchObject({ walkSpeed: 3, speed: 4 });
+        });
+      }
+
+      it("cycles Shift+F6 through ×1.5 → ×2 → ×3 → ×1 with toasts and keeps hotkey changes on identical rewrites", () => {
+        h = newGame();
+        onMap(h);
+        writeControl(h, { walkSpeed: 1, speed: 2, autoSpeed: 4 });
+        poll(h);
+        const press = () => {
+          expect(h.g.Input.keyEvent(117, { shift: true })).toEqual({ stopped: true, prevented: true });
+          h.bridge._frame(); h.g.Input.update(); h.g.Input.keyUp(117); h.g.Input.update();
+        };
+        expect(assistOf(h).hotkeys.walkSpeed).toBe(117 | SHIFT);
+        for (const walkSpeed of [1.5, 2, 3, 1]) {
+          press();
+          expect(assistOf(h)).toMatchObject({ walkSpeed, speed: 2, autoSpeed: 4 });
+          expect(h.bridge._lastMessage).toBe("이동 속도 ×" + walkSpeed);
+          writeControl(h, { walkSpeed: 1, speed: 2, autoSpeed: 4, seenMessages: ["x"] });
+          poll(h);
+          expect(assistOf(h).walkSpeed).toBe(walkSpeed);
+        }
+        press();
+        writeControl(h, { walkSpeed: 3 });
+        poll(h);
+        expect(assistOf(h).walkSpeed).toBe(3);
+        writeControl(h, { walkSpeed: 3, hotkeys: { walkSpeed: null } });
+        poll(h);
+        expect(assistOf(h).hotkeys.walkSpeed).toBeNull();
+        writeControl(h, { walkSpeed: 3, hotkeys: { walkSpeed: 65 } });
+        poll(h);
+        h.g.Input.press(65); h.bridge._frame(); h.g.Input.update();
+        expect(assistOf(h).walkSpeed).toBe(1);
+      });
+
+      it("defaults missing or invalid walkSpeed to ×1, including an old viewer replacing a faster setting", () => {
+        h = newGame();
+        onMap(h);
+        for (const walkSpeed of [undefined, null, "2", 4, 0, -1, true, {}]) {
+          writeControl(h, { walkSpeed: 3 });
+          poll(h);
+          writeControl(h, { walkSpeed });
+          poll(h);
+          expect(assistOf(h).walkSpeed).toBe(1);
+          expect(h.g.$gamePlayer.distancePerFrame()).toBe(1 / 16);
+        }
+      });
+    });
 
     it("polls control.json at most once per second, re-reads on mtime change, ignores bad input", () => {
       h = newGame();
@@ -2038,13 +2152,13 @@ describe("RPGViewerBridge", () => {
 
   it("exposes VERSION once with an RPG Maker plugin header", () => {
     const src = readFileSync(PLUGIN_PATH, "utf8");
-    expect(src.match(/VERSION:\s*"1\.26\.0"/g)).toHaveLength(1);
+    expect(src.match(/VERSION:\s*"1\.27\.0"/g)).toHaveLength(1);
     expect(src.startsWith("/*:")).toBe(true);
     expect(src).toContain("@target MZ MV");
     expect(src).toContain("@plugindesc RPG Viewer 기록 플러그인");
     expect(src).toContain("@author RPG Viewer");
     h = createHarness();
-    expect(h.bridge.VERSION).toBe("1.26.0");
+    expect(h.bridge.VERSION).toBe("1.27.0");
   });
 
   it("uses ES2015-compatible syntax only", () => {

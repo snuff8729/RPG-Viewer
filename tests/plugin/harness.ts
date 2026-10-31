@@ -213,7 +213,27 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     return this._data[id];
   };
   Game_Troop.prototype.troop = function () { return g.$dataTroops[this._troopId]; };
-  function Game_Player(this: any) { this.x = 0; this.y = 0; this._transferring = false; this._newMapId = 0; this._newX = 0; this._newY = 0; }
+  // MV/MZ movement: subclasses inherit distancePerFrame; followers copy realMoveSpeed on update.
+  function Game_CharacterBase(this: any) { this._moveSpeed = 4; }
+  Game_CharacterBase.prototype.setMoveSpeed = function (speed: number) { this._moveSpeed = speed; };
+  Game_CharacterBase.prototype.moveSpeed = function () { return this._moveSpeed; };
+  Game_CharacterBase.prototype.isDashing = function () { return false; };
+  Game_CharacterBase.prototype.realMoveSpeed = function () { return this._moveSpeed + (this.isDashing() ? 1 : 0); };
+  Game_CharacterBase.prototype.distancePerFrame = function () { return Math.pow(2, this.realMoveSpeed()) / 256; };
+  function Game_Follower(this: any) { Game_CharacterBase.call(this); }
+  Game_Follower.prototype = Object.create(Game_CharacterBase.prototype);
+  Game_Follower.prototype.constructor = Game_Follower;
+  Game_Follower.prototype.update = function () { this.setMoveSpeed(g.$gamePlayer.realMoveSpeed()); };
+  function Game_Vehicle(this: any, type: string) {
+    Game_CharacterBase.call(this);
+    this.setMoveSpeed(type === "boat" ? 4 : type === "ship" ? 5 : 6);
+  }
+  Game_Vehicle.prototype = Object.create(Game_CharacterBase.prototype);
+  Game_Vehicle.prototype.constructor = Game_Vehicle;
+  function Game_Player(this: any) { Game_CharacterBase.call(this); this.x = 0; this.y = 0; this._transferring = false; this._newMapId = 0; this._newX = 0; this._newY = 0; }
+  Game_Player.prototype = Object.create(Game_CharacterBase.prototype);
+  Game_Player.prototype.constructor = Game_Player;
+  Game_Player.prototype.isDashing = function () { return !!this._dashing; };
   Game_Player.prototype.isTransferring = function () { return this._transferring; };
   Game_Player.prototype.updateEncounterCount = function () { this._encounterCount = (this._encounterCount ?? 3) - 1; };
   Game_Player.prototype.makeEncounterCount = function () { this._encounterCount = 3; };
@@ -233,9 +253,12 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     }
   };
   function Game_Event(this: any, eventId: number, pages: Cmd[][], pageIndex: number) {
+    Game_CharacterBase.call(this);
     this._eventId = eventId; this._pageIndex = pageIndex;
     this._data = { id: eventId, pages: pages.map((list) => ({ list })) };
   }
+  Game_Event.prototype = Object.create(Game_CharacterBase.prototype);
+  Game_Event.prototype.constructor = Game_Event;
   Game_Event.prototype.eventId = function () { return this._eventId; };
   Game_Event.prototype.event = function () { return this._data; };
   Game_Event.prototype.list = function () { return this._data.pages[this._pageIndex].list; };
@@ -666,6 +689,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
 
   Object.assign(g, {
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
+    Game_CharacterBase, Game_Follower, Game_Vehicle,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Game_Enemy, Game_Actor, Game_Actors, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
     SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture, Bitmap,
     AudioManager: {

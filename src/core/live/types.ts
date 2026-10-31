@@ -121,6 +121,8 @@ export interface LiveActor {
 export interface LiveAssist {
   /** 기본 배속(단축키 F6으로 바뀔 수 있음) */
   speed: number;
+  /** 맵에서 플레이어·동료의 이동 거리 배율(플러그인 1.25.0+) */
+  walkSpeed?: number;
   /** 지금 실제로 돌고 있는 배속(자동 배속 포함) */
   effectiveSpeed: number;
   skipSeen: boolean;
