@@ -8,6 +8,7 @@ import { branchPath, buildHistory, foldTimeline } from "./history";
 import { lastSeqOf, readerItems } from "./reader";
 import { picturesBySeq, scenesBySeq, type PictureContext } from "../addons/screenPictures";
 import type { HistoryItem, LogRecord } from "./types";
+import { formatRich, formatText } from "../text/escape";
 
 let data: GameData;
 beforeAll(async () => {
@@ -26,6 +27,17 @@ const rec = { v: 1, run: 1, branch: 1, t: 0 } as const;
 const item = (record: LogRecord): HistoryItem => ({ kind: "record", uncertain: false, changed: false, record });
 
 describe("readerItems", () => {
+  it("preserves raw message styles while keeping reader text and speaker plain", () => {
+    const rawText = "\\C[2]first\\{big\nsecond\\C[0]end";
+    const rawSpeaker = "\\C[#abc]\\N[1]\\FS[80]";
+    const out = readerItems([
+      item({ ...rec, seq: 1, type: "message", src: null, cmd: 0, face: "", faceIndex: 0, speaker: rawSpeaker, text: rawText }),
+      item({ ...rec, seq: 2, type: "scroll", src: null, cmd: 1, text: rawText }),
+    ], data, new Map(), model);
+    expect(out[0]).toMatchObject({ kind: "message", speaker: formatText(rawSpeaker, data), lines: ["firstbig", "secondend"], rawText, rawSpeaker });
+    expect(out[1]).toMatchObject({ kind: "scroll", lines: ["firstbig", "secondend"], rawText });
+    expect(formatRich(rawText, data).some(segment => segment.color && segment.size)).toBe(true);
+  });
   it("shows no branch-start chapter for a save-load continuation", () => {
     const recs = [
       { ...rec, seq: 1, type: "branchStart", reason: "newGame", parentBranch: null, fromSeq: null },
