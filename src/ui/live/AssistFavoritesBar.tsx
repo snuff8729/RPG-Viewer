@@ -7,7 +7,7 @@ import type { AssistFavoriteId } from "@/core/live/favoritesFile";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  AssistCommandButton, AutoFastControl, AutoSpeedControl, EncounterControl, SkipSeenControl, SpeedControl, type AssistControlSize,
+  AssistCommandButton, AutoFastControl, AutoSpeedControl, EncounterControl, SkipSeenControl, SpeedControl, WalkSpeedControl, type AssistControlSize,
 } from "./AssistControls";
 import { visibleAssistFavorites, withObjectParticle } from "./assistItems";
 import { BackupNowButton, RestoreLatestButton } from "./BackupControls";
@@ -42,6 +42,7 @@ function LoseButton({ size }: { size: AssistControlSize }) {
 function FavoriteControl({ id, size, idPrefix }: { id: AssistFavoriteId; size: AssistControlSize; idPrefix: string }): ReactNode {
   switch (id) {
     case "speed": return <SpeedControl size={size} short />;
+    case "walkSpeed": return <WalkSpeedControl size={size} short />;
     case "skipSeen": return <SkipSeenControl id={`${idPrefix}-skip-seen`} short />;
     case "autoFast":
       return (

@@ -11,6 +11,8 @@ import { cheatOpsForControl, type CheatOp } from "./cheat";
  */
 export interface AssistSettings {
   speed: 1 | 2 | 4 | 8; skipSeen: boolean; autoFast: boolean; autoSpeed: 2 | 4 | 8; hotkeys: Hotkeys;
+  /** 맵에서 플레이어·동료의 이동 거리 배율(플러그인 1.25.0) */
+  walkSpeed: 1 | 1.5 | 2 | 3;
   /** 퀵 세이브·퀵 로드 칸(1~). null = 게임의 마지막 세이브 칸(플러그인 1.21.0) */
   quickSlot: number | null;
   /**
@@ -27,7 +29,7 @@ export interface AssistSettings {
  * enemyHpFull·enemyHpLow(전투 중 적 체력 100%·1%)는 1.23.0.
  */
 export type HotkeyAction =
-  | "speed" | "autoSpeed" | "skip" | "autoFast" | "win" | "lose" | "escape" | "enemyHpFull" | "enemyHpLow" | "hpFull" | "hpLow"
+  | "speed" | "walkSpeed" | "autoSpeed" | "skip" | "autoFast" | "win" | "lose" | "escape" | "enemyHpFull" | "enemyHpLow" | "hpFull" | "hpLow"
   | "quickSave" | "quickLoad" | "saveMenu" | "loadMenu" | "backup" | "restore";
 /**
  * 동작별 단축키. null = 끔. 값 = DOM keyCode | Ctrl 256 | Shift 512 | Alt 1024(조합 키, 플러그인 1.22.0).
@@ -56,12 +58,13 @@ const ctrlShift = (k: number) => k | MOD_CTRL | MOD_SHIFT;
 
 /**
  * 1.22.0부터의 기본값. 진행: F6 배속, Ctrl+F6 자동 배속 빠르기, F7 본 대사 넘기기, Ctrl+F7 본 이벤트 자동 배속.
+ * 1.25.0: Shift+F6 이동 속도(×1→×1.5→×2→×3).
  * 전투: F10 이기기, F11 지기, Ctrl+F10 도망, Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1%(1.23.0). 체력: Home 100%, End 1%.
  * 세이브: Ctrl+S 퀵 세이브, Ctrl+L 퀵 로드(두 번), Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창.
  * 백업: Ctrl+B 백업, Ctrl+Shift+B 마지막 백업으로 복원(두 번).
  */
 export const DEFAULT_HOTKEYS: Hotkeys = {
-  speed: 117, autoSpeed: ctrl(117), skip: 118, autoFast: ctrl(118),
+  speed: 117, walkSpeed: 117 | MOD_SHIFT, autoSpeed: ctrl(117), skip: 118, autoFast: ctrl(118),
   win: 121, lose: 122, escape: ctrl(121), enemyHpFull: ctrl(36), enemyHpLow: ctrl(35),
   hpFull: 36, hpLow: 35,
   quickSave: ctrl(83), quickLoad: ctrl(76), saveMenu: ctrlShift(83), loadMenu: ctrlShift(76),
@@ -77,6 +80,7 @@ const V3_DEFAULT_HOTKEYS: Partial<Hotkeys> = {
  * 어떤 동작을 보고하지 않는 플러그인에는 그 단축키가 없다.
  */
 export const LEGACY_HOTKEYS: Hotkeys = {
+  walkSpeed: null,
   speed: 117, autoSpeed: null, skip: 118, autoFast: null, win: 121, lose: 122, escape: null, enemyHpFull: null, enemyHpLow: null, hpFull: null, hpLow: null,
   quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null, backup: null, restore: null,
 };
@@ -88,14 +92,15 @@ export const LEGACY_HOTKEYS: Hotkeys = {
  *   옮기고, 사용자가 바꾼 필드는 그대로 둔다(새 기본값과 겹치면 바꾼 쪽을 끈다).
  * - 5(1.23.0): 적 체력 100%·1%. 4 묶음은 그대로 두고 없는 이 두 필드만 기본값(Ctrl+Home·Ctrl+End)을 받는다.
  *   사용자가 그 조합을 이미 다른 동작에 썼으면 새 필드를 끈다(쓰던 단축키는 건드리지 않는다).
+ * - 6(1.25.0): 이동 속도(Shift+F6). 없는 필드만 채우고 이미 쓰던 키와 겹치면 새 필드를 끈다.
  */
-export const HOTKEYS_VERSION = 5;
+export const HOTKEYS_VERSION = 6;
 /** 조합 키 기본값(1.22.0)이 들어온 판: 이 판부터의 묶음은 없는 필드만 채운다 */
 const COMBO_KEYS_VERSION = 4;
 /** 체력 단축키 옮기기는 이 판 전의 묶음에만 */
 const HP_KEYS_VERSION = 2;
 export const DEFAULT_ASSIST: AssistSettings = {
-  speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
+  speed: 1, walkSpeed: 1, skipSeen: true, autoFast: true, autoSpeed: 8, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
   noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
 };
 export type HotkeyGroup = "진행" | "전투" | "체력" | "세이브" | "백업";
@@ -103,6 +108,7 @@ export const HOTKEY_GROUPS: readonly HotkeyGroup[] = ["진행", "전투", "체�
 /** 단축키 동작(표시 순서·묶음)과 이름. short는 하단 안내 줄에 쓴다. */
 export const HOTKEY_ACTIONS: readonly { action: HotkeyAction; group: HotkeyGroup; label: string; short: string }[] = [
   { action: "speed", group: "진행", label: "배속 바꾸기", short: "배속" },
+  { action: "walkSpeed", group: "진행", label: "이동 속도 바꾸기", short: "이동 속도" },
   { action: "autoSpeed", group: "진행", label: "자동 배속 빠르기 바꾸기", short: "자동 배속 빠르기" },
   { action: "skip", group: "진행", label: "본 대사 넘기기 켜고 끄기", short: "본 대사 넘기기" },
   { action: "autoFast", group: "진행", label: "본 이벤트 자동 배속 켜고 끄기", short: "자동 배속" },
@@ -141,6 +147,7 @@ const RESERVED_COMBOS: ReadonlySet<number> = new Set([
   ctrlShift(46),
 ]);
 export const SPEEDS = [1, 2, 4, 8] as const;
+export const WALK_SPEEDS = [1, 1.5, 2, 3] as const;
 export const AUTO_SPEEDS = [2, 4, 8] as const;
 /** control.json 지원 플러그인 최소 버전 */
 export const ASSIST_MIN_VERSION = "1.1.0";
@@ -152,6 +159,8 @@ export const SAVE_COMMAND_MIN_VERSION = "1.21.0";
 export const ENEMY_HP_COMMAND_MIN_VERSION = "1.23.0";
 /** 랜덤 전투 끄기·전투 건너뛰기·잡아 본 적만(noRandomEncounter·skipBattles·skipKnownOnly)을 지원하는 플러그인 최소 버전 */
 export const ENCOUNTER_MIN_VERSION = "1.24.0";
+/** 플레이어·동료 이동 속도 지원 플러그인 최소 버전 */
+export const WALK_SPEED_MIN_VERSION = "1.25.0";
 const COMMAND_KINDS: ReadonlySet<unknown> = new Set<AssistCommandKind>([
   "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow", "cheat", "saveMenu", "loadMenu", "quickSave", "quickLoad",
 ]);
@@ -168,6 +177,7 @@ const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object";
 
 export const isSpeed = (v: unknown): v is AssistSettings["speed"] => v === 1 || v === 2 || v === 4 || v === 8;
+export const isWalkSpeed = (v: unknown): v is AssistSettings["walkSpeed"] => v === 1 || v === 1.5 || v === 2 || v === 3;
 export const isAutoSpeed = (v: unknown): v is AssistSettings["autoSpeed"] => v === 2 || v === 4 || v === 8;
 
 /** 플러그인과 같은 범위: keyCode 8~255에 조합 비트(256·512·1024)만 */
@@ -315,6 +325,7 @@ export function normalizeAssist(v: unknown): AssistSettings {
   const o = isObj(v) ? v : {};
   return {
     speed: isSpeed(o.speed) ? o.speed : DEFAULT_ASSIST.speed,
+    walkSpeed: isWalkSpeed(o.walkSpeed) ? o.walkSpeed : DEFAULT_ASSIST.walkSpeed,
     skipSeen: typeof o.skipSeen === "boolean" ? o.skipSeen : DEFAULT_ASSIST.skipSeen,
     autoFast: typeof o.autoFast === "boolean" ? o.autoFast : DEFAULT_ASSIST.autoFast,
     autoSpeed: isAutoSpeed(o.autoSpeed) ? o.autoSpeed : DEFAULT_ASSIST.autoSpeed,
@@ -392,7 +403,7 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
   return JSON.stringify({
     ...(isObj(flags) ? flags : {}),
     v: 1, t: Number.isFinite(now) ? now : 0,
-    speed: n.speed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: hotkeysForSave(n.hotkeys),
+    speed: n.speed, walkSpeed: n.walkSpeed, skipSeen: n.skipSeen, autoFast: n.autoFast, autoSpeed: n.autoSpeed, hotkeys: hotkeysForSave(n.hotkeys),
     quickSlot: n.quickSlot,
     noRandomEncounter: n.noRandomEncounter, skipBattles: n.skipBattles, skipKnownOnly: n.skipKnownOnly,
     seenMessages: strs(sets?.seenMessages), seenPages: strs(sets?.seenPages),
@@ -401,7 +412,7 @@ export function controlJson(s: AssistSettings, sets: SeenSets, command: AssistCo
 }
 
 const CONTROL_KEYS = new Set([
-  "v", "t", "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
+  "v", "t", "speed", "walkSpeed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
   "seenMessages", "seenPages", "command",
 ]);
 
@@ -431,10 +442,10 @@ export function parseControlFile(text: string | null | undefined): ControlFile |
   return { t: c.t, settings, sets, flags, command, body: controlJson(settings, sets, command, 0, flags) };
 }
 
-/** 설정 하나하나(배속·본 대사 넘기기·자동 배속·자동 배속 값·단축키·퀵 세이브 칸·적 만남) */
+/** 설정 하나하나(배속·이동 속도·본 대사 넘기기·자동 배속·자동 배속 값·단축키·퀵 세이브 칸·적 만남) */
 export type AssistKey = keyof AssistSettings;
 export const ASSIST_KEYS: readonly AssistKey[] = [
-  "speed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
+  "speed", "walkSpeed", "skipSeen", "autoFast", "autoSpeed", "hotkeys", "quickSlot", "noRandomEncounter", "skipBattles", "skipKnownOnly",
 ];
 
 /** a와 b에서 값이 다른 설정 키들 */
@@ -461,10 +472,10 @@ export function carryCommand(disk: ControlFile | null, ours: AssistCommand | nul
 
 /** 마지막으로 성공한 control.json 쓰기 */
 export interface WrittenControl { t: number; settings: AssistSettings }
-export type AdoptPatch = Partial<Pick<AssistSettings, "speed" | "skipSeen" | "autoFast" | "autoSpeed">>;
+export type AdoptPatch = Partial<Pick<AssistSettings, "speed" | "walkSpeed" | "skipSeen" | "autoFast" | "autoSpeed">>;
 
 /**
- * live.json `assist`의 배속·본 대사 넘기기·본 이벤트 자동 배속·자동 배속 빠르기(1.22.0) 중 게임 창 단축키로 바뀐 값(받아들일 것). 없으면 null.
+ * live.json `assist`의 배속·이동 속도(1.25.0)·본 대사 넘기기·본 이벤트 자동 배속·자동 배속 빠르기(1.22.0) 중 게임 창 단축키로 바뀐 값. 없으면 null.
  * 게임이 우리가 마지막으로 쓴 파일을 적용한 뒤(controlT === written.t) 스스로 바꾼 값만 받는다 —
  * 쓰는 중이거나(pending) controlT가 다르면 예전 파일의 메아리일 수 있으므로 무시한다. 예외를 던지지 않는다.
  */
@@ -473,6 +484,9 @@ export function adoptLiveAssist(assist: unknown, written: WrittenControl | null,
   if (typeof assist.controlT !== "number" || assist.controlT !== written.t) return null;
   const patch: AdoptPatch = {};
   if (isSpeed(assist.speed) && assist.speed !== written.settings.speed && assist.speed !== current.speed) patch.speed = assist.speed;
+  if (isWalkSpeed(assist.walkSpeed) && assist.walkSpeed !== written.settings.walkSpeed && assist.walkSpeed !== current.walkSpeed) {
+    patch.walkSpeed = assist.walkSpeed;
+  }
   if (typeof assist.skipSeen === "boolean" && assist.skipSeen !== written.settings.skipSeen && assist.skipSeen !== current.skipSeen) {
     patch.skipSeen = assist.skipSeen;
   }

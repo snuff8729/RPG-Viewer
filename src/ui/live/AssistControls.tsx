@@ -3,7 +3,7 @@ import { FolderOpen, Heart, HeartCrack, History, Save, type LucideIcon } from "l
 import { useAssist } from "@/app/LiveProvider";
 import {
   AUTO_SPEEDS, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isAutoSpeed, isQuickSlot, isSpeed, keyLabel, sameHotkeys, SPEEDS,
-  validateHotkey, type HotkeyAction,
+  isWalkSpeed, validateHotkey, WALK_SPEEDS, type HotkeyAction,
 } from "@/core/live/assist";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -50,6 +50,24 @@ export function SpeedControl({ size = "sm", favorite, short }: ControlProps) {
         onValueChange={(v) => { const n = Number(v); if (isSpeed(n)) setSettings({ ...settings, speed: n }); }}
       >
         {SPEEDS.map((s) => <ToggleGroupItem key={s} value={String(s)}>×{s}</ToggleGroupItem>)}
+      </ToggleGroup>
+    </WithFavorite>
+  );
+}
+
+/** 맵에서 플레이어·동료의 이동 속도(×1 ~ ×3). */
+export function WalkSpeedControl({ size = "sm", favorite, short }: ControlProps) {
+  const { settings, setSettings } = useAssist();
+  const { walkSpeedSupported } = useAssistGuards();
+  return (
+    <WithFavorite favorite={favorite}>
+      <ToggleGroup
+        type="single" variant="outline" size={size} spacing={short ? 0 : undefined} disabled={!walkSpeedSupported} aria-label={assistItemLabel("walkSpeed")}
+        title={short ? assistItemLabel("walkSpeed") : undefined}
+        value={String(settings.walkSpeed)}
+        onValueChange={(v) => { const n = Number(v); if (isWalkSpeed(n)) setSettings({ ...settings, walkSpeed: n }); }}
+      >
+        {WALK_SPEEDS.map((s) => <ToggleGroupItem key={s} value={String(s)}>×{s}</ToggleGroupItem>)}
       </ToggleGroup>
     </WithFavorite>
   );

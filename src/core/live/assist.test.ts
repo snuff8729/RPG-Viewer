@@ -4,6 +4,7 @@ import {
   adoptLiveAssist, commandStatus, commandStatusText, controlJson, controlMismatch, DEFAULT_ASSIST, DEFAULT_HOTKEYS, hotkeySummary, keyLabel, LEGACY_HOTKEYS, liveHotkeys,
   ENCOUNTER_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isEnemyHpCommand, isHpCommand, isSaveCommand, normalizeAssist, sameHotkeys, normalizeHotkeys, resyncDue, seenSets, validateHotkey, versionAtLeast,
   carryCommand, changedAssistKeys, mergeAssist, migrateSavedAssist, parseControlFile,
+  isWalkSpeed, WALK_SPEEDS, WALK_SPEED_MIN_VERSION,
 } from "./assist";
 import { pageNewCounts } from "./interactable";
 import type { Coverage, PickInfo } from "./types";
@@ -24,11 +25,13 @@ const HP_OFF = { hpFull: null, hpLow: null };
 const CTRL = 256, SHIFT = 512, ALT = 1024;
 /** 1.22.0 조합 기본 단축키(Ctrl+F6·Ctrl+F7·Ctrl+F10, Ctrl+S·Ctrl+L·Ctrl+Shift+S·Ctrl+Shift+L, Ctrl+B·Ctrl+Shift+B) */
 const SAVE = {
+  walkSpeed: 117 | SHIFT,
   autoSpeed: 117 | CTRL, autoFast: 118 | CTRL, escape: 121 | CTRL, enemyHpFull: 36 | CTRL, enemyHpLow: 35 | CTRL,
   quickSave: 83 | CTRL, quickLoad: 76 | CTRL, saveMenu: 83 | CTRL | SHIFT, loadMenu: 76 | CTRL | SHIFT, backup: 66 | CTRL, restore: 66 | CTRL | SHIFT,
 };
 /** 그 단축키 끔(예전 플러그인) */
 const SAVE_OFF = {
+  walkSpeed: null,
   autoSpeed: null, autoFast: null, escape: null, enemyHpFull: null, enemyHpLow: null, quickSave: null, quickLoad: null, saveMenu: null, loadMenu: null, backup: null, restore: null,
 };
 
@@ -87,8 +90,8 @@ describe("controlJson", () => {
   it("writes the v1 contract", () => {
     const j = JSON.parse(controlJson(DEFAULT_ASSIST, { seenMessages: ["a#1"], seenPages: ["common:7"] }, { id: "c-1", kind: "win", at: 100 }, 123));
     expect(j).toEqual({
-      v: 1, t: 123, speed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
-      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP, ...SAVE, v: 5 }, quickSlot: null,
+      v: 1, t: 123, speed: 1, walkSpeed: 1, skipSeen: true, autoFast: true, autoSpeed: 8,
+      hotkeys: { speed: 117, skip: 118, win: 121, lose: 122, ...HP, ...SAVE, v: 6 }, quickSlot: null,
       noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
       seenMessages: ["a#1"], seenPages: ["common:7"], command: { id: "c-1", kind: "win", at: 100 },
     });
@@ -136,12 +139,73 @@ describe("controlJson", () => {
   });
 });
 
+describe("walk speed", () => {
+  it("accepts exactly the four multipliers and defaults old or invalid settings to ×1", () => {
+    expect(WALK_SPEEDS).toEqual([1, 1.5, 2, 3]);
+    expect(DEFAULT_ASSIST.walkSpeed).toBe(1);
+    expect(normalizeAssist({}).walkSpeed).toBe(1);
+    for (const walkSpeed of WALK_SPEEDS) {
+      expect(isWalkSpeed(walkSpeed)).toBe(true);
+      expect(normalizeAssist({ walkSpeed }).walkSpeed).toBe(walkSpeed);
+    }
+    for (const walkSpeed of [undefined, null, "1.5", true, 0, -1, 1.25, 4, 8, NaN, Infinity, {}, []]) {
+      expect(isWalkSpeed(walkSpeed)).toBe(false);
+      expect(normalizeAssist({ walkSpeed }).walkSpeed).toBe(1);
+    }
+    expect(versionAtLeast("1.24.0", WALK_SPEED_MIN_VERSION)).toBe(false);
+    expect(versionAtLeast("1.25.0", WALK_SPEED_MIN_VERSION)).toBe(true);
+  });
+
+  it("round-trips as a control setting and merges changes from multiple viewers", () => {
+    for (const walkSpeed of WALK_SPEEDS) {
+      const settings = { ...DEFAULT_ASSIST, walkSpeed };
+      const text = controlJson(settings, { seenMessages: [], seenPages: [] }, null, 8, { walkSpeed: 99 });
+      expect(JSON.parse(text).walkSpeed).toBe(walkSpeed);
+      const parsed = parseControlFile(text)!;
+      expect(parsed.settings).toEqual(settings);
+      expect(parsed.flags).toEqual({});
+      expect(parsed.body).toBe(controlJson(settings, parsed.sets, null, 0));
+    }
+    expect(parseControlFile('{"v":1,"t":1}')?.settings.walkSpeed).toBe(1);
+    const local = { ...DEFAULT_ASSIST, walkSpeed: 3 as const };
+    const dirty = changedAssistKeys(DEFAULT_ASSIST, local);
+    expect(dirty).toEqual(["walkSpeed"]);
+    expect(mergeAssist({ ...DEFAULT_ASSIST, speed: 4 }, local, dirty)).toEqual({ ...local, speed: 4 });
+    expect(mergeAssist(local, { ...DEFAULT_ASSIST, speed: 2 }, ["speed"])).toEqual({ ...local, speed: 2 });
+  });
+
+  it("adopts a hotkey change only after the game acknowledges our control file", () => {
+    const written = { t: 10, settings: DEFAULT_ASSIST };
+    expect(adoptLiveAssist({ controlT: 10, walkSpeed: 1.5 }, written, DEFAULT_ASSIST, false)).toEqual({ walkSpeed: 1.5 });
+    expect(adoptLiveAssist({ controlT: 9, walkSpeed: 2 }, written, DEFAULT_ASSIST, false)).toBeNull();
+    expect(adoptLiveAssist({ controlT: 10, walkSpeed: 2 }, written, DEFAULT_ASSIST, true)).toBeNull();
+    expect(adoptLiveAssist({ controlT: 10, walkSpeed: 2 }, null, DEFAULT_ASSIST, false)).toBeNull();
+    expect(adoptLiveAssist({ controlT: 10, walkSpeed: 2 }, written, { ...DEFAULT_ASSIST, walkSpeed: 2 }, false)).toBeNull();
+    for (const walkSpeed of [undefined, "2", 4, 1]) {
+      expect(adoptLiveAssist({ controlT: 10, walkSpeed }, written, DEFAULT_ASSIST, false)).toBeNull();
+    }
+  });
+
+  it("adds Shift+F6 to v5 settings without taking an existing custom binding", () => {
+    const { walkSpeed: _walk, ...v5 } = DEFAULT_HOTKEYS;
+    expect(LEGACY_HOTKEYS.walkSpeed).toBeNull();
+    expect(DEFAULT_HOTKEYS.walkSpeed).toBe(117 | SHIFT);
+    expect(normalizeAssist(migrateSavedAssist({ hotkeys: { ...v5, v: 5 } })).hotkeys).toEqual(DEFAULT_HOTKEYS);
+    const taken = { hotkeys: { ...v5, autoSpeed: 117 | SHIFT, v: 5 } };
+    const migrated = migrateSavedAssist(taken);
+    expect(normalizeAssist(migrated).hotkeys).toEqual({ ...DEFAULT_HOTKEYS, autoSpeed: 117 | SHIFT, walkSpeed: null });
+    expect(migrateSavedAssist(migrated)).toEqual(migrated);
+    expect(normalizeAssist(migrateSavedAssist({ hotkeys: { ...v5, walkSpeed: null, v: 5 } })).hotkeys.walkSpeed).toBeNull();
+    expect(normalizeAssist(migrateSavedAssist({ hotkeys: { ...v5, walkSpeed: 65, v: 5 } })).hotkeys.walkSpeed).toBe(65);
+  });
+});
+
 describe("normalizeAssist / versionAtLeast", () => {
   it("normalizes stored values", () => {
     expect(normalizeAssist(null)).toEqual(DEFAULT_ASSIST);
     expect(normalizeAssist({ speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2 }))
       .toEqual({
-        speed: 4, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
+        speed: 4, walkSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 2, hotkeys: DEFAULT_HOTKEYS, quickSlot: null,
         noRandomEncounter: false, skipBattles: false, skipKnownOnly: false,
       });
     const hk = { speed: 65, skip: null, win: 121, lose: 122, hpFull: 72, hpLow: 76, ...SAVE };
@@ -239,7 +303,7 @@ describe("hotkeys", () => {
     for (const { action } of HOTKEY_ACTIONS) expect(validateHotkey(DEFAULT_HOTKEYS[action], action, DEFAULT_HOTKEYS)).toBeNull();
     expect(normalizeHotkeys(DEFAULT_HOTKEYS)).toEqual(DEFAULT_HOTKEYS);
     expect(HOTKEY_ACTIONS.map((a) => keyLabel(DEFAULT_HOTKEYS[a.action]!))).toEqual([
-      "F6", "Ctrl+F6", "F7", "Ctrl+F7", "F10", "F11", "Ctrl+F10", "Ctrl+Home", "Ctrl+End", "Home", "End",
+      "F6", "Shift+F6", "Ctrl+F6", "F7", "Ctrl+F7", "F10", "F11", "Ctrl+F10", "Ctrl+Home", "Ctrl+End", "Home", "End",
       "Ctrl+S", "Ctrl+L", "Ctrl+Shift+S", "Ctrl+Shift+L", "Ctrl+B", "Ctrl+Shift+B",
     ]);
     expect(HOTKEY_GROUPS.every((g) => HOTKEY_ACTIONS.some((a) => a.group === g))).toBe(true);
@@ -280,14 +344,14 @@ describe("hotkeys", () => {
     // 1.21.0 플러그인: 조합 키를 받지 못해 예전 기본 키를 보고하고, 새 동작(자동 배속 빠르기·자동 배속·도망)은 없다
     const v121 = { speed: 117, skip: 118, win: 121, lose: 122, ...HP, backup: 112, restore: 192, quickSave: 219, quickLoad: 221, saveMenu: null, loadMenu: null };
     const eff = liveHotkeys({ hotkeys: v121 });
-    expect(eff).toEqual({ ...v121, autoSpeed: null, autoFast: null, escape: null, enemyHpFull: null, enemyHpLow: null });
+    expect(eff).toEqual({ ...v121, walkSpeed: null, autoSpeed: null, autoFast: null, escape: null, enemyHpFull: null, enemyHpLow: null });
     expect(sameHotkeys(eff, DEFAULT_HOTKEYS)).toBe(false); // → 플러그인 업데이트 안내
     expect(liveHotkeys({ hotkeys: DEFAULT_HOTKEYS })).toEqual(DEFAULT_HOTKEYS);
     expect(liveHotkeys({ hotkeys: { ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null } })).toEqual({ ...DEFAULT_HOTKEYS, hpFull: 72, hpLow: null });
   });
   it("hotkeySummary lists bound keys by group", () => {
     expect(hotkeySummary(DEFAULT_HOTKEYS)).toBe(
-      "게임 창 단축키 — 진행: F6 배속, Ctrl+F6 자동 배속 빠르기, F7 본 대사 넘기기, Ctrl+F7 자동 배속"
+      "게임 창 단축키 — 진행: F6 배속, Shift+F6 이동 속도, Ctrl+F6 자동 배속 빠르기, F7 본 대사 넘기기, Ctrl+F7 자동 배속"
       + " · 전투: F10 이기기, F11 지기, Ctrl+F10 도망, Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1% · 체력: Home 100%, End 1%"
       + " · 세이브: Ctrl+S 퀵 세이브, Ctrl+L 퀵 로드(두 번), Ctrl+Shift+S 세이브 창, Ctrl+Shift+L 로드 창"
       + " · 백업: Ctrl+B 백업, Ctrl+Shift+B 복원(두 번)",
@@ -299,7 +363,7 @@ describe("hotkeys", () => {
   });
   it("controlJson writes custom hotkeys", () => {
     const hotkeys = { ...DEFAULT_HOTKEYS, speed: 65, skip: null, hpFull: 72, hpLow: null, restore: null };
-    expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual({ ...hotkeys, v: 5 });
+    expect(JSON.parse(controlJson({ ...DEFAULT_ASSIST, hotkeys }, { seenMessages: [], seenPages: [] }, null, 1)).hotkeys).toEqual({ ...hotkeys, v: 6 });
   });
   it("migrateSavedAssist: old untouched HP default (both null, no v) gets the new keys; v2 or set keys stay", () => {
     const old = { ...DEFAULT_ASSIST, speed: 4 as const, hotkeys: { speed: 65, skip: 118, win: 121, lose: 122, ...HP_OFF } };
@@ -350,7 +414,7 @@ describe("hotkeys", () => {
     const migrated = migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: taken });
     expect(normalizeAssist(migrated).hotkeys).toEqual({ ...DEFAULT_HOTKEYS, win: 36 | CTRL, enemyHpFull: null });
     expect(migrateSavedAssist(migrated)).toEqual(migrated);
-    expect((migrated as { hotkeys: { v: number } }).hotkeys.v).toBe(5);
+    expect((migrated as { hotkeys: { v: number } }).hotkeys.v).toBe(6);
     // 4 묶음에 이미 적 체력 필드가 있으면(다른 뷰어가 쓴 것) 그대로
     expect(normalizeAssist(migrateSavedAssist({ ...DEFAULT_ASSIST, hotkeys: { ...V4, enemyHpLow: 76, v: 4 } })).hotkeys)
       .toEqual({ ...DEFAULT_HOTKEYS, enemyHpLow: 76 });

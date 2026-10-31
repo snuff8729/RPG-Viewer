@@ -12,6 +12,7 @@
  * 플러그인 명령이나 파라미터는 없습니다.
  * 게임 창 단축키(RPG Viewer에서 바꿀 수 있음, Ctrl·Shift·Alt 조합 가능):
  * 진행 — F6 배속(×1→×2→×4→×8), Ctrl+F6 자동 배속 빠르기(×2→×4→×8),
+ *   Shift+F6 이동 속도(×1→×1.5→×2→×3, 맵의 플레이어·동료·운전 중 탈것, 1.25.0).
  *   F7 본 대사 자동 넘기기 켜고 끄기, Ctrl+F7 본 이벤트 자동 배속 켜고 끄기.
  * 전투 중 — F10 이기기, F11 지기, Ctrl+F10 도망,
  *   Ctrl+Home 적 체력 100%, Ctrl+End 적 체력 1%(살아 있는 적 전원, 1%는 쓰러뜨리지 않음).
@@ -64,7 +65,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.24.0",
+    VERSION: "1.25.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -124,6 +125,8 @@
   // game assist (control.json from the viewer, hotkeys in game)
   var SPEED_OK = { 1: true, 2: true, 4: true, 8: true };
   var SPEED_NEXT = { 1: 2, 2: 4, 4: 8, 8: 1 };
+  var WALK_SPEED_OK = { 1: true, 1.5: true, 2: true, 3: true };
+  var WALK_SPEED_NEXT = { 1: 1.5, 1.5: 2, 2: 3, 3: 1 };
   var COMMAND_KINDS = {
     win: true, lose: true, escape: true, enemyHpFull: true, enemyHpLow: true, hpFull: true, hpLow: true, cheat: true,
     saveMenu: true, loadMenu: true, quickSave: true, quickLoad: true
@@ -140,14 +143,15 @@
   var KEY_BACKUP = "rpgvBackup", KEY_RESTORE = "rpgvRestore", KEY_QUICK_SAVE = "rpgvQuickSave", KEY_QUICK_LOAD = "rpgvQuickLoad";
   var KEY_SAVE_MENU = "rpgvSaveMenu", KEY_LOAD_MENU = "rpgvLoadMenu";
   var KEY_AUTO_SPEED = "rpgvAutoSpeed", KEY_AUTO_FAST = "rpgvAutoFast", KEY_ESCAPE = "rpgvEscape";
+  var KEY_WALK_SPEED = "rpgvWalkSpeed";
   var KEY_ENEMY_HP_FULL = "rpgvEnemyHpFull", KEY_ENEMY_HP_LOW = "rpgvEnemyHpLow";
   // same order as the viewer (core/live/assist HOTKEY_ACTIONS): a later duplicate loses
   var HOTKEY_NAMES = [
-    "speed", "autoSpeed", "skip", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow",
+    "speed", "walkSpeed", "autoSpeed", "skip", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow",
     "quickSave", "quickLoad", "saveMenu", "loadMenu", "backup", "restore"
   ];
   var HOTKEY_BUTTONS = {
-    speed: KEY_SPEED, autoSpeed: KEY_AUTO_SPEED, skip: KEY_SKIP, autoFast: KEY_AUTO_FAST,
+    speed: KEY_SPEED, walkSpeed: KEY_WALK_SPEED, autoSpeed: KEY_AUTO_SPEED, skip: KEY_SKIP, autoFast: KEY_AUTO_FAST,
     win: KEY_WIN, lose: KEY_LOSE, escape: KEY_ESCAPE, enemyHpFull: KEY_ENEMY_HP_FULL, enemyHpLow: KEY_ENEMY_HP_LOW,
     hpFull: KEY_HP_FULL, hpLow: KEY_HP_LOW,
     quickSave: KEY_QUICK_SAVE, quickLoad: KEY_QUICK_LOAD, saveMenu: KEY_SAVE_MENU, loadMenu: KEY_LOAD_MENU,
@@ -159,7 +163,7 @@
   // F6 / Ctrl+F6 / F7 / Ctrl+F7, F10 F11 Ctrl+F10 Ctrl+Home Ctrl+End, Home End, Ctrl+S Ctrl+L Ctrl+Shift+S Ctrl+Shift+L,
   // Ctrl+B Ctrl+Shift+B
   var HOTKEY_DEFAULTS = {
-    speed: 117, autoSpeed: 117 | MOD_CTRL, skip: 118, autoFast: 118 | MOD_CTRL,
+    speed: 117, walkSpeed: 117 | MOD_SHIFT, autoSpeed: 117 | MOD_CTRL, skip: 118, autoFast: 118 | MOD_CTRL,
     win: 121, lose: 122, escape: 121 | MOD_CTRL, enemyHpFull: 36 | MOD_CTRL, enemyHpLow: 35 | MOD_CTRL,
     hpFull: 36, hpLow: 35,
     quickSave: 83 | MOD_CTRL, quickLoad: 76 | MOD_CTRL, saveMenu: 83 | MOD_CTRL | MOD_SHIFT, loadMenu: 76 | MOD_CTRL | MOD_SHIFT,
@@ -208,7 +212,7 @@
   var comboReady = false;     // our keydown listener is installed (combos work)
   var COMBO_MAX_AGE_MS = 1000;
   var mappedKeys = {};        // keyCode -> button name this plugin put into Input.keyMapper
-  var assist = { speed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
+  var assist = { speed: 1, walkSpeed: 1, skipSeen: false, autoFast: false, autoSpeed: 8 };
   // 1.24.0 encounters (control.json noRandomEncounter / skipBattles / skipKnownOnly; all off by default)
   var encounter = { noRandom: false, skipBattles: false, knownOnly: false };
   var defeated = null;        // enemyId -> true (rpg-viewer/defeated.json, read on first use)
@@ -220,8 +224,8 @@
   var STORY_BATTLE_CODES = { 101: true, 102: true, 103: true, 104: true, 105: true, 333: true, 336: true, 340: true, 353: true, 354: true };
   var STORY_SCAN_DEPTH = 5;   // nested Common Event calls looked into
   var seenMessages = Object.create(null), seenPages = Object.create(null);
-  // last speed/skipSeen/autoFast/autoSpeed taken from control.json: a rewrite with the same value does not undo a hotkey change
-  var ctrlSpeed = null, ctrlSkip = null, ctrlAutoFast = null, ctrlAutoSpeed = null;
+  // last speed/walkSpeed/skipSeen/autoFast/autoSpeed taken from control.json: a rewrite with the same value does not undo a hotkey change
+  var ctrlSpeed = null, ctrlWalkSpeed = null, ctrlSkip = null, ctrlAutoFast = null, ctrlAutoSpeed = null;
   var lastControlKey = null, lastControlText = null, lastControlPollT = -Infinity;
   var lastCommandId = null, lastCommand = null, pendingCommand = null;
   var controlT = null;        // "t" of the last applied control.json (null = none applied this session)
@@ -771,7 +775,7 @@
       choice: choice,
       inBattle: inBattle,
       assist: {
-        speed: assist.speed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
+        speed: assist.speed, walkSpeed: assist.walkSpeed, effectiveSpeed: effectiveSpeed, skipSeen: assist.skipSeen,
         autoFast: assist.autoFast, autoSpeed: assist.autoSpeed,
         noRandomEncounter: encounter.noRandom, skipBattles: encounter.skipBattles, skipKnownOnly: encounter.knownOnly,
         knownEnemies: knownEnemyCount(),
@@ -1153,6 +1157,10 @@
       if (ctrlSpeed === null || c.speed !== ctrlSpeed) assist.speed = c.speed;
       ctrlSpeed = c.speed;
     }
+    // Old viewers omit walkSpeed: use ×1. As with speed, identical rewrites preserve hotkey changes.
+    var ws = typeof c.walkSpeed === "number" && WALK_SPEED_OK[c.walkSpeed] === true ? c.walkSpeed : 1;
+    if (ctrlWalkSpeed === null || ws !== ctrlWalkSpeed) assist.walkSpeed = ws;
+    ctrlWalkSpeed = ws;
     if (typeof c.skipSeen === "boolean") {
       if (ctrlSkip === null || c.skipSeen !== ctrlSkip) assist.skipSeen = c.skipSeen;
       ctrlSkip = c.skipSeen;
@@ -1697,6 +1705,7 @@
     if (!I || typeof I.isTriggered !== "function") return;
     var p = triggeredHotkeys(I);
     if (p.speed) { assist.speed = SPEED_NEXT[assist.speed] || 1; showMessage("배속 ×" + assist.speed); }
+    if (p.walkSpeed) { assist.walkSpeed = WALK_SPEED_NEXT[assist.walkSpeed] || 1; showMessage("이동 속도 ×" + assist.walkSpeed); }
     if (p.autoSpeed) {
       assist.autoSpeed = AUTO_SPEED_NEXT[assist.autoSpeed] || 2;
       showMessage("본 이벤트 자동 배속 빠르기 ×" + assist.autoSpeed + (assist.autoFast ? "" : " (자동 배속은 꺼져 있어요)"));
@@ -3861,6 +3870,22 @@
   function installAssist() {
     applyKeyMap();
     try { installHotkeyListener(); } catch (ek) { reportError(ek); }
+
+    // MV/MZ: player and followers inherit distancePerFrame = 2^realMoveSpeed / 256.
+    // Followers copy the player's realMoveSpeed, not this distance: multiply each only once.
+    // Driving sets the player's moveSpeed from the vehicle; the vehicle synchronizes to the player.
+    // Never write moveSpeed (event routes and saves keep their original values).
+    hook(G.Game_CharacterBase && G.Game_CharacterBase.prototype, "Game_CharacterBase", "distancePerFrame", function (orig) {
+      return function () {
+        var distance = orig.apply(this, arguments);
+        try {
+          if (sceneKind() === "map" && (this === G.$gamePlayer || (G.Game_Follower && this instanceof G.Game_Follower))) {
+            return Math.min(1, distance * assist.walkSpeed);
+          }
+        } catch (e) { reportError(e); }
+        return distance;
+      };
+    });
 
     hook(G.SceneManager, "SceneManager", "updateScene", function (orig) {
       return function () {

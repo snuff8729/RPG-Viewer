@@ -8,6 +8,7 @@ import { battleOnly, type AssistFavoriteId } from "@/core/live/favoritesFile";
  */
 export const ASSIST_ITEMS = [
   { id: "speed", label: "배속", short: "배속" },
+  { id: "walkSpeed", label: "이동 속도", short: "이동 속도" },
   { id: "skipSeen", label: "본 대사 자동 넘기기", short: "넘기기" },
   { id: "autoFast", label: "본 이벤트 자동 배속", short: "자동 배속" },
   { id: "noRandomEncounter", label: "랜덤 전투 끄기", short: "랜덤 전투 끔" },

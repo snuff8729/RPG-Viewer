@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 import { Separator } from "@/components/ui/separator";
 import {
   AutoFastControl, AutoSpeedControl, BattleControls, EncounterControl, EnemyHpControls, HotkeySettings, HpControls, QuickSlotInput, SaveControls,
-  SkipSeenControl, SpeedControl,
+  SkipSeenControl, SpeedControl, WalkSpeedControl,
 } from "./AssistControls";
 import { withObjectParticle, type AssistFavoriteSlot } from "./assistItems";
 import { useAssistGuards, useAssistSession, type AssistSession } from "./useAssistSession";
@@ -44,7 +44,7 @@ function AssistContentOwn(props: AssistContentProps) {
 function AssistBody({ session, active = true, header = true, favorite }: AssistContentProps & { session: AssistSession }) {
   const { settings } = useAssist();
   const { live } = useLive();
-  const { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, encounterSupported, canEscape, canLose } = useAssistGuards();
+  const { supported, inBattle, hpSupported, saveSupported, enemyHpSupported, encounterSupported, walkSpeedSupported, canEscape, canLose } = useAssistGuards();
   /** 게임이 기억하는 이겨 본 적 종류 수(플러그인 1.24.0) */
   const knownEnemies: unknown = live?.assist?.knownEnemies;
   const { statusText, hpSent, saveSent, showMismatch } = session;
@@ -64,6 +64,14 @@ function AssistBody({ session, active = true, header = true, favorite }: AssistC
       <div className="flex flex-col gap-2">
         <Label>배속</Label>
         <SpeedControl favorite={favorite?.("speed")} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label>이동 속도</Label>
+        <WalkSpeedControl favorite={favorite?.("walkSpeed")} />
+        <p className="text-xs text-muted-foreground">맵에서 플레이어와 동료의 이동만 빨라져요. 탈것에도 적용돼요</p>
+        {supported && !walkSpeedSupported && (
+          <p className="text-xs text-muted-foreground">플러그인을 1.25.0으로 업데이트하면 쓸 수 있어요</p>
+        )}
       </div>
       <div className="flex flex-col gap-1">
         <SkipSeenControl favorite={favorite?.("skipSeen")} />
