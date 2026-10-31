@@ -93,6 +93,19 @@ describe("battle skip seen story (1.29.0)", () => {
     setControl(h, { skipBattles: true, seenMessages });
   }
 
+  it("writes why a battle was not skipped on its end record (1.29.1)", () => {
+    prepare("MZ", []);
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h, 5, [[cmd(101), cmd(0)]]);
+    expect(eventBattle(h).n).toBeUndefined();
+    h.g.BattleManager.endBattle(0);
+    expect(battleRecs(h).at(-1)).toMatchObject({ phase: "end", notSkipped: { reason: "unseen", key: "troop:5:0#0", seen: 1, known: false } });
+    prepare("MZ", [1, 2], ["troop:5:0#0"]);
+    setTroop(h, 5, [[cmd(101), cmd(0)]]);
+    expect(eventBattle(h).n).toBe(0);
+    expect(battleRecs(h).at(-1).notSkipped).toBeUndefined();
+  });
+
   for (const engine of ["MV", "MZ"] as const) {
     it.each([101, 105])(`an unseen defeat page (actor HP) blocks only a never-beaten troop (${engine}, %s)`, code => {
       prepare(engine, []);

@@ -54,6 +54,7 @@
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
  * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
+ * 1.29.1: 건너뛰지 않은 전투는 끝 기록에 그 까닭(notSkipped)을 남깁니다.
  * 1.29.0: 현재 조건에서 볼 대화를 이미 본 전투는 건너뛰며, 이겨 본 적의 전투 변경 명령도 허용합니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
@@ -71,7 +72,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.29.0",
+    VERSION: "1.29.1",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1660,7 +1661,7 @@
       var c = list[i];
       if (!c) continue;
       // Choices / input (102-104) have no seen keys; surrounding text decides.
-      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) return "unseen";
+      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) { lastUnseenKey = key + "#" + i; return "unseen"; }
       if (blockChanges && c.code >= 333 && STORY_BATTLE_CODES[c.code] === true) reason = "story";
       if (c.code === 111) {
         var condition = storyCondition(c.parameters, src);
@@ -1788,11 +1789,22 @@
 
   // SceneManager.push(Scene_Battle) right after BattleManager.setup (random encounter, Battle Processing, symbol
   // encounter plugins): true when the battle was skipped and the scene must not be pushed.
+  // 1.29.1: why the last battle was not skipped, written on its end record (notSkipped) so a report shows it.
+  var lastUnseenKey = null, skipNote = null;
   function maybeSkipBattle(sceneClass) {
     if (!encounter.skipBattles || !battleSetupPending) return false;
     var SB = G.Scene_Battle;
     if (!SB || typeof sceneClass !== "function" || !(sceneClass === SB || sceneClass.prototype instanceof SB)) return false;
+    skipNote = null;
+    lastUnseenKey = null;
     var why = skipBlock();
+    if (why !== null) {
+      try {
+        skipNote = { reason: why, seen: Object.keys(seenMessages).length };
+        if (why === "unseen" && lastUnseenKey) skipNote.key = lastUnseenKey;
+        if (G.$gameTroop && typeof G.$gameTroop.members === "function") skipNote.known = troopKnown(G.$gameTroop);
+      } catch (en) { reportError(en); }
+    }
     if (why === "story") showMessage("대화가 있는 전투라 그대로 싸워요");
     else if (why === "unseen") showMessage("처음 보는 대화가 있어 그대로 싸워요");
     else if (why === "unknown") showMessage("처음 보는 적이 있어 그대로 싸워요");
@@ -3938,6 +3950,8 @@
             try { noteDefeated(deadEnemyIds()); } catch (ed) { reportError(ed); } // 1.24.0 잡아 본 적
           }
           if (skippingBattle) fields.skipped = true; // 1.24.0 전투 건너뛰기
+          else if (skipNote) fields.notSkipped = skipNote;
+          skipNote = null;
           if (battleLog && battleLog.dropped > 0) fields.dropped = battleLog.dropped;
           if (capturePictures) {
             finishHeld(); // a waiting message takes its own snapshot first (the dedupe follows log order)

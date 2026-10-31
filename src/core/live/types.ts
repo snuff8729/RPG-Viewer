@@ -48,6 +48,8 @@ export type LogRecord = RecordBase & (
   | {
     type: "battle"; phase: "start" | "end"; troopId: number; result?: "win" | "escape" | "lose" | "abort";
     troopName?: string; enemies?: string[]; canEscape?: boolean; canLose?: boolean; skipped?: true;
+    /** 1.29.1+: 전투 건너뛰기가 켜져 있었는데 건너뛰지 않은 까닭(끝 기록). key = 처음 보는 대사 위치, seen = 게임이 받은 본 대사 수, known = 모든 적을 이겨 봤는지 */
+    notSkipped?: { reason: string; key?: string; seen?: number; known?: boolean };
     rewards?: { exp: number; gold: number; items: string[] }; dropped?: number; pics?: unknown[]; picsSame?: true;
   }
   /** 1.8.0+: 전투 로그 한 줄(제어 문자 그대로). 이야기 기록이 아니다. pics: 그림이 바뀌었을 때만 */
