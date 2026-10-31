@@ -46,6 +46,9 @@ import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from ".
 import { isRemoteView } from "@/app/share";
 import { cn } from "@/lib/utils";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { ReaderVoiceProvider } from "./ReaderVoiceProvider";
+import { useReaderAutoVoice } from "./useReaderAutoVoice";
+import { loadVoiceAuto, saveVoiceAuto } from "./voiceAuto";
 
 const PAGE = 300;
 const EMPTY_RANGE: ReadRange = { start: 0, end: 0 };
@@ -94,6 +97,8 @@ function syncView(v: View | null, total: number, stats: ReadStats, readSeq: numb
  */
 /** 읽기 본문 공용 설정: 자동으로 맨 아래로(ReaderView가 갖고, 휴대폰에서는 보기 설정 서랍에서 바꾼다)와 휴대폰 배치 */
 interface BodyOpts {
+  voiceAuto: boolean;
+  onVoiceAuto: (on: boolean) => void;
   autoFollow: boolean;
   onAutoFollow: (on: boolean) => void;
   /** 본문이 걸어 두는 손잡이: 자동으로 맨 아래로를 켠 순간 맨 아래로(떼면 null) */
@@ -130,7 +135,7 @@ function FullReader({ branch, withLive, ...opts }: { branch: number | null; with
 }
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
-function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
+function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone, voiceAuto, onVoiceAuto }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
   const readerFile = useReaderFile();
@@ -231,6 +236,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const atEnd = range.end >= total;
 
   const scroller = useRef<HTMLDivElement>(null);
+  useReaderAutoVoice(scroller, items, voiceAuto, isHidden);
   const content = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   /** 맨 아래 + 다 읽음 + 구간이 끝까지 — 새 항목이 오면 따라간다 */
@@ -702,6 +708,10 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         <Button variant="outline" size="sm" onClick={goBottom} disabled={atBottom && atEnd && unread === 0}>맨 아래로</Button>
         {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
         <div className="flex items-center gap-2">
+          <Switch id="reader-voice-auto" checked={voiceAuto} onCheckedChange={onVoiceAuto} />
+          <Label htmlFor="reader-voice-auto">음성 자동 재생</Label>
+        </div>
+        <div className="flex items-center gap-2">
           <Switch id="reader-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
           <Label htmlFor="reader-auto-follow">자동으로 맨 아래로</Label>
         </div>
@@ -735,7 +745,7 @@ function SettingRow({ id, label, checked, onChange, children }: {
  */
 export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const data = useLiveData();
-  const { records, model, latestBranch } = useLive();
+  const { records, model, latestBranch, logEpoch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
   const [picked, setPicked] = useState<number | null>(null);
   // 다른 갈래의 북마크로 갈 때: 갈래를 바꾸고 새 본문이 그 줄로 간다
@@ -750,6 +760,8 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
   // 자동으로 맨 아래로(본문과 휴대폰 보기 설정 서랍이 함께 쓴다)
   const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
+  const [voiceAuto, setVoiceAuto] = useState(loadVoiceAuto);
+  const onVoiceAuto = useCallback((on: boolean) => { setVoiceAuto(on); saveVoiceAuto(on); }, []);
   const followOn = useRef<(() => void) | null>(null);
   const onFollowOn = useCallback((fn: (() => void) | null) => { followOn.current = fn; }, []);
   const onAutoFollow = useCallback((on: boolean) => {
@@ -772,12 +784,13 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   const hasBranch = records.length > 0 && selected !== null;
   const body = hasBranch && mode === "flow"
     ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
-    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} />;
+    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} voiceAuto={voiceAuto} onVoiceAuto={onVoiceAuto} />;
+  const voicedBody = <ReaderVoiceProvider key={`${gameKeyOf(data)}.${selected}.${mode}.${logEpoch}`} auto={voiceAuto}>{body}</ReaderVoiceProvider>;
 
   if (mobile) {
     return (
       <div className="relative flex h-full min-h-0 flex-col">
-        {body}
+        {voicedBody}
         <Button
           variant="outline"
           size="icon"
@@ -805,6 +818,7 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
                 </>
               )}
               <SettingRow id="reader-m-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
+              <SettingRow id="reader-m-voice-auto" label="음성 자동 재생" checked={voiceAuto} onChange={onVoiceAuto} />
               {(picturesOn || hasPictureRecords) && (
                 <SettingRow id="reader-m-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
               )}
@@ -827,7 +841,7 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
           </ToggleGroup>
         </div>
       )}
-      {body}
+      {voicedBody}
     </div>
   );
 }

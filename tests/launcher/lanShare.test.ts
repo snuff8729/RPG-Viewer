@@ -10,6 +10,10 @@ import {
   MSG_READ_ONLY, MSG_STALE, parseCookies, remoteRouteAllowed, SHARE_COOKIE, shareCookie, shareUrls, ShareState, type ShareStore,
 } from "../../scripts/lanShare";
 import { isLoopbackIp, isPrivateIp, normalizeIp } from "../../scripts/netAddress";
+import { AssetStore } from "../../src/core/assets/assets";
+import { ServerFolder, type FetchFn } from "../../src/app/serverFolder";
+import type { GameData } from "../../src/core/types";
+import { encryptedAudio, oggFixture } from "../helpers/audioFixture";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -265,7 +269,7 @@ describe("shareUrls", () => {
 
 // ── 미들웨어 묶음(문지기 → 공유 API → 폴더 API)을 가짜 요청으로 ──
 
-interface Reply { status: number; headers: Record<string, string>; body: string; next: boolean }
+interface Reply { status: number; headers: Record<string, string>; body: string; bytes?: Buffer; next: boolean }
 
 function chain(share: ShareState, sessions: FsSessions) {
   const gate = createGateMiddleware(share);
@@ -282,7 +286,7 @@ function chain(share: ShareState, sessions: FsSessions) {
       set statusCode(s: number) { out.status = s; },
       get statusCode() { return out.status; },
       setHeader(k: string, v: string) { out.headers[k.toLowerCase()] = v; },
-      end(t?: string | Buffer) { out.body = t === undefined ? "" : t.toString(); },
+      end(t?: string | Buffer) { out.body = t === undefined ? "" : t.toString(); if (Buffer.isBuffer(t)) out.bytes = t; },
     } as unknown as ServerResponse;
     let step = 0;
     const steps = [
@@ -304,6 +308,24 @@ function chain(share: ShareState, sessions: FsSessions) {
 describe("share API and remote file access", () => {
   const pc = { ip: "127.0.0.1", host: "localhost:5173", origin: "http://localhost:5173" };
   const phone = { ip: "192.168.0.20", host: "192.168.0.10:5173", origin: "http://192.168.0.10:5173" };
+
+  it("loads keyless encrypted voice through the LAN gate and remote ServerFolder", async () => {
+    const audioDir = path.join(game, "www/audio/voice");
+    fs.mkdirSync(audioDir, { recursive: true });
+    fs.writeFileSync(path.join(audioDir, "한 줄.ogg_"), encryptedAudio(oggFixture()));
+    const sessions = new FsSessions();
+    const { share } = makeShare(memoryShareStore(), sessions);
+    const call = chain(share, sessions);
+    await call({ ...pc, method: "POST", url: "/api/share/start", body: { days: 7, gamePath: game } });
+    const cookie = `${SHARE_COOKIE}=${share.token()}`;
+    const fetchFn: FetchFn = async (url, init) => {
+      const r = await call({ ...phone, cookie, method: init?.method ?? "GET", url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(r.bytes ? new Uint8Array(r.bytes).buffer : r.body, { status: r.status, headers: r.headers });
+    };
+    const folder = new ServerFolder({ id: share.sharedId()!, root: "", title: "모험", engine: "MV", name: "My Game" }, fetchFn, { remote: true });
+    const clip = await new AssetStore(folder, { dataRoot: "www/data", system: {} } as GameData).audio("voice", "한 줄");
+    expect(new Uint8Array(await clip!.arrayBuffer())).toEqual(oggFixture());
+  });
 
   it("start/status/current/stop, and phones read only the shared game", async () => {
     const sessions = new FsSessions();

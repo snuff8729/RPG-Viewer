@@ -368,6 +368,7 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Interpreter.prototype.command231 = function () { return true; };
   Game_Interpreter.prototype.command232 = function () { return true; };
   Game_Interpreter.prototype.command235 = function () { return true; };
+  Game_Interpreter.prototype.command250 = function (params?: any[]) { g.AudioManager.playSe((params ?? this._params)[0]); return true; };
   Game_Interpreter.prototype.pluginCalls = 0;
   Game_Interpreter.prototype.command356 = function () { this.pluginCalls++; return true; };
   if (engine === "MZ") Game_Interpreter.prototype.command357 = function () { this.pluginCalls++; return true; };
@@ -667,6 +668,11 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     Game_Message, Game_Switches, Game_Variables, Game_SelfSwitches, Game_Party, Game_Troop, Game_Player,
     Game_Event, Game_Map, Game_Interpreter, Game_Screen, Game_Picture, Game_Battler, Game_Enemy, Game_Actor, Game_Actors, Scene_Boot, Scene_Title, Scene_Map, Scene_Battle,
     SceneManager, BattleManager, DataManager, ImageManager, Input, TouchInput, Window_Message, Window_BattleLog, Sprite, Sprite_Picture, Bitmap,
+    AudioManager: {
+      createBuffer(folder: string, name: string) { return { folder, name }; },
+      playSe(sound: any) { return this.createBuffer("se", sound.name); },
+      playStaticSe(sound: any) { return this.createBuffer("se", sound.name); },
+    },
     $dataCommonEvents: [null], $dataTroops: [null],
     $dataActors: [null], $dataItems: [null], $dataWeapons: [null], $dataArmors: [null], $dataSkills: [null], $dataStates: [null],
     $dataSystem: null,

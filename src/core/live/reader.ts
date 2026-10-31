@@ -12,7 +12,7 @@ import { isNoticeHidden, noticeRecordKind, noticeSourceLabel, type NoticeKind } 
 import type { GameData, Location } from "../types";
 import { branchLabel, foldTimelineFrom, isContinuation, type FoldCache, type FoldOptions } from "./history";
 import { classifyPluginRecord, pluginKey, type PluginOverrides } from "./pluginText";
-import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "./types";
+import type { HistoryItem, HistoryModel, LogRecord, RecordOf, VoiceSound } from "./types";
 
 export type ReaderItem =
   /** 장면 구분(장소 이동·갈래 시작). part = 목차의 큰 단위(플레이 묶음·변수 값) 제목 줄(읽기 화면이 넣는다, key p{seq}) */
@@ -22,7 +22,7 @@ export type ReaderItem =
     /** Display-only originals; speaker/lines stay plain for hiding, navigation and export. */
     rawText?: string; rawSpeaker?: string;
     /** 접힌 반복 대화(repeat)의 회차별 항목(대사·그림·알림·플러그인 글). 펼치면 `1회째`·`2회째`…로 보인다. */
-    occurrences?: ReaderItem[][] }
+    occurrences?: ReaderItem[][]; voice?: VoiceSound[] }
   | { kind: "scroll"; key: string; seq: number; lines: string[]; rawText?: string }
   /** name이 ""이면 화면에 글자 띄우기(파일 없음) — caption: 바로 앞 D_TEXT 플러그인 기록의 글. 글도 이름도 없는 빈 자리는 항목을 만들지 않는다. */
   | { kind: "picture"; key: string; seq: number; pictureId: number; name: string; caption?: string }
@@ -93,6 +93,7 @@ function messageItem(r: RecordOf<"message">, data: GameData, repeat?: number): E
     rawText: safe(r.text),
     ...(safe(r.speaker) && formatText(r.speaker, data) ? { rawSpeaker: r.speaker } : {}),
     src: r.src ?? null, cmd: typeof r.cmd === "number" ? r.cmd : null,
+    voice: r.voice,
   };
   if (repeat !== undefined) item.repeat = repeat;
   return item;

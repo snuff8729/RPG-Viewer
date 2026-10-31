@@ -412,6 +412,8 @@ function foldRecords(env: FoldEnv, s: FoldState, records: LogRecord[], from: num
   const { noisy } = env;
   for (let i = from; i < records.length; i++) {
     const r = records[i];
+    // 음성은 대사의 메타데이터다. 대화·상태 묶음과 반복 판정을 끊지 않는다.
+    if (r.type === "voice") continue;
     if (!env.nested && r.type === "battle" && r.phase === "start") {
       // 전투 한 번을 묶는다: 끝 기록까지(없으면 다음 전투·갈래 시작·이동·불러오기 앞까지)
       let j = i + 1;
