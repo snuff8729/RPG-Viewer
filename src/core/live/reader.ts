@@ -19,9 +19,11 @@ export type ReaderItem =
   | { kind: "chapter"; key: string; text: string; part?: true }
   /** screen: 화면 그림 따라 그리기 — 이 대사에서 새로 보일 이벤트 그림·스탠딩(nextShot)이 있을 때만 */
   | { kind: "message"; key: string; seq: number; speaker: string; face: string; faceIndex: number; lines: string[]; src: Location | null; cmd: number | null; repeat?: number; screen?: ScreenShot;
+    /** Display-only originals; speaker/lines stay plain for hiding, navigation and export. */
+    rawText?: string; rawSpeaker?: string;
     /** 접힌 반복 대화(repeat)의 회차별 항목(대사·그림·알림·플러그인 글). 펼치면 `1회째`·`2회째`…로 보인다. */
     occurrences?: ReaderItem[][] }
-  | { kind: "scroll"; key: string; seq: number; lines: string[] }
+  | { kind: "scroll"; key: string; seq: number; lines: string[]; rawText?: string }
   /** name이 ""이면 화면에 글자 띄우기(파일 없음) — caption: 바로 앞 D_TEXT 플러그인 기록의 글. 글도 이름도 없는 빈 자리는 항목을 만들지 않는다. */
   | { kind: "picture"; key: string; seq: number; pictureId: number; name: string; caption?: string }
   /**
@@ -88,6 +90,8 @@ function messageItem(r: RecordOf<"message">, data: GameData, repeat?: number): E
   const item: Extract<ReaderItem, { kind: "message" }> = {
     kind: "message", key: `r${r.seq}`, seq: r.seq, speaker: speakerOf(r, data), face: safe(r.face),
     faceIndex: typeof r.faceIndex === "number" ? r.faceIndex : 0, lines: lines(r.text, data),
+    rawText: safe(r.text),
+    ...(safe(r.speaker) && formatText(r.speaker, data) ? { rawSpeaker: r.speaker } : {}),
     src: r.src ?? null, cmd: typeof r.cmd === "number" ? r.cmd : null,
   };
   if (repeat !== undefined) item.repeat = repeat;
@@ -134,7 +138,7 @@ function fromRecord(
 ): ReaderItem | null {
   switch (r.type) {
     case "message": return messageItem(r, data);
-    case "scroll": return { kind: "scroll", key: `r${r.seq}`, seq: r.seq, lines: lines(r.text, data) };
+    case "scroll": return { kind: "scroll", key: `r${r.seq}`, seq: r.seq, lines: lines(r.text, data), rawText: safe(r.text) };
     case "picture": return null; // readerItems가 따로 다룬다(pictureRecord)
     case "plugin": return pluginItem(r, data, overrides);
     case "choice": {

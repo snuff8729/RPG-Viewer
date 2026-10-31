@@ -32,6 +32,18 @@ describe("AssetStore", () => {
     const { folder, data } = await open("sample-mv");
     expect(await head(await new AssetStore(folder, data).load("faces", "Actor1"))).toEqual(PNG_SIG);
   });
+  it.each([
+    ["sample-mz", "img/faces/People1.png_", "img/system/Window.png_"],
+    ["sample-mv", "www/img/faces/Actor1.rpgmvp", "www/img/system/Window.rpgmvp"],
+  ] as const)("decrypts system skins through the same asset layer (%s)", async (fixture, facePath, windowPath) => {
+    const { folder, data } = await open(fixture);
+    // Reuse an encrypted fixture image under the system path; no game files are read.
+    const encrypted = new Uint8Array((await folder.readBinary(facePath))!);
+    const systemFolder = new MemoryFolder({ [windowPath]: encrypted });
+    const skinStore = new AssetStore(systemFolder, { ...data, pictureFolders: [{ token: "Window", folder: "moved" }] });
+    expect(await head(await skinStore.load("system", "Window"))).toEqual(PNG_SIG);
+    expect(skinStore.fetch("system", "Window")).toBe(skinStore.fetch("system", "Window"));
+  });
   it("image() is null when missing or when createImageBitmap is unavailable", async () => {
     expect(await store.image("characters", "nope")).toBeNull();
     expect(await store.image("tilesets", "")).toBeNull();

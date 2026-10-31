@@ -21,14 +21,14 @@ import { BattleActionLine } from "./BattleActionLine";
 import { NoticeLine } from "./NoticeLine";
 import { isRepeatOpen, setRepeatOpen } from "./repeatOpen";
 import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
+import { ReaderMessageText, ReaderScrollText } from "./RichMessageText";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
   return (
     <div className="flex gap-3">
       {item.face && <FaceImage name={item.face} index={item.faceIndex} />}
       <div className="min-w-0 flex-1 space-y-0.5">
-        {item.speaker && <p className="text-sm font-medium text-muted-foreground">{item.speaker}</p>}
-        {item.lines.map((l, i) => <p key={i} className="whitespace-pre-wrap break-words">{l || " "}</p>)}
+        <ReaderMessageText item={item} />
       </div>
     </div>
   );
@@ -229,7 +229,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "scroll":
       return (
         <div className="space-y-0.5 text-center">
-          {item.lines.map((l, i) => <p key={i} className="whitespace-pre-wrap break-words">{l || " "}</p>)}
+          <ReaderScrollText item={item} />
         </div>
       );
     case "picture":
@@ -282,10 +282,10 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     }
     case "message": {
       const m = b as typeof a;
-      return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)
+      return a.rawText === m.rawText && a.rawSpeaker === m.rawSpeaker && a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)
         && sameOccurrences(a.occurrences, m.occurrences);
     }
-    case "scroll": return sameLines(a.lines, (b as typeof a).lines);
+    case "scroll": return a.rawText === (b as typeof a).rawText && sameLines(a.lines, (b as typeof a).lines);
     case "picture": {
       const p = b as typeof a;
       return a.name === p.name && a.caption === p.caption && a.pictureId === p.pictureId;
