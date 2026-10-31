@@ -50,6 +50,8 @@
  * 전투 건너뛰기(전투 화면 없이 바로 이기고 경험치·골드·떨어뜨린 아이템을 받음. 대화·선택지·
  * 전투 중단·게임 오버·적 상태 바꾸기·적 변신이 있는 전투는 그대로 싸움), 잡아 본 적만(모든 적을
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
+ * 1.25.0: 전투 뒤 처음 보는 장면은 승리 → 허용된 패배 → 허용된 도망 순으로 고릅니다.
+ * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
  *
@@ -64,7 +66,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.24.0",
+    VERSION: "1.25.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1507,43 +1509,105 @@
     return null;
   }
 
+  // 1.25.0: only live during command301, including its synchronous Scene_Battle push.
+  var battleEventContext = null;
+
+  // Ranges keep the original list indices: seen keys must never use a sliced branch's indices.
+  function battleBranches(list, index) {
+    var out = [null, null, null], c = list && list[index];
+    if (!c || c.code !== 301) return out;
+    var indent = c.indent, active = null, i;
+    for (i = index + 1; i < list.length; i++) {
+      c = list[i];
+      if (!c) continue;
+      if (c.indent > indent) continue;
+      if (active) { active.to = i; active = null; }
+      if (c.indent !== indent || c.code < 601 || c.code > 603) break; // includes 604 (engine no-op)
+      active = { from: i + 1, to: list.length };
+      out[c.code - 601] = active;
+    }
+    return out;
+  }
+
+  function branchHasUnseen(list, from, to, src, depth, seenCe) {
+    if (!list || typeof list.length !== "number") return false;
+    var key = locKey(src);
+    for (var i = from; i < to; i++) {
+      var c = list[i];
+      if (!c) continue;
+      if ((c.code === 101 || c.code === 105 || c.code === 102) && key !== null && seenMessages[key + "#" + i] !== true) return true;
+      if (c.code === 117 && depth < STORY_SCAN_DEPTH && c.parameters) {
+        var id = c.parameters[0];
+        var ce = G.$dataCommonEvents && isCount(id) ? G.$dataCommonEvents[id] : null;
+        if (ce && ce.list && (seenCe[id] == null || seenCe[id] > depth + 1)) {
+          // Skip cycles / repeated calls unless a shallower call exposes more of the depth budget.
+          seenCe[id] = depth + 1;
+          var unseen = branchHasUnseen(ce.list, 0, ce.list.length, { source: "common", commonEventId: id }, depth + 1, seenCe);
+          if (unseen) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function battleSkipOutcome() {
+    var out = { result: 0, unseen: [false, false, false] }, ctx = battleEventContext, BM = G.BattleManager;
+    if (!ctx || ctx.interp._list !== ctx.list || Object.keys(seenMessages).length === 0) return out;
+    var branches = battleBranches(ctx.list, ctx.index);
+    for (var i = 0; i < branches.length; i++) {
+      if (!branches[i]) continue;
+      var seenCe = {};
+      if (ctx.src && ctx.src.source === "common") seenCe[ctx.src.commonEventId] = 0;
+      out.unseen[i] = branchHasUnseen(ctx.list, branches[i].from, branches[i].to, ctx.src, 0, seenCe);
+    }
+    if (!out.unseen[0]) {
+      if (out.unseen[2] && BM._canLose) out.result = 2;
+      else if (out.unseen[1] && BM._canEscape) out.result = 1;
+    }
+    return out;
+  }
+
   function returnFalse() { return false; }
 
-  // The battle just set up ends here as a victory instead of opening Scene_Battle: every appeared enemy goes down,
+  // The battle just set up ends here instead of opening Scene_Battle. For a win every appeared enemy goes down,
   // the engine's own makeRewards / gainRewards give exp (battle / reserve member rates as usual), gold and rolled
   // drops, and endBattle(0) runs the event's win branch, the victory count and our end record. No battle BGM, ME
-  // or level-up message (the toast names who levelled up). Once started it always ends as a win: nothing waits.
-  function skipBattle() {
+  // or level-up message (the toast names who levelled up). Escape / lose only end the battle: no party or rewards
+  // changes. The callback receives the chosen result even if another plugin's endBattle forgets to call it.
+  function skipBattle(result, unseen) {
     var BM = G.BattleManager, tr = G.$gameTroop, party = G.$gameParty;
     var cb = BM._eventCallback, cbCalled = false, wrapped = null;
     if (typeof cb === "function") {
       wrapped = function () { cbCalled = true; return cb.apply(this, arguments); };
       BM._eventCallback = wrapped;
     }
-    var members = typeof party.allMembers === "function" ? party.allMembers() : (typeof party.members === "function" ? party.members() : []);
+    var members = result !== 0 ? [] : (typeof party.allMembers === "function" ? party.allMembers() : (typeof party.members === "function" ? party.members() : []));
     var levels = [], quiet = [], i;
     skippingBattle = true;
     try {
-      var enemies = tr.aliveMembers();
-      for (i = 0; i < enemies.length; i++) {
-        var e = enemies[i];
-        e.addNewState(e.deathStateId());
-        if (typeof e.refresh === "function") e.refresh();
+      if (result === 0) {
+        var enemies = tr.aliveMembers();
+        for (i = 0; i < enemies.length; i++) {
+          var e = enemies[i];
+          e.addNewState(e.deathStateId());
+          if (typeof e.refresh === "function") e.refresh();
+        }
+        for (i = 0; members && i < members.length; i++) {
+          var m = members[i];
+          levels.push(m ? m.level : 0);
+          if (m && !Object.prototype.hasOwnProperty.call(m, "shouldDisplayLevelUp")) { m.shouldDisplayLevelUp = returnFalse; quiet.push(m); }
+        }
+        BM.makeRewards();
+        BM.gainRewards();
       }
-      for (i = 0; members && i < members.length; i++) {
-        var m = members[i];
-        levels.push(m ? m.level : 0);
-        if (m && !Object.prototype.hasOwnProperty.call(m, "shouldDisplayLevelUp")) { m.shouldDisplayLevelUp = returnFalse; quiet.push(m); }
-      }
-      BM.makeRewards();
-      BM.gainRewards();
     } catch (e1) {
       reportError(e1);
     } finally {
       for (i = 0; i < quiet.length; i++) delete quiet[i].shouldDisplayLevelUp;
     }
     try {
-      BM.endBattle(0);
+      if (result === 1) BM._escaped = true; // end record and engine escape count (1 without this means abort)
+      BM.endBattle(result);
     } catch (e2) {
       reportError(e2);
     } finally {
@@ -1552,8 +1616,12 @@
       BM._phase = null; // like BattleManager.updateBattleEnd after the scene pops
       if (wrapped !== null) {
         if (BM._eventCallback === wrapped) BM._eventCallback = cb;
-        if (!cbCalled) { try { cb(0); } catch (e3) { reportError(e3); } }
+        if (!cbCalled) { try { cb(result); } catch (e3) { reportError(e3); } }
       }
+    }
+    if (result !== 0) {
+      showMessage(result === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면");
+      return;
     }
     var parts = [], rw = null;
     try { rw = battleRewards(BM); } catch (e4) { reportError(e4); }
@@ -1569,7 +1637,10 @@
       } catch (e5) { reportError(e5); }
     }
     if (ups.length) parts.push("레벨 업 " + ups.join(", "));
-    showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : ""));
+    var hint = "";
+    if (unseen && unseen[2]) hint += " · 패배 장면은 아직 안 봄";
+    if (unseen && unseen[1]) hint += " · 도망 장면은 아직 안 봄";
+    showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : "") + hint);
   }
 
   // SceneManager.push(Scene_Battle) right after BattleManager.setup (random encounter, Battle Processing, symbol
@@ -1582,7 +1653,8 @@
     if (why === "story") showMessage("대화가 있는 전투라 그대로 싸워요");
     else if (why === "unknown") showMessage("처음 보는 적이 있어 그대로 싸워요");
     if (why !== null) return false;
-    skipBattle();
+    var outcome = battleSkipOutcome();
+    skipBattle(outcome.result, outcome.unseen);
     return true;
   }
 
@@ -3576,7 +3648,21 @@
         return orig.apply(this, arguments);
       };
     });
-    // 1.24.0 전투 건너뛰기: the battle scene is not opened, the battle is won right here
+    // MV uses this._params, MZ passes params; preserve both by forwarding arguments unchanged.
+    // Both install _eventCallback before pushing Scene_Battle; it writes _branch[_indent] for 601/602/603.
+    hook(GI, "Game_Interpreter", "command301", function (orig) {
+      return function () {
+        var prev = battleEventContext;
+        battleEventContext = null;
+        try { battleEventContext = { interp: this, list: this._list, index: this._index, src: srcOf(this) }; } catch (e) { reportError(e); }
+        try {
+          return orig.apply(this, arguments);
+        } finally {
+          battleEventContext = prev;
+        }
+      };
+    });
+    // 1.25.0 전투 건너뛰기: resolve the result before any battle scene opens.
     hook(G.SceneManager, "SceneManager", "push", function (orig) {
       return function (sceneClass) {
         try { if (maybeSkipBattle(sceneClass)) return; } catch (e) { reportError(e); }

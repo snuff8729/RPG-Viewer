@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { seenKey } from "../../src/core/live/coverage";
+import type { Location } from "../../src/core/types";
 import { cmd, createHarness, type Harness, type MemFs } from "./harness";
 
 // 1.24.0 랜덤 전투 끄기 · 전투 건너뛰기 · 잡아 본 적만
@@ -47,6 +49,245 @@ const defeatedOnDisk = (hh: Harness) => {
   const t = hh.fs.files.get(DEFEATED_PATH);
   return t === undefined ? undefined : JSON.parse(t);
 };
+
+const mapSource: Location = { source: "map", mapId: 1, eventId: 3, page: 0 };
+const dialogue = (text = "aftermath") => [cmd(101, ["", 0, 0, 2]), cmd(401, [text])];
+function aftermathList(win = dialogue("win"), escape = dialogue("escape"), lose = dialogue("lose"), canEscape = true, canLose = true) {
+  // Prefix + enclosing indent catch accidental branch-relative indices and hard-coded indent 0.
+  return [cmd(108, ["prefix"]), cmd(301, [0, 5, canEscape, canLose], 2),
+    ...[win, escape, lose].flatMap((body, result) => [cmd(601 + result, [], 2), ...body.map(c => ({ ...c, indent: c.indent + 3 }))]),
+    cmd(604, [], 2), cmd(0)];
+}
+function seenOutcomes(list: ReturnType<typeof aftermathList>, results: number[], src = mapSource) {
+  let result = -1;
+  return list.flatMap((c, i) => {
+    if (c.indent === 2 && c.code >= 601 && c.code <= 603) result = c.code - 601;
+    return results.includes(result) && [101, 102, 105].includes(c.code) ? [seenKey(src, i)] : [];
+  });
+}
+function runAftermath(list: ReturnType<typeof aftermathList>, src = mapSource) {
+  const interp = h.newInterpreter();
+  if (src.source === "map") h.addMapEvent(src.eventId, [list], 0);
+  else if (src.source === "common") h.g.$dataCommonEvents[src.commonEventId] = { list };
+  else {
+    h.g.$dataTroops[src.troopId] = { pages: [{ list }] };
+    h.g.$gameTroop._troopId = src.troopId;
+  }
+  interp.setup(list, src.source === "map" ? src.eventId : 0);
+  // Origin pages already have resolver coverage elsewhere; preserve the complete source in this test.
+  if (src.source === "map" && typeof src.origin === "number") interp._rpgvSrc = src;
+  h.runCommand(interp, 1);
+  return interp;
+}
+
+describe("battle skip unseen aftermath (1.25.0)", () => {
+  for (const engine of ["MZ", "MV"] as const) {
+    for (const [seen, expected] of [[[], 0], [[0], 2], [[0, 2], 1], [[0, 1, 2], 0]] as const) {
+      it(`chooses win > allowed lose > allowed escape > win (${engine}, seen ${seen})`, () => {
+        h = newGame(engine);
+        const list = aftermathList();
+        setControl(h, { skipBattles: true, seenMessages: ["common:999#0", ...seenOutcomes(list, [...seen])] });
+        const enemies = setTroop(h);
+        if (expected !== 0) {
+          h.g.$gameParty._battlers[0]._hp = 3;
+          h.g.$gameParty._battlers[1].addNewState(1); // a defeated party member must stay defeated
+        }
+        const actorsBefore = JSON.stringify(h.g.$gameParty._battlers);
+        const interp = runAftermath(list);
+        expect(interp._branch[2]).toBe(expected);
+        expect(h.g.SceneManager.pushed).toEqual([]);
+        expect(h.g.BattleManager._phase).toBeNull();
+        const end = battleRecs(h).at(-1);
+        expect(end).toMatchObject({ phase: "end", skipped: true, result: ["win", "escape", "lose"][expected] });
+        if (expected !== 0) {
+          expect(enemies.every((e: any) => e.isAlive())).toBe(true);
+          expect(JSON.stringify(h.g.$gameParty._battlers)).toBe(actorsBefore);
+          expect(h.g.$gameParty._gold).toBe(0);
+          expect(h.g.$gameParty._items).toEqual({});
+          expect(h.g.BattleManager._rewards).toBeNull();
+          expect(h.g.BattleManager.wins).toBe(0);
+          expect(defeatedOnDisk(h)).toBeUndefined();
+          expect(end).not.toHaveProperty("rewards");
+          expect(h.bridge._lastMessage).toBe(expected === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면");
+        }
+        // Continue through the actual 601/602/603 handlers; only the selected dialogue runs.
+        while (interp._index < list.length) {
+          h.runCommand(interp, interp._index);
+          if (h.g.$gameMessage.isBusy()) h.g.$gameMessage.clear();
+        }
+        expect(h.readLog().filter(r => r.type === "message").map(r => r.text)).toEqual([["win", "escape", "lose"][expected]]);
+      });
+    }
+  }
+
+  it.each([undefined, []])("keeps winning with unknown / empty seen data (%s)", seenMessages => {
+    h = newGame();
+    setControl(h, { skipBattles: true, ...(seenMessages ? { seenMessages } : {}) });
+    setTroop(h);
+    expect(runAftermath(aftermathList([], dialogue(), dialogue()))._branch[2]).toBe(0);
+    expect(h.bridge._lastMessage).not.toContain("아직 안 봄");
+  });
+
+  it.each([[false, true, 1], [true, false, 2], [false, false, 0]])("respects canLose=%s, canEscape=%s", (canLose, canEscape, result) => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(aftermathList([], dialogue(), dialogue(), !!canEscape, !!canLose))._branch[2]).toBe(result);
+  });
+
+  it("tells a winning player about both unseen alternative routes", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(aftermathList())._branch[2]).toBe(0);
+    expect(h.bridge._lastMessage).toContain(" · 패배 장면은 아직 안 봄 · 도망 장면은 아직 안 봄");
+  });
+
+  for (const source of [mapSource, { ...mapSource, origin: 1 }, { source: "common", commonEventId: 9 }, { source: "troop", troopId: 9, page: 0 }] as Location[]) {
+    it(`uses viewer seen keys for ${JSON.stringify(source)}`, () => {
+      h = newGame();
+      const list = aftermathList();
+      setControl(h, { skipBattles: true, seenMessages: seenOutcomes(list, [0, 1, 2], source) });
+      setTroop(h);
+      expect(runAftermath(list, source)._branch[2]).toBe(0);
+      expect(h.bridge._lastMessage).not.toContain("아직 안 봄");
+    });
+  }
+
+  it.each([101, 105, 102])("detects unseen command %s using its exact command index", code => {
+    h = newGame();
+    const list = aftermathList([], [], [cmd(code)]);
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(2);
+    setControl(h, { skipBattles: true, seenMessages: seenOutcomes(list, [2]) });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(0);
+  });
+
+  it("uses each nested common event's own key; seen calls do not make a branch new", () => {
+    h = newGame();
+    h.g.$dataCommonEvents[1] = { list: [cmd(117, [2]), cmd(0)] };
+    h.g.$dataCommonEvents[2] = { list: [cmd(105), cmd(405, ["nested"]), cmd(0)] };
+    const list = aftermathList([], [], [cmd(117, [1])]);
+    // A map key at the common event's index must not hide its dialogue.
+    setControl(h, { skipBattles: true, seenMessages: [seenKey(mapSource, 0)] });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(2);
+    setControl(h, { skipBattles: true, seenMessages: ["common:2#0"] });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(0);
+  });
+
+  it("handles common-event cycles, missing events and empty branches", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    h.g.$dataCommonEvents[1] = { list: [cmd(117, [2]), cmd(0)] };
+    h.g.$dataCommonEvents[2] = { list: [cmd(117, [1]), cmd(117, [999]), cmd(121, [1, 1, 0]), cmd(0)] };
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], [cmd(117, [1])]))._branch[2]).toBe(0);
+    h.g.$dataCommonEvents[2].list.push(...dialogue());
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], [cmd(117, [1])]))._branch[2]).toBe(2);
+  });
+
+  it("scans up to STORY_SCAN_DEPTH=5, including a later call with a shallower path", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    for (let id = 1; id <= 5; id++) h.g.$dataCommonEvents[id] = { list: [cmd(117, [id + 1]), cmd(0)] };
+    h.g.$dataCommonEvents[6] = { list: dialogue() };
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], [cmd(117, [1])]))._branch[2]).toBe(0);
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], [cmd(117, [1]), cmd(117, [2])]))._branch[2]).toBe(2);
+  });
+
+  it("does not mix visited common events between outcomes", () => {
+    h = newGame();
+    h.g.$dataCommonEvents[1] = { list: dialogue() };
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(aftermathList([cmd(117, [1])], [], [cmd(117, [1])]))._branch[2]).toBe(0);
+    expect(h.bridge._lastMessage).toContain("패배 장면은 아직 안 봄");
+  });
+
+  it.each([604, 108, -1])("stops at branch end / unrelated command / outer indent (%s)", boundary => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    const list = aftermathList([], [], []);
+    list.splice(3, list.length, cmd(boundary === -1 ? 603 : boundary, [], boundary === -1 ? 1 : 2), cmd(603, [], 2), ...dialogue().map(c => ({ ...c, indent: 3 })), cmd(604, [], 2));
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(0);
+  });
+
+  it("nested battle markers cannot create an outer lose branch", () => {
+    h = newGame();
+    const list = aftermathList([cmd(603), ...dialogue().map(c => ({ ...c, indent: 1 })), cmd(604)], [], []);
+    setControl(h, { skipBattles: true, seenMessages: seenOutcomes(list, [0]) });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(0);
+    expect(h.bridge._lastMessage).not.toContain("아직 안 봄");
+  });
+
+  it("no outcome markers means no aftermath to select", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath([cmd(108), cmd(301, [0, 5, true, true]), ...dialogue(), cmd(0)])._branch[0]).toBe(0);
+  });
+
+  it.each([1, 2])("falls back to cb(result=%s) exactly once when endBattle omits the callback", result => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    const BM = h.g.BattleManager, end = BM.endBattle;
+    let calls = 0;
+    const setCallback = BM.setEventCallback;
+    BM.setEventCallback = function (cb: (n: number) => void) { setCallback.call(this, (n: number) => { calls++; cb(n); }); };
+    BM.endBattle = function (n: number) {
+      const cb = this._eventCallback;
+      this._eventCallback = null;
+      try { end.call(this, n); } finally { this._eventCallback = cb; }
+    };
+    setTroop(h);
+    expect(runAftermath(aftermathList([], result === 1 ? dialogue() : [], result === 2 ? dialogue() : []))._branch[2]).toBe(result);
+    expect(calls).toBe(1);
+    expect(battleRecs(h).at(-1)).toMatchObject({ result: result === 1 ? "escape" : "lose", skipped: true });
+  });
+
+  it("clears event context when command301 returns, including battles that were fought normally", () => {
+    h = newGame();
+    setControl(h, { seenMessages: ["common:999#0"] });
+    setTroop(h);
+    runAftermath(aftermathList([], [], dialogue())); // not skipped
+    h.g.BattleManager.endBattle(0);
+    setControl(h, { skipBattles: true });
+    setTroop(h);
+    expect(eventBattle(h).n).toBe(0); // symbol encounter: no command301 context
+  });
+
+  it("clears event context when command301 throws", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    const BM = h.g.BattleManager, setup = BM.setup;
+    BM.setup = () => { throw new Error("setup failed"); };
+    expect(() => runAftermath(aftermathList([], [], dialogue()))).toThrow("setup failed");
+    BM.setup = setup;
+    expect(eventBattle(h).n).toBe(0);
+  });
+
+  it("preserves the story-troop and unknown-enemy rules even with an unseen lose branch", () => {
+    h = newGame();
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h, 5, [dialogue()]);
+    expect(runAftermath(aftermathList([], [], dialogue()))._branch[2]).toBeUndefined();
+    h.g.BattleManager.endBattle(0);
+    setControl(h, { skipBattles: true, skipKnownOnly: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], dialogue()))._branch[2]).toBeUndefined();
+    expect(h.g.SceneManager.pushed).toHaveLength(2);
+  });
+});
 
 describe("battle skip (1.24.0)", () => {
   for (const engine of ["MZ", "MV"] as const) {
