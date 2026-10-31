@@ -85,7 +85,7 @@ function conditional(params: any[], yes = dialogue("then"), no?: ReturnType<type
   return [cmd(111, params), ...nested(yes), ...(no ? [cmd(411), ...nested(no)] : []), cmd(412)];
 }
 
-describe("battle skip seen story (1.28.0)", () => {
+describe("battle skip seen story (1.29.0)", () => {
   function prepare(engine: "MZ" | "MV" = "MZ", enemies = [1, 2], seenMessages = ["common:999#0"]) {
     h = newGame(engine);
     h.fs.dirs.add(DIR);
