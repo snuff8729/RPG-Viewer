@@ -94,8 +94,8 @@ describe("battle skip seen story (1.28.0)", () => {
   }
 
   for (const engine of ["MV", "MZ"] as const) {
-    it.each([101, 105])(`uses exact troop page keys for a defeat page, even before its HP condition is met (${engine}, %s)`, code => {
-      prepare(engine);
+    it.each([101, 105])(`an unseen defeat page (actor HP) blocks only a never-beaten troop (${engine}, %s)`, code => {
+      prepare(engine, []);
       const pages = [[cmd(0)], [cmd(108), cmd(code), cmd(code), cmd(0)]];
       const setup = () => {
         setTroop(h, 5, pages);
@@ -106,10 +106,23 @@ describe("battle skip seen story (1.28.0)", () => {
       expect(eventBattle(h).n).toBeUndefined();
       expect(h.bridge._lastMessage).toBe("처음 보는 대화가 있어 그대로 싸워요");
       h.g.BattleManager.endBattle(0);
-      setControl(h, { skipBattles: true, seenMessages: ["troop:5:1#1", "troop:5:1#2"] });
+      // the same troop once beaten: a defeat page (often never reached when the game loses through a skill) no longer blocks
+      prepare(engine, [1, 2], ["troop:5:0#1", "troop:5:1#2"]);
       setup();
       expect(eventBattle(h).n).toBe(0);
       expect(battleRecs(h).at(-1)).toMatchObject({ skipped: true, result: "win" });
+    });
+
+    it(`uses exact troop page keys for a page without an actor HP condition (${engine})`, () => {
+      prepare(engine);
+      const pages = [[cmd(0)], [cmd(108), cmd(101), cmd(101), cmd(0)]];
+      setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#1", "troop:5:1#2"] });
+      setTroop(h, 5, pages);
+      expect(eventBattle(h).n).toBeUndefined();
+      h.g.BattleManager.endBattle(0);
+      setControl(h, { skipBattles: true, seenMessages: ["troop:5:1#1", "troop:5:1#2"] });
+      setTroop(h, 5, pages);
+      expect(eventBattle(h).n).toBe(0);
     });
 
     it(`follows the current count through nested branches and their matching Else / End (${engine})`, () => {

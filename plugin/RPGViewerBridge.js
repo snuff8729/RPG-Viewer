@@ -1511,9 +1511,13 @@
     var dt = G.$dataTroops && isCount(troopId) ? G.$dataTroops[troopId] : null;
     if (!dt) return "story";
     var pages = dt.pages || [], seenCe = {}, legacy = Object.keys(seenMessages).length === 0;
-    var blockChanges = !legacy && !troopKnown(G.$gameTroop), reason = null;
+    var known = !legacy && troopKnown(G.$gameTroop);
+    var blockChanges = !legacy && !known, reason = null;
     for (var i = 0; i < pages.length; i++) {
       if (!pages[i]) continue;
+      // An actor-HP page only runs while the party is losing; a skipped win never reaches it. Once the troop
+      // was beaten it cannot block (games often lose through a skill instead, so such pages may never run).
+      if (known && pages[i].conditions && pages[i].conditions.actorValid) continue;
       if (legacy) {
         if (listHasStory(pages[i].list, 0, seenCe)) return "story";
       } else {
