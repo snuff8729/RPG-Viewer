@@ -82,8 +82,8 @@ function runAftermath(list: ReturnType<typeof aftermathList>, src = mapSource) {
 
 describe("battle skip unseen aftermath (1.25.0)", () => {
   for (const engine of ["MZ", "MV"] as const) {
-    for (const [seen, expected] of [[[], 0], [[0], 2], [[0, 2], 1], [[0, 1, 2], 0]] as const) {
-      it(`chooses win > allowed lose > allowed escape > win (${engine}, seen ${seen})`, () => {
+    for (const [seen, expected] of [[[], 2], [[0], 2], [[1], 2], [[2], 1], [[0, 1], 2], [[0, 2], 1], [[1, 2], 0], [[0, 1, 2], 0]] as const) {
+      it(`chooses allowed unseen lose > allowed unseen escape > win (${engine}, seen ${seen})`, () => {
         h = newGame(engine);
         const list = aftermathList();
         setControl(h, { skipBattles: true, seenMessages: ["common:999#0", ...seenOutcomes(list, [...seen])] });
@@ -108,7 +108,11 @@ describe("battle skip unseen aftermath (1.25.0)", () => {
           expect(h.g.BattleManager.wins).toBe(0);
           expect(defeatedOnDisk(h)).toBeUndefined();
           expect(end).not.toHaveProperty("rewards");
-          expect(h.bridge._lastMessage).toBe(expected === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면");
+          const hint = [0, 2, 1].filter(result => result !== expected && !(seen as readonly number[]).includes(result))
+            .map(result => ` · ${["승리", "도망", "패배"][result]} 장면은 아직 안 봄`).join("");
+          expect(h.bridge._lastMessage).toBe((expected === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면") + hint);
+        } else {
+          expect(h.bridge._lastMessage).not.toContain("아직 안 봄");
         }
         // Continue through the actual 601/602/603 handlers; only the selected dialogue runs.
         while (interp._index < list.length) {
@@ -132,14 +136,14 @@ describe("battle skip unseen aftermath (1.25.0)", () => {
     h = newGame();
     setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
     setTroop(h);
-    expect(runAftermath(aftermathList([], dialogue(), dialogue(), !!canEscape, !!canLose))._branch[2]).toBe(result);
+    expect(runAftermath(aftermathList(dialogue(), dialogue(), dialogue(), !!canEscape, !!canLose))._branch[2]).toBe(result);
   });
 
   it("tells a winning player about both unseen alternative routes", () => {
     h = newGame();
     setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
     setTroop(h);
-    expect(runAftermath(aftermathList())._branch[2]).toBe(0);
+    expect(runAftermath(aftermathList(undefined, undefined, undefined, false, false))._branch[2]).toBe(0);
     expect(h.bridge._lastMessage).toContain(" · 패배 장면은 아직 안 봄 · 도망 장면은 아직 안 봄");
   });
 
@@ -207,8 +211,9 @@ describe("battle skip unseen aftermath (1.25.0)", () => {
     h.g.$dataCommonEvents[1] = { list: dialogue() };
     setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
     setTroop(h);
-    expect(runAftermath(aftermathList([cmd(117, [1])], [], [cmd(117, [1])]))._branch[2]).toBe(0);
-    expect(h.bridge._lastMessage).toContain("패배 장면은 아직 안 봄");
+    expect(runAftermath(aftermathList([cmd(117, [1])], [], [cmd(117, [1])]))._branch[2]).toBe(2);
+    expect(h.bridge._lastMessage).toContain("승리 장면은 아직 안 봄");
+    expect(h.bridge._lastMessage).not.toContain("패배 장면은 아직 안 봄");
   });
 
   it.each([604, 108, -1])("stops at branch end / unrelated command / outer indent (%s)", boundary => {

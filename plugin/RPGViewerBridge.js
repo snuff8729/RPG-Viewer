@@ -50,7 +50,7 @@
  * 전투 건너뛰기(전투 화면 없이 바로 이기고 경험치·골드·떨어뜨린 아이템을 받음. 대화·선택지·
  * 전투 중단·게임 오버·적 상태 바꾸기·적 변신이 있는 전투는 그대로 싸움), 잡아 본 적만(모든 적을
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
- * 1.25.0: 전투 뒤 처음 보는 장면은 승리 → 허용된 패배 → 허용된 도망 순으로 고릅니다.
+ * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
  * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
@@ -1560,10 +1560,8 @@
       if (ctx.src && ctx.src.source === "common") seenCe[ctx.src.commonEventId] = 0;
       out.unseen[i] = branchHasUnseen(ctx.list, branches[i].from, branches[i].to, ctx.src, 0, seenCe);
     }
-    if (!out.unseen[0]) {
-      if (out.unseen[2] && BM._canLose) out.result = 2;
-      else if (out.unseen[1] && BM._canEscape) out.result = 1;
-    }
+    if (out.unseen[2] && BM._canLose) out.result = 2;
+    else if (out.unseen[1] && BM._canEscape) out.result = 1;
     return out;
   }
 
@@ -1619,8 +1617,12 @@
         if (!cbCalled) { try { cb(result); } catch (e3) { reportError(e3); } }
       }
     }
+    var hint = "";
+    if (unseen && unseen[0] && result !== 0) hint += " · 승리 장면은 아직 안 봄";
+    if (unseen && unseen[2] && result !== 2) hint += " · 패배 장면은 아직 안 봄";
+    if (unseen && unseen[1] && result !== 1) hint += " · 도망 장면은 아직 안 봄";
     if (result !== 0) {
-      showMessage(result === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면");
+      showMessage((result === 2 ? "전투 건너뜀(짐) — 처음 보는 패배 장면" : "전투 건너뜀(도망) — 처음 보는 도망 장면") + hint);
       return;
     }
     var parts = [], rw = null;
@@ -1637,9 +1639,6 @@
       } catch (e5) { reportError(e5); }
     }
     if (ups.length) parts.push("레벨 업 " + ups.join(", "));
-    var hint = "";
-    if (unseen && unseen[2]) hint += " · 패배 장면은 아직 안 봄";
-    if (unseen && unseen[1]) hint += " · 도망 장면은 아직 안 봄";
     showMessage("전투 건너뜀(이김)" + (parts.length ? " — " + parts.join(" · ") : "") + hint);
   }
 
