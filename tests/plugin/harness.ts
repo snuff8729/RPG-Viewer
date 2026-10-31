@@ -216,6 +216,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   function Game_Player(this: any) { this.x = 0; this.y = 0; this._transferring = false; this._newMapId = 0; this._newX = 0; this._newY = 0; }
   Game_Player.prototype.isTransferring = function () { return this._transferring; };
   Game_Player.prototype.updateEncounterCount = function () { this._encounterCount = (this._encounterCount ?? 3) - 1; };
+  Game_Player.prototype.makeEncounterCount = function () { this._encounterCount = 3; };
+  Game_Player.prototype.makeEncounterTroopId = function () { return this.encounterTroopId ?? 1; };
   Game_Player.prototype.executeEncounter = function () {
     if ((this._encounterCount ?? 3) > 0) return false;
     this._encounterCount = 3;
@@ -302,6 +304,31 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
     this._index++;
     return true;
   };
+  // Battle Processing: MV reads _params, MZ receives params. The callback is installed before push,
+  // and the interpreter's current indent is still that of 301 when a synchronous skip calls it.
+  Game_Interpreter.prototype.command301 = function (params?: any[]) {
+    const p = engine === "MZ" ? params! : this._params;
+    if (!g.$gameParty.inBattle()) {
+      const troopId = p[0] === 0 ? p[1] : p[0] === 1 ? g.$gameVariables.value(p[1]) : g.$gamePlayer.makeEncounterTroopId();
+      if (g.$dataTroops[troopId]) {
+        g.BattleManager.setup(troopId, p[2], p[3]);
+        g.BattleManager.setEventCallback((n: number) => { this._branch[this._indent] = n; });
+        g.$gamePlayer.makeEncounterCount();
+        g.SceneManager.push(g.Scene_Battle);
+      }
+    }
+    return true;
+  };
+  Game_Interpreter.prototype.skipBranch = function () {
+    while (this._list[this._index + 1]?.indent > this._indent) this._index++;
+  };
+  for (const [code, result] of [[601, 0], [602, 1], [603, 2]]) {
+    Game_Interpreter.prototype["command" + code] = function () {
+      if (this._branch[this._indent] !== result) this.skipBranch();
+      return true;
+    };
+  }
+  // 604 has no handler in either engine: executeCommand simply advances past it.
   Game_Interpreter.prototype.command101 = function (params?: any[]) {
     const p = params ?? this._params;
     const m = g.$gameMessage;
