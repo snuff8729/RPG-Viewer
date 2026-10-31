@@ -3,6 +3,7 @@
  * @plugindesc RPG Viewer 기록 플러그인
  * @author RPG Viewer
  * @help
+ * 1.28.0: Auto speed for stretches before seen dialogue, including running battle events.
  * RPG Viewer가 설치하는 기록 플러그인입니다.
  * 게임 폴더의 rpg-viewer/ 아래에 플레이 기록(log.jsonl)과
  * 현재 상태(live.json)를 남깁니다.
@@ -231,6 +232,7 @@
   var STORY_BATTLE_CODES = { 101: true, 102: true, 103: true, 104: true, 105: true, 333: true, 336: true, 340: true, 353: true, 354: true };
   var STORY_SCAN_DEPTH = 5;   // nested Common Event calls looked into
   var seenMessages = Object.create(null), seenPages = Object.create(null);
+  var AUTO_SCAN_MAX = 2000, autoScanCache = null;
   // last speed/walkSpeed/skipSeen/autoFast/autoSpeed taken from control.json: a rewrite with the same value does not undo a hotkey change
   var ctrlSpeed = null, ctrlWalkSpeed = null, ctrlSkip = null, ctrlAutoFast = null, ctrlAutoSpeed = null;
   var lastControlKey = null, lastControlText = null, lastControlPollT = -Infinity;
@@ -813,14 +815,17 @@
   }
 
   // Innermost running interpreter of the map (or of the troop in battle), or null.
-  function innermost(inBattle) {
+  function innermost(inBattle, chain) {
     var map = G.$gameMap;
     var inner = inBattle && G.$gameTroop ? G.$gameTroop._interpreter : (map ? map._interpreter : null);
     var depth = 0;
     while (inner && inner._childInterpreter && inner._childInterpreter.isRunning && inner._childInterpreter.isRunning() && depth < 32) {
+      if (chain) chain.push(inner);
       inner = inner._childInterpreter; depth++;
     }
-    return inner && inner.isRunning && inner.isRunning() ? inner : null;
+    if (!inner || !inner.isRunning || !inner.isRunning()) return null;
+    if (chain) chain.push(inner);
+    return inner;
   }
 
   // Title (or boot) scene: objects may still hold the previous play; let live.json go stale.
@@ -1200,7 +1205,7 @@
     } else {
       try { stopHtmlWatch(); } catch (eh) { reportError(eh); }
     }
-    // c.seenTroops is accepted and ignored: battles are never sped up automatically
+    // c.seenTroops is accepted and ignored: only running event dialogue can enable battle auto speed
     var hk = hotkeysFrom(c.hotkeys);
     if (JSON.stringify(hk) !== JSON.stringify(hotkeys)) {
       hotkeys = hk;
@@ -1328,11 +1333,55 @@
     return !!((m.isChoice && m.isChoice()) || (m.isNumberInput && m.isNumberInput()) || (m.isItemChoice && m.isItemChoice()));
   }
 
-  // Auto speed only for a fully seen event outside battle (battles are never judged "seen").
+  // Next dialogue key, false for a choice / an incomplete scan, null when the whole chain has no text.
+  // Cache the target, not its seen status: control.json may update coverage while an event waits.
+  function nextAutoDialogue(chain) {
+    var frames = [], same = autoScanCache && autoScanCache.frames.length === chain.length;
+    var i, f, old;
+    for (i = 0; i < chain.length; i++) {
+      f = { list: chain[i]._list, index: chain[i]._index, key: locKey(srcOf(chain[i])) };
+      frames.push(f);
+      old = same ? autoScanCache.frames[i] : null;
+      if (!old || old.list !== f.list || old.index !== f.index || old.key !== f.key) same = false;
+    }
+    if (same) return autoScanCache.result;
+    var scanned = 0, result = null;
+    for (i = frames.length - 1; i >= 0 && result === null; i--) {
+      f = frames[i];
+      if (!Array.isArray(f.list) || typeof f.index !== "number" || !isFinite(f.index) || f.index < 0 || Math.floor(f.index) !== f.index) {
+        result = false;
+        break;
+      }
+      // MV/MZ advance the parent's index past 117 before updating its child. Resume there as-is.
+      for (var j = f.index; j < f.list.length; j++) {
+        if (scanned >= AUTO_SCAN_MAX) { result = false; break; }
+        scanned++;
+        var c = f.list[j];
+        if (!c) continue;
+        if (c.code === 102) { result = false; break; }
+        if (c.code === 101 || c.code === 105) {
+          result = f.key === null ? false : f.key + "#" + j;
+          break;
+        }
+      }
+    }
+    // Only the last chain is retained; no interpreter fields or parent cycles enter save data.
+    autoScanCache = { frames: frames, result: result };
+    return result;
+  }
+
+  // A seen stretch or, when no dialogue remains, a fully seen page. Battle actions alone never qualify.
   function autoActive() {
-    if (!assist.autoFast || inBattleNow()) return false;
-    var inner = innermost(false);
-    var k = inner ? locKey(inner._rpgvSrc) : null;
+    if (!assist.autoFast) return false;
+    var battle = inBattleNow(), troop = G.$gameTroop;
+    if (battle && (!troop || !troop._interpreter || !troop._interpreter.isRunning || !troop._interpreter.isRunning())) return false;
+    var chain = [], inner = innermost(battle, chain);
+    if (!inner) return false;
+    // innermost bounds malformed / excessively deep chains; an incomplete chain cannot prove a seen stretch.
+    if (inner._childInterpreter && inner._childInterpreter.isRunning && inner._childInterpreter.isRunning()) return false;
+    var next = nextAutoDialogue(chain);
+    if (next !== null) return next !== false && seenMessages[next] === true;
+    var k = locKey(srcOf(inner));
     return k !== null && seenPages[k] === true;
   }
 

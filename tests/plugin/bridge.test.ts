@@ -1540,7 +1540,7 @@ describe("RPGViewerBridge", () => {
       expect(pressOkCount(w, 30)).toBe(0);
     });
 
-    it("auto speed while a fully seen event runs outside battle; never in battle (seenTroops ignored)", () => {
+    it("auto speed falls back to seenPages without dialogue; seenTroops alone never enables it", () => {
       h = newGame();
       onMap(h);
       writeControl(h, { speed: 2, autoFast: true, autoSpeed: 8, seenPages: ["map:1:3:0"], seenTroops: [4] });

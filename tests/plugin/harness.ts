@@ -309,7 +309,8 @@ export function createHarness(opts: { engine?: Engine; fs?: MemFs; startTime?: n
   Game_Interpreter.prototype.command117 = function (params?: any[]) {
     const p = params ?? this._params;
     const ce = g.$dataCommonEvents[p[0]];
-    if (ce) this.setupChild(ce.list, p[0]);
+    // MV/MZ pass the caller's event id on the current map, not the common event id.
+    if (ce) this.setupChild(ce.list, this._mapId === g.$gameMap.mapId() ? this._eventId : 0);
     return true;
   };
   Game_Interpreter.prototype.isRunning = function () { return !!this._list; };
