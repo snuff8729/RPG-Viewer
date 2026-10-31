@@ -54,6 +54,7 @@
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
  * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
+ * 1.29.0: 현재 조건에서 볼 대화를 이미 본 전투는 건너뛰며, 이겨 본 적의 전투 변경 명령도 허용합니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
  * 1.26.0: 대사 직전·표시 중의 AudioManager.playSe·playVoice 소리도 대사와 연결해 기록합니다.
@@ -70,7 +71,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.28.0",
+    VERSION: "1.29.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -1546,30 +1547,47 @@
     return false;
   }
 
-  // A troop whose battle events talk, ask, change enemy states, transform, abort or end the game is fought normally.
-  function storyBattle(troopId) {
-    var dt = G.$dataTroops && isCount(troopId) ? G.$dataTroops[troopId] : null;
-    if (!dt) return true;
-    var pages = dt.pages || [], seenCe = {};
-    for (var i = 0; i < pages.length; i++) {
-      if (pages[i] && listHasStory(pages[i].list, 0, seenCe)) return true;
+  function troopKnown(tr) {
+    var d = loadDefeated(), ms = tr.members();
+    for (var i = 0; ms && i < ms.length; i++) {
+      if (d[enemyIdOf(ms[i])] !== true) return false;
     }
-    return false;
+    return true;
   }
 
-  // null when the battle just set up may be skipped, else why not ("engine", "story", "party", "unknown").
+  // Scan every page: HP / turn / switch page conditions can become true during the battle.
+  function storyBattle(troopId) {
+    var dt = G.$dataTroops && isCount(troopId) ? G.$dataTroops[troopId] : null;
+    if (!dt) return "story";
+    var pages = dt.pages || [], seenCe = {}, legacy = Object.keys(seenMessages).length === 0;
+    var known = !legacy && troopKnown(G.$gameTroop);
+    var blockChanges = !legacy && !known, reason = null;
+    for (var i = 0; i < pages.length; i++) {
+      if (!pages[i]) continue;
+      // An actor-HP page only runs while the party is losing; a skipped win never reaches it. Once the troop
+      // was beaten it cannot block (games often lose through a skill instead, so such pages may never run).
+      if (known && pages[i].conditions && pages[i].conditions.actorValid) continue;
+      if (legacy) {
+        if (listHasStory(pages[i].list, 0, seenCe)) return "story";
+      } else {
+        var list = pages[i].list;
+        var why = reachableStory(list, 0, list ? list.length : 0, { source: "troop", troopId: troopId, page: i }, 0, seenCe, blockChanges);
+        if (why === "unseen") return why;
+        if (why) reason = why;
+      }
+    }
+    return reason;
+  }
+
+  // null when the battle just set up may be skipped, else why not ("engine", "story", "unseen", "party", "unknown").
   function skipBlock() {
     var BM = G.BattleManager, tr = G.$gameTroop, party = G.$gameParty;
     if (!BM || !tr || !party || typeof BM.makeRewards !== "function" || typeof BM.gainRewards !== "function" ||
         typeof BM.endBattle !== "function" || typeof tr.members !== "function" || typeof tr.aliveMembers !== "function") return "engine";
-    if (storyBattle(tr._troopId)) return "story";
+    var story = storyBattle(tr._troopId);
+    if (story) return story;
     if (typeof party.aliveMembers !== "function" || party.aliveMembers().length === 0) return "party";
-    if (encounter.knownOnly) {
-      var d = loadDefeated(), ms = tr.members();
-      for (var i = 0; ms && i < ms.length; i++) {
-        if (d[enemyIdOf(ms[i])] !== true) return "unknown";
-      }
-    }
+    if (encounter.knownOnly && !troopKnown(tr)) return "unknown";
     return null;
   }
 
@@ -1593,26 +1611,87 @@
     return out;
   }
 
-  function branchHasUnseen(list, from, to, src, depth, seenCe) {
-    if (!list || typeof list.length !== "number") return false;
-    var key = locKey(src);
+  // MV / MZ command111: [0, switchId, 0=ON/1=OFF],
+  // [1, variableId, 0=constant/1=variable, operand, 0===/1>=/2<=/3>/4</5!==],
+  // or [2, selfSwitchLetter, 0=ON/1=OFF]. Other condition types remain unknown.
+  function storyCondition(p, src) {
+    if (!p) return null;
+    if (p[0] === 0 && (p[2] === 0 || p[2] === 1) && G.$gameSwitches) {
+      return G.$gameSwitches.value(p[1]) === (p[2] === 0);
+    }
+    if (p[0] === 1 && (p[2] === 0 || p[2] === 1) && G.$gameVariables) {
+      var a = G.$gameVariables.value(p[1]);
+      var b = p[2] === 0 ? p[3] : G.$gameVariables.value(p[3]);
+      switch (p[4]) {
+        case 0: return a === b;
+        case 1: return a >= b;
+        case 2: return a <= b;
+        case 3: return a > b;
+        case 4: return a < b;
+        case 5: return a !== b;
+      }
+    }
+    if (p[0] === 2 && (p[2] === 0 || p[2] === 1) && src && src.source === "map" && G.$gameSelfSwitches) {
+      return G.$gameSelfSwitches.value([src.mapId, src.eventId, p[1]]) === (p[2] === 0);
+    }
+    return null;
+  }
+
+  function conditionalBranches(list, index, to) {
+    var indent = list[index].indent, other = null;
+    for (var i = index + 1; i < to; i++) {
+      var c = list[i];
+      if (!c) continue;
+      if (c.indent < indent) break;
+      if (c.indent !== indent) continue;
+      if (c.code === 411) other = i;
+      else if (c.code === 412) return { other: other, end: i };
+      else break;
+    }
+    return null; // Malformed / incomplete lists: conservatively scan both bodies.
+  }
+
+  // Current-state approximation: commands are never executed, including variable / switch changes
+  // earlier in the list. Keep original command indices and common-event sources for seen keys.
+  function reachableStory(list, from, to, src, depth, seenCe, blockChanges) {
+    if (!list || typeof list.length !== "number") return null;
+    var key = locKey(src), reason = null;
     for (var i = from; i < to; i++) {
       var c = list[i];
       if (!c) continue;
-      // choices (102) are not in seenMessages (viewer sends message/scroll keys only): counting them would never be "seen"
-      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) return true;
+      // Choices / input (102-104) have no seen keys; surrounding text decides.
+      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) return "unseen";
+      if (blockChanges && c.code >= 333 && STORY_BATTLE_CODES[c.code] === true) reason = "story";
+      if (c.code === 111) {
+        var condition = storyCondition(c.parameters, src);
+        var bounds = condition === null ? null : conditionalBranches(list, i, to);
+        if (bounds) {
+          var start = condition ? i + 1 : (bounds.other === null ? bounds.end : bounds.other + 1);
+          var end = condition && bounds.other !== null ? bounds.other : bounds.end;
+          var branch = reachableStory(list, start, end, src, depth, seenCe, blockChanges);
+          if (branch === "unseen") return branch;
+          if (branch) reason = branch;
+          i = bounds.end;
+          continue;
+        }
+      }
       if (c.code === 117 && depth < STORY_SCAN_DEPTH && c.parameters) {
         var id = c.parameters[0];
         var ce = G.$dataCommonEvents && isCount(id) ? G.$dataCommonEvents[id] : null;
         if (ce && ce.list && (seenCe[id] == null || seenCe[id] > depth + 1)) {
           // Skip cycles / repeated calls unless a shallower call exposes more of the depth budget.
           seenCe[id] = depth + 1;
-          var unseen = branchHasUnseen(ce.list, 0, ce.list.length, { source: "common", commonEventId: id }, depth + 1, seenCe);
-          if (unseen) return true;
+          var called = reachableStory(ce.list, 0, ce.list.length, { source: "common", commonEventId: id }, depth + 1, seenCe, blockChanges);
+          if (called === "unseen") return called;
+          if (called) reason = called;
         }
       }
     }
-    return false;
+    return reason;
+  }
+
+  function branchHasUnseen(list, from, to, src, depth, seenCe) {
+    return reachableStory(list, from, to, src, depth, seenCe, false) === "unseen";
   }
 
   function battleSkipOutcome() {
@@ -1715,6 +1794,7 @@
     if (!SB || typeof sceneClass !== "function" || !(sceneClass === SB || sceneClass.prototype instanceof SB)) return false;
     var why = skipBlock();
     if (why === "story") showMessage("대화가 있는 전투라 그대로 싸워요");
+    else if (why === "unseen") showMessage("처음 보는 대화가 있어 그대로 싸워요");
     else if (why === "unknown") showMessage("처음 보는 적이 있어 그대로 싸워요");
     if (why !== null) return false;
     var outcome = battleSkipOutcome();

@@ -80,6 +80,246 @@ function runAftermath(list: ReturnType<typeof aftermathList>, src = mapSource) {
   return interp;
 }
 
+function conditional(params: any[], yes = dialogue("then"), no?: ReturnType<typeof dialogue>) {
+  const nested = (body: ReturnType<typeof dialogue>) => body.map(c => ({ ...c, indent: c.indent + 1 }));
+  return [cmd(111, params), ...nested(yes), ...(no ? [cmd(411), ...nested(no)] : []), cmd(412)];
+}
+
+describe("battle skip seen story (1.29.0)", () => {
+  function prepare(engine: "MZ" | "MV" = "MZ", enemies = [1, 2], seenMessages = ["common:999#0"]) {
+    h = newGame(engine);
+    h.fs.dirs.add(DIR);
+    h.fs.writeFileSync(DEFEATED_PATH, JSON.stringify({ v: 1, enemies }));
+    setControl(h, { skipBattles: true, seenMessages });
+  }
+
+  for (const engine of ["MV", "MZ"] as const) {
+    it.each([101, 105])(`an unseen defeat page (actor HP) blocks only a never-beaten troop (${engine}, %s)`, code => {
+      prepare(engine, []);
+      const pages = [[cmd(0)], [cmd(108), cmd(code), cmd(code), cmd(0)]];
+      const setup = () => {
+        setTroop(h, 5, pages);
+        h.g.$dataTroops[5].pages[1].conditions = { actorValid: true, actorId: 1, actorHp: 0 };
+      };
+      setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#1", "troop:5:1#2"] });
+      setup();
+      expect(eventBattle(h).n).toBeUndefined();
+      expect(h.bridge._lastMessage).toBe("처음 보는 대화가 있어 그대로 싸워요");
+      h.g.BattleManager.endBattle(0);
+      // the same troop once beaten: a defeat page (often never reached when the game loses through a skill) no longer blocks
+      prepare(engine, [1, 2], ["troop:5:0#1", "troop:5:1#2"]);
+      setup();
+      expect(eventBattle(h).n).toBe(0);
+      expect(battleRecs(h).at(-1)).toMatchObject({ skipped: true, result: "win" });
+    });
+
+    it(`uses exact troop page keys for a page without an actor HP condition (${engine})`, () => {
+      prepare(engine);
+      const pages = [[cmd(0)], [cmd(108), cmd(101), cmd(101), cmd(0)]];
+      setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#1", "troop:5:1#2"] });
+      setTroop(h, 5, pages);
+      expect(eventBattle(h).n).toBeUndefined();
+      h.g.BattleManager.endBattle(0);
+      setControl(h, { skipBattles: true, seenMessages: ["troop:5:1#1", "troop:5:1#2"] });
+      setTroop(h, 5, pages);
+      expect(eventBattle(h).n).toBe(0);
+    });
+
+    it(`follows the current count through nested branches and their matching Else / End (${engine})`, () => {
+      prepare(engine);
+      const list = [cmd(108), ...conditional([1, 7, 0, 3, 0],
+        conditional([0, 8, 0], [], dialogue("nested else")), dialogue("outer else")), cmd(0)];
+      // Only the outer Else is seen. Nested 411/412 must not close the outer 111.
+      const outerText = list.findIndex(c => c.code === 401 && c.parameters[0] === "outer else") - 1;
+      setControl(h, { skipBattles: true, seenMessages: [`troop:5:0#${outerText}`] });
+      h.g.$gameVariables.setValue(7, 2);
+      setTroop(h, 5, [list]);
+      expect(eventBattle(h).n).toBe(0);
+      h.g.$gameVariables.setValue(7, 3);
+      setTroop(h, 5, [list]);
+      expect(eventBattle(h).n).toBeUndefined();
+      expect(h.bridge._lastMessage).toBe("처음 보는 대화가 있어 그대로 싸워요");
+      h.g.$gameSwitches.setValue(8, true);
+      setTroop(h, 5, [list]);
+      expect(eventBattle(h).n).toBe(0);
+    });
+
+    for (const operandType of [0, 1]) {
+      // For each operator, one true and one false comparison (including equality boundaries).
+      for (const [op, yes, no] of [[0, 5, 4], [1, 5, 4], [2, 5, 6], [3, 6, 5], [4, 4, 5], [5, 4, 5]]) {
+        it(`evaluates variable comparison ${op}, operand type ${operandType} (${engine})`, () => {
+          prepare(engine);
+          h.g.$gameVariables.setValue(8, 5);
+          const list = conditional([1, 7, operandType, operandType === 0 ? 5 : 8, op]);
+          h.g.$gameVariables.setValue(7, no);
+          setTroop(h, 5, [list]);
+          expect(eventBattle(h).n).toBe(0);
+          h.g.$gameVariables.setValue(7, yes);
+          setTroop(h, 5, [list]);
+          expect(eventBattle(h).n).toBeUndefined();
+        });
+      }
+    }
+
+    it.each([0, 1])(`evaluates switch ON / OFF conditions without an Else (${engine}, %s)`, onOff => {
+      prepare(engine);
+      const list = conditional([0, 7, onOff]);
+      h.g.$gameSwitches.setValue(7, onOff === 1);
+      setTroop(h, 5, [list]);
+      expect(eventBattle(h).n).toBe(0);
+      h.g.$gameSwitches.setValue(7, onOff === 0);
+      setTroop(h, 5, [list]);
+      expect(eventBattle(h).n).toBeUndefined();
+    });
+  }
+
+  it("uses strict engine equality for variable comparisons", () => {
+    prepare();
+    h.g.$gameVariables.setValue(7, "5");
+    setTroop(h, 5, [conditional([1, 7, 0, 5, 0])]);
+    expect(eventBattle(h).n).toBe(0);
+    setTroop(h, 5, [conditional([1, 7, 0, 5, 5])]);
+    expect(eventBattle(h).n).toBeUndefined();
+  });
+
+  it.each([[4, 1, 0], [2, "A", 0], [12, "throw new Error('must not execute')"]])("scans both arms of unknown conditions (%j)", (...params) => {
+    prepare();
+    h.g.$gameSelfSwitches.setValue([1, 3, "A"], true);
+    const list = conditional(params, dialogue("seen"), dialogue("unseen"));
+    setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#1"] });
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBeUndefined();
+    setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#4"] });
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBeUndefined();
+    setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#1", "troop:5:0#4"] });
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBe(0);
+  });
+
+  it("scans text after End and never executes earlier switch or variable changes", () => {
+    prepare();
+    const list = [cmd(121, [7, 7, 0]), cmd(122, [8, 8, 0, 0, 5]),
+      ...conditional([0, 7, 0]), ...conditional([1, 8, 0, 5, 0]), ...dialogue("after End")];
+    setControl(h, { skipBattles: true, seenMessages: [`troop:5:0#${list.length - 2}`] });
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBe(0);
+    expect(h.g.$gameSwitches.value(7)).toBe(false);
+    expect(h.g.$gameVariables.value(8)).toBe(0);
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBeUndefined();
+  });
+
+  it("follows reachable nested common events with their own keys, cycles and missing calls", () => {
+    prepare();
+    h.g.$dataCommonEvents[1] = { list: [cmd(117, [2]), cmd(117, [999])] };
+    h.g.$dataCommonEvents[2] = { list: [cmd(117, [1]), ...conditional([1, 7, 0, 3, 0], [cmd(105)])] };
+    const setup = () => setTroop(h, 5, [[cmd(117, [1])]]);
+    setup();
+    expect(eventBattle(h).n).toBe(0);
+    h.g.$gameVariables.setValue(7, 3);
+    setControl(h, { skipBattles: true, seenMessages: ["troop:5:0#2", "common:1#2"] });
+    setup();
+    expect(eventBattle(h).n).toBeUndefined();
+    setControl(h, { skipBattles: true, seenMessages: ["common:2#2"] });
+    setup();
+    expect(eventBattle(h).n).toBe(0);
+  });
+
+  it("respects the common-event depth limit and revisits a shallower call on another page", () => {
+    prepare();
+    for (let id = 1; id <= 5; id++) h.g.$dataCommonEvents[id] = { list: [cmd(117, [id + 1])] };
+    h.g.$dataCommonEvents[6] = { list: dialogue() };
+    setTroop(h, 5, [[cmd(117, [1])]]);
+    expect(eventBattle(h).n).toBe(0);
+    setTroop(h, 5, [[cmd(117, [1])], [cmd(117, [2])]]);
+    expect(eventBattle(h).n).toBeUndefined();
+  });
+
+  it.each([333, 336, 340, 353, 354])("allows battle-changing command %s only after every enemy was beaten", code => {
+    for (const enemies of [[], [1], [1, 2]]) {
+      prepare("MZ", enemies);
+      h.g.$dataCommonEvents[1] = { list: [cmd(code)] };
+      setTroop(h, 5, [[cmd(117, [1])]]);
+      expect(eventBattle(h).n).toBe(enemies.length === 2 ? 0 : undefined);
+      if (enemies.length !== 2) expect(h.bridge._lastMessage).toBe("대화가 있는 전투라 그대로 싸워요");
+    }
+  });
+
+  it("ignores unreachable battle changes even for new enemies; reachable unseen text still blocks beaten troops", () => {
+    prepare("MZ", []);
+    setTroop(h, 5, [conditional([0, 7, 0], [cmd(340)])]);
+    expect(eventBattle(h).n).toBe(0);
+    setTroop(h, 5, [[cmd(336), ...dialogue()]]);
+    expect(eventBattle(h).n).toBeUndefined();
+    expect(h.bridge._lastMessage).toBe("처음 보는 대화가 있어 그대로 싸워요");
+  });
+
+  it("allows choices / input alone, but keeps the old rule with empty or unloaded seen data", () => {
+    prepare("MZ", [], ["common:999#0"]);
+    setTroop(h, 5, [[cmd(102), cmd(103), cmd(104)]]);
+    expect(eventBattle(h).n).toBe(0);
+    for (const seenMessages of [undefined, []]) {
+      for (const code of [101, 102, 103, 104, 105, 333, 336, 340, 353, 354]) {
+        h = newGame();
+        h.fs.dirs.add(DIR);
+        h.fs.writeFileSync(DEFEATED_PATH, JSON.stringify({ v: 1, enemies: [1, 2] }));
+        setControl(h, { skipBattles: true, ...(seenMessages ? { seenMessages } : {}) });
+        h.g.$dataCommonEvents[1] = { list: conditional([0, 7, 0], [cmd(code)]) };
+        setTroop(h, 5, [[cmd(117, [1])]]);
+        expect(eventBattle(h).n).toBeUndefined();
+        expect(h.bridge._lastMessage).toBe("대화가 있는 전투라 그대로 싸워요");
+      }
+    }
+  });
+
+  it("retains lose > escape > win selection with reachable aftermath text and map self switches", () => {
+    prepare();
+    const list = aftermathList([], conditional([0, 7, 1]), conditional([2, "A", 0]));
+    h.g.$gameSelfSwitches.setValue([1, 3, "A"], false);
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(1);
+    h.g.$gameSelfSwitches.setValue([1, 3, "A"], true);
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(2);
+  });
+
+  it("keeps common-event self switches unknown even when called by a map event", () => {
+    prepare();
+    h.g.$dataCommonEvents[1] = { list: conditional([2, "A", 0]) };
+    h.g.$gameSelfSwitches.setValue([1, 3, "A"], false);
+    setTroop(h);
+    expect(runAftermath(aftermathList([], [], [cmd(117, [1])]))._branch[2]).toBe(2);
+  });
+
+  it("still selects an unseen lose aftermath when a beaten story troop becomes skippable", () => {
+    prepare("MZ", [1, 2], ["troop:5:1#1"]);
+    setTroop(h, 5, [[cmd(336)], [cmd(340), ...dialogue("seen battle text")]]);
+    expect(runAftermath(aftermathList([], [], dialogue()))._branch[2]).toBe(2);
+    expect(h.g.SceneManager.pushed).toEqual([]);
+    expect(battleRecs(h).at(-1)).toMatchObject({ skipped: true, result: "lose" });
+    expect(h.g.$gameParty._gold).toBe(0);
+  });
+
+  it("scans conservatively when a conditional End is missing", () => {
+    prepare();
+    const list = conditional([0, 7, 0]);
+    list.pop();
+    setTroop(h, 5, [list]);
+    expect(eventBattle(h).n).toBeUndefined();
+  });
+
+  it("reports a failing condition accessor and opens the normal battle scene", () => {
+    prepare();
+    setTroop(h, 5, [conditional([1, 7, 0, 3, 0])]);
+    h.g.$gameVariables.value = () => { throw new Error("condition accessor failed"); };
+    expect(eventBattle(h).n).toBeUndefined();
+    expect(h.g.SceneManager.pushed).toEqual([h.g.Scene_Battle]);
+    expect(h.readLog().filter(r => r.type === "error")).toContainEqual(expect.objectContaining({ message: "condition accessor failed" }));
+  });
+});
+
 describe("battle skip unseen aftermath (1.25.0)", () => {
   for (const engine of ["MZ", "MV"] as const) {
     for (const [seen, expected] of [[[], 2], [[0], 2], [[1], 2], [[2], 1], [[0, 1], 2], [[0, 2], 1], [[1, 2], 0], [[0, 1, 2], 0]] as const) {
