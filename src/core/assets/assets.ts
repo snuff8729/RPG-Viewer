@@ -3,7 +3,7 @@ import type { GameData } from "@/core/types";
 import { decodeAudio, decodeImage } from "./decrypt";
 import { classifiedName } from "./pictureFolders";
 
-export type AssetKind = "faces" | "pictures" | "tilesets" | "characters";
+export type AssetKind = "faces" | "pictures" | "tilesets" | "characters" | "system";
 
 /**
  * ok: 그릴 수 있는 그림. missing: 게임 폴더에 없음(모든 확장자 후보가 없거나 그림이 아님) — 캐시된다.
@@ -141,7 +141,7 @@ export class AssetStore {
    */
   private async read(kind: AssetKind, name: string): Promise<AssetResult> {
     // 그림 하위 폴더 플러그인(BY_PictureClassify): 게임은 옮긴 경로에서 읽는다. 거기 없으면 이름 그대로도 본다.
-    const moved = classifiedName(name, this.data.pictureFolders);
+    const moved = kind === "system" ? null : classifiedName(name, this.data.pictureFolders);
     let failed = false;
     for (const n of moved !== null ? [moved, name] : [name]) {
       const r = await this.readAt(kind, n);

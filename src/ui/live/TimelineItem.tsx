@@ -21,6 +21,7 @@ import { battleText, pickedFallbackText, reasonText, stateChangeText, transferTe
 import { classifyPluginRecord, pluginKey } from "@/core/live/pluginText";
 import { PluginLine } from "./PluginLine";
 import { usePluginOverrides } from "./pluginDisplay";
+import { RichText } from "./RichMessageText";
 
 export interface TimelineCtx {
   data: GameData;
@@ -72,8 +73,8 @@ function MessageLine({ r, ctx, uncertain, changed }: { r: RecordOf<"message">; c
       <div className="flex gap-3">
         <div className="size-10 shrink-0">{r.face && <FaceImage name={r.face} index={r.faceIndex} />}</div>
         <div className="min-w-0 flex-1">
-          {r.speaker && <div className="font-semibold">{formatText(r.speaker, ctx.data)}</div>}
-          <div className="whitespace-pre-line">{formatText(r.text, ctx.data)}</div>
+          {r.speaker && <div className="whitespace-pre-line font-semibold"><RichText text={r.speaker} data={ctx.data} colorsOnly /></div>}
+          <div className="whitespace-pre-line"><RichText text={r.text} data={ctx.data} /></div>
         </div>
       </div>
     </Line>
@@ -92,7 +93,7 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
   switch (r.type) {
     case "message": return <MessageLine r={r} ctx={ctx} uncertain={uncertain} changed={changed} />;
     case "scroll":
-      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><div className="whitespace-pre-line text-muted-foreground">{formatText(r.text, ctx.data)}</div></Line>;
+      return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}><div className="whitespace-pre-line text-muted-foreground"><RichText text={r.text} data={ctx.data} /></div></Line>;
     case "choices": case "error": case "screen": return null;
     case "choice":
       return <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>▶ 선택: "{ctx.choiceText.get(r.seq) ?? pickedFallbackText(r.picked)}"</Line>;

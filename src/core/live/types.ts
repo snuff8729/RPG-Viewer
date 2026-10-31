@@ -21,7 +21,7 @@ export type LogRecord = RecordBase & (
    * picsSame = 앞과 같음. 그림 하나는 [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode, tone?, angle?] (core/addons/screenPictures)
    */
   | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string; pics?: unknown[]; picsSame?: true; voice?: VoiceSound[] }
-  /** 1.25.0+: 대사를 띄운 뒤 재생된 음성. msg = 같은 run·branch의 message seq. */
+  /** 1.26.0+: 대사를 띄운 뒤 재생된 음성. msg = 같은 run·branch의 message seq. */
   | ({ type: "voice"; msg: number } & VoiceSound)
   | { type: "scroll"; src: Location | null; cmd: number; text: string }
   /** pics: 1.6.0+ 그림이 바뀌었을 때만(message와 같은 모양) */
