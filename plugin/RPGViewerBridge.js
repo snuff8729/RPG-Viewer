@@ -1535,7 +1535,8 @@
     for (var i = from; i < to; i++) {
       var c = list[i];
       if (!c) continue;
-      if ((c.code === 101 || c.code === 105 || c.code === 102) && key !== null && seenMessages[key + "#" + i] !== true) return true;
+      // choices (102) are not in seenMessages (viewer sends message/scroll keys only): counting them would never be "seen"
+      if ((c.code === 101 || c.code === 105) && key !== null && seenMessages[key + "#" + i] !== true) return true;
       if (c.code === 117 && depth < STORY_SCAN_DEPTH && c.parameters) {
         var id = c.parameters[0];
         var ce = G.$dataCommonEvents && isCount(id) ? G.$dataCommonEvents[id] : null;

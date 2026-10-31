@@ -158,7 +158,15 @@ describe("battle skip unseen aftermath (1.25.0)", () => {
     });
   }
 
-  it.each([101, 105, 102])("detects unseen command %s using its exact command index", code => {
+  it("ignores choices (the viewer sends no choice keys): a choice-only branch is never new", () => {
+    h = newGame();
+    const list = aftermathList([], [], [cmd(102)]);
+    setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
+    setTroop(h);
+    expect(runAftermath(list)._branch[2]).toBe(0);
+  });
+
+  it.each([101, 105])("detects unseen command %s using its exact command index", code => {
     h = newGame();
     const list = aftermathList([], [], [cmd(code)]);
     setControl(h, { skipBattles: true, seenMessages: ["common:999#0"] });
