@@ -6,7 +6,8 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EyeOff } from "lucide-react";
+import { EyeOff, Volume2 } from "lucide-react";
+import { useReaderVoice } from "./readerVoiceContext";
 import { FaceImage } from "../script/FaceImage";
 import { AssetPlaceholder, TextPictureNote } from "../script/AssetPlaceholder";
 import { useAsset } from "../script/useAssetUrl";
@@ -23,6 +24,7 @@ import { isRepeatOpen, setRepeatOpen } from "./repeatOpen";
 import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
+  const voice = useReaderVoice();
   return (
     <div className="flex gap-3">
       {item.face && <FaceImage name={item.face} index={item.faceIndex} />}
@@ -30,6 +32,9 @@ function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }>
         {item.speaker && <p className="text-sm font-medium text-muted-foreground">{item.speaker}</p>}
         {item.lines.map((l, i) => <p key={i} className="whitespace-pre-wrap break-words">{l || " "}</p>)}
       </div>
+      {voice.sounds(item).length > 0 && (
+        <Button variant="ghost" size="icon-xs" aria-label="음성 재생" title="음성 재생" onClick={() => voice.play(item)}><Volume2 /></Button>
+      )}
     </div>
   );
 }
@@ -211,6 +216,12 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
   // 전투 안·다시 본 대화 안의 줄은 여기서 숨긴다(맨 위 줄은 읽기 화면이 `숨긴 문구 N줄`로 묶어 온다)
   const hidden = useLineHidden();
   if (item.kind !== "hidden" && hidden(item)) return null;
+  const body = <ReaderItemBody item={item} />;
+  if (item.kind === "chapter" || item.kind === "battle" || item.kind === "hidden" || (item.kind === "message" && item.repeat !== undefined)) return body;
+  return <div data-reader-line={item.key}>{body}</div>;
+}, (a, b) => sameItem(a.item, b.item));
+
+function ReaderItemBody({ item }: { item: ReaderItem }) {
   switch (item.kind) {
     case "chapter":
       if (item.part) {
@@ -251,7 +262,7 @@ export const ReaderItemView = memo(function ReaderItemView({ item }: { item: Rea
     case "hidden":
       return <HiddenLines item={item} />;
   }
-}, (a, b) => sameItem(a.item, b.item));
+}
 
 function sameAction(a: BattleAction | undefined, b: BattleAction | undefined): boolean {
   if (!a || !b) return a === b;
@@ -283,7 +294,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     case "message": {
       const m = b as typeof a;
       return a.repeat === m.repeat && sameShot(a.screen, m.screen) && a.speaker === m.speaker && a.face === m.face && a.faceIndex === m.faceIndex && sameLines(a.lines, m.lines)
-        && sameOccurrences(a.occurrences, m.occurrences);
+        && a.voice === m.voice && sameOccurrences(a.occurrences, m.occurrences);
     }
     case "scroll": return sameLines(a.lines, (b as typeof a).lines);
     case "picture": {

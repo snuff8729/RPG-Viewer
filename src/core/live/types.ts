@@ -12,13 +12,17 @@ export interface StateChange {
   /** 플러그인이 잦은 변수로 보고 기록을 줄이는 중에 남긴 변경(변수만). 있으면 그 변수는 잦은 변수다. */
   throttled?: true;
 }
+/** audio/<folder>/<name>, 확장자 제외. pan은 기록만 하고 읽기 재생에서는 쓰지 않는다. */
+export interface VoiceSound { folder: string; name: string; volume: number; pitch: number; pan: number }
 export type LogRecord = RecordBase & (
   | { type: "branchStart"; reason: "newGame" | "load" | "unknownSave"; parentBranch: number | null; fromSeq: number | null }
   /**
    * 1.6.0+, 화면 그림 따라 그리기가 켜진 게임만: pics = 대사가 나올 때 화면 그림 전체(앞과 다를 때),
    * picsSame = 앞과 같음. 그림 하나는 [id, name, origin, x, y, scaleX, scaleY, opacity, blendMode, tone?, angle?] (core/addons/screenPictures)
    */
-  | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string; pics?: unknown[]; picsSame?: true }
+  | { type: "message"; src: Location | null; cmd: number; face: string; faceIndex: number; speaker: string; text: string; pics?: unknown[]; picsSame?: true; voice?: VoiceSound[] }
+  /** 1.25.0+: 대사를 띄운 뒤 재생된 음성. msg = 같은 run·branch의 message seq. */
+  | ({ type: "voice"; msg: number } & VoiceSound)
   | { type: "scroll"; src: Location | null; cmd: number; text: string }
   /** pics: 1.6.0+ 그림이 바뀌었을 때만(message와 같은 모양) */
   | { type: "choices"; src: Location | null; cmd: number; options: string[]; pics?: unknown[] }

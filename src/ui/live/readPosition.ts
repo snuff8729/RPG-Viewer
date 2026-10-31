@@ -8,6 +8,16 @@ export interface StoreLike {
   key?(index: number): string | null;
 }
 
+/** 맨 위에 걸친 실제 줄. 접힌 내용·화면 아래 줄은 제외한다. 항목 위치 표시와 음성 재생이 함께 쓴다. */
+export function readerNodeAtTop(root: HTMLElement, selector = "[data-key]"): HTMLElement | null {
+  const rect = root.getBoundingClientRect();
+  for (const node of root.querySelectorAll<HTMLElement>(selector)) {
+    const r = node.getBoundingClientRect();
+    if (r.height > 0 && r.bottom > rect.top + 1 && r.top < rect.bottom) return node;
+  }
+  return null;
+}
+
 function defaultStore(): StoreLike | null {
   try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
 }

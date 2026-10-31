@@ -63,3 +63,58 @@ export function decodeImage(buf: ArrayBuffer, keyHex?: string): { bytes: ArrayBu
   const t = imageType(src);
   return t ? { bytes: buf, type: t } : null;
 }
+
+const OGG = [0x4f, 0x67, 0x67, 0x53];
+
+/** 오디오도 확장자가 아니라 내용으로 판단한다. */
+export function audioType(b: Uint8Array): string | null {
+  if (b.length >= 27 && startsWith(b, OGG) && b[4] === 0) return "audio/ogg";
+  if (b.length >= 16 && startsWith(b, [0x66, 0x74, 0x79, 0x70], 4)) return "audio/mp4";
+  return null;
+}
+
+/** Ogg 첫 페이지 CRC. 체크섬 필드는 계산할 때 0으로 본다. https://xiph.org/ogg/doc/framing.html */
+function oggCrc(b: Uint8Array, end: number): number {
+  let crc = 0;
+  for (let i = 0; i < end; i++) {
+    crc ^= (i >= 22 && i < 26 ? 0 : b[i]) << 24;
+    for (let bit = 0; bit < 8; bit++) crc = (crc << 1) ^ (crc & 0x80000000 ? 0x04c11db7 : 0);
+  }
+  return crc >>> 0;
+}
+
+/**
+ * 키 없는 Vorbis: 고정된 BOS 머리(14바이트)와 다음 페이지의 스트림 번호로 복원한다.
+ * serial의 앞 2바이트는 고정값이 아니다. 다음 페이지가 없거나 CRC가 안 맞으면 조용히 포기한다.
+ */
+function restoreOgg(b: Uint8Array): ArrayBuffer | null {
+  if (b.length < 28 || b.length < 27 + b[26]) return null;
+  let next = 27 + b[26];
+  for (let i = 27; i < 27 + b[26]; i++) next += b[i];
+  if (next + 27 > b.length || !startsWith(b, OGG, next) || b[next + 4] !== 0) return null;
+  if (b[16] !== b[next + 16] || b[17] !== b[next + 17]) return null;
+  const out = b.slice();
+  out.fill(0, 0, 14);
+  out.set(OGG);
+  out[5] = 2;
+  out[14] = b[next + 14]; out[15] = b[next + 15];
+  const expected = new DataView(out.buffer).getUint32(22, true);
+  return oggCrc(out, next) === expected ? out.buffer : null;
+}
+
+/** RPGMV 머리 제거 + 앞 16바이트 XOR. 키가 없거나 틀리면 복구 가능한 OGG만 쓴다. */
+export function decodeAudio(buf: ArrayBuffer, keyHex?: string): { bytes: ArrayBuffer; type: string } | null {
+  const src = new Uint8Array(buf);
+  if (!startsWith(src, RPGMV)) {
+    const type = audioType(src);
+    return type ? { bytes: buf, type } : null;
+  }
+  if (src.length < HEADER_LEN + 16) return null;
+  if (keyHex && /^[\da-f]{32}$/i.test(keyHex)) {
+    const bytes = decryptImage(buf, keyHex);
+    const type = audioType(new Uint8Array(bytes));
+    if (type) return { bytes, type };
+  }
+  const restored = restoreOgg(src.slice(HEADER_LEN));
+  return restored ? { bytes: restored, type: "audio/ogg" } : null;
+}

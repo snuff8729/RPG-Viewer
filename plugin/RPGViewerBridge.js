@@ -52,6 +52,8 @@
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
  * 게임 중에 바뀐 캐릭터 이름(이름 변경·이름 입력)도 현재 상태에 남깁니다.
+ * 대사 직전·표시 중의 AudioManager.playSe·playVoice 소리도 대사와 연결해 기록합니다.
+ * 병렬 이벤트 소리와 playStaticSe(커서·결정 등 UI 효과음)는 연결하지 않습니다.
  *
  * 주의: 세이브 미리보기 등을 위해 DataManager.extractSaveContents를
  * 직접 호출하는 다른 플러그인이 있으면, 실제 로드가 아니어도 기록에
@@ -64,7 +66,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.24.0",
+    VERSION: "1.25.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -111,7 +113,9 @@
   // (closed at flush or before the next non-state record): [{ t, src, cmd, changes, at }].
   var pendingGroups = [];
   var groupByKey = {};
-  var currentCtx = null;      // { src, cmd } of the command being executed
+  var currentCtx = null;      // { src, cmd, interp } of the command being executed
+  var pendingVoices = [], voiceMessage = null, voiceCall = null;
+  var voiceFolders = {}, voiceFolderCount = 0;
   var childParentSrc = null;  // source of the interpreter running setupChild (while it runs)
   var pendingChoiceCtx = null;
   var lastChoices = null;     // { src, cmd, options } for live.json
@@ -453,6 +457,7 @@
     if (hold) pushHeld(rec, typeof hold === "number" ? hold : PICS_HOLD_MS);
     else pushLine(rec);
     if (IMMEDIATE[type] === true) scheduleFlush();
+    return rec;
   }
 
   function pushHeld(rec, ms) {
@@ -478,7 +483,7 @@
   }
 
   // Dialogue-flow records reach disk at the end of the current frame instead of the next 250ms tick.
-  var IMMEDIATE = { message: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
+  var IMMEDIATE = { message: true, voice: true, scroll: true, choices: true, choice: true, picture: true, transfer: true };
   var flushScheduled = false;
   var MIN_FLUSH_GAP_MS = 50, lastFlushT = 0;
   function runScheduled() {
@@ -612,6 +617,7 @@
   }
 
   function startBranch(reason, newRun, parentBranch, fromSeq) {
+    clearVoices();
     releasePending(true); // belongs to the branch that is ending
     closeState();
     finishHeld();
@@ -629,6 +635,7 @@
 
   // Continue the stamped run/branch (no branchStart) when it has no story records after the stamp.
   function resumeBranch(r, b) {
+    clearVoices();
     releasePending(true);
     closeState();
     finishHeld();
@@ -1977,6 +1984,7 @@
   }
 
   function tick() {
+    try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
     try { pollControl(); } catch (ec) { reportError(ec); }
     try { if (htmlWatch) htmlWatch.check(); } catch (eh) { reportError(eh); }
     try { flush(); } catch (e) { reportError(e); }
@@ -3268,6 +3276,83 @@
     return false;
   }
 
+  // 1.25.0: only the foreground interpreter chain can lend a sound to dialogue.
+  // Keep the list identity too: the map interpreter is reused for the next event.
+  function voiceRoot(interp) {
+    var root = inBattleNow() && G.$gameTroop ? G.$gameTroop._interpreter : G.$gameMap && G.$gameMap._interpreter;
+    return root && inChain(root, interp) ? root : null;
+  }
+  function clearVoices() { pendingVoices = []; voiceMessage = null; }
+  function takeVoices(interp) {
+    var root = voiceRoot(interp), sounds = [], t = now();
+    for (var i = 0; i < pendingVoices.length; i++) {
+      var e = pendingVoices[i];
+      if (root && e.root === root && e.list === root._list && e.epoch === root._rpgvVoiceRun && t - e.t <= 2000) sounds.push(e.sound);
+    }
+    pendingVoices = [];
+    return sounds;
+  }
+  function noteVoice(sound) {
+    if (run === null || !sound || typeof sound.name !== "string" || !sound.name) return;
+    var interp = currentCtx && currentCtx.interp;
+    var root = interp ? voiceRoot(interp) : null;
+    if (interp && !root) return;
+    var busy = voiceMessage && (voiceMessage.opening || (messageBusy() && messageHasText()));
+    if (busy) {
+      if (interp && (root !== voiceMessage.root || root._list !== voiceMessage.list || root._rpgvVoiceRun !== voiceMessage.epoch)) return;
+      emit("voice", { msg: voiceMessage.seq, folder: sound.folder, name: sound.name,
+        volume: sound.volume, pitch: sound.pitch, pan: sound.pan });
+    } else {
+      if (!interp || messageBusy()) return;
+      voiceMessage = null;
+      var t = now();
+      pendingVoices = pendingVoices.filter(function (e) { return t - e.t <= 2000; });
+      if (pendingVoices.length >= 32) pendingVoices.shift();
+      pendingVoices.push({ root: root, list: root._list, epoch: root._rpgvVoiceRun, t: t, sound: sound });
+    }
+  }
+  function ensureVoiceHooks() {
+    var am = G.AudioManager;
+    if (!am) return;
+    // Voice plugins choose their folder in createBuffer; observe it without changing playback.
+    if (typeof am.createBuffer === "function" && !am.createBuffer._rpgvVoiceHook) {
+      hook(am, "AudioManager", "createBuffer", function (orig) {
+        var wrapped = function (folder) {
+          if (voiceCall && typeof folder === "string") voiceCall.folder = folder.replace(/^audio\//, "").replace(/\/$/, "");
+          return orig.apply(this, arguments);
+        };
+        wrapped._rpgvVoiceHook = true;
+        return wrapped;
+      });
+    }
+    ["playSe", "playVoice"].forEach(function (method) {
+      if (typeof am[method] !== "function" || am[method]._rpgvVoiceHook) return;
+      hook(am, "AudioManager", method, function (orig) {
+        var wrapped = function (sound) {
+          if (voiceCall) return orig.apply(this, arguments); // playVoice may delegate to playSe
+          var key = method + "/" + (sound && sound.name);
+          var call = { folder: has(voiceFolders, key) ? voiceFolders[key] : (method === "playSe" ? "se" : "voice") };
+          voiceCall = call;
+          try {
+            var result = orig.apply(this, arguments);
+            // Cached plugin buffers may skip createBuffer on replay; remember the folder we observed.
+            if (!has(voiceFolders, key)) voiceFolderCount++;
+            if (voiceFolderCount > 256) { voiceFolders = {}; voiceFolderCount = 1; }
+            voiceFolders[key] = call.folder;
+            if (!/^(bgm|bgs|me)$/i.test(call.folder) && sound && typeof sound.name === "string") {
+              var num = function (v, fallback) { return typeof v === "number" && isFinite(v) ? v : fallback; };
+              try { noteVoice({ folder: call.folder, name: sound.name, volume: num(sound.volume, 90),
+                pitch: num(sound.pitch, 100), pan: num(sound.pan, 0) }); } catch (e) { reportError(e); }
+            }
+            return result;
+          } finally { voiceCall = null; }
+        };
+        wrapped._rpgvVoiceHook = true;
+        return wrapped;
+      });
+    });
+  }
+
   function notePlugin(interp, code) {
     if (run === null) return;
     var i = cmdAt(interp, code);
@@ -3329,6 +3414,7 @@
         var r = orig.apply(this, arguments);
         try {
           this._rpgvSrc = null;
+          this._rpgvVoiceRun = (this._rpgvVoiceRun || 0) + 1;
           this._rpgvPar = null;      // parallel or not: decided at its first plugin command
           this._rpgvPlugins = null;  // plugin commands recorded during this run
           this._rpgvSrc = resolveSource(list, eventId);
@@ -3352,9 +3438,10 @@
 
     hook(GI, "Game_Interpreter", "executeCommand", function (orig) {
       return function () {
+        try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
         var prev = currentCtx;
         var ctx = null;
-        try { ctx = { src: srcOf(this), cmd: this._index }; } catch (e) { reportError(e); }
+        try { ctx = { src: srcOf(this), cmd: this._index, interp: this }; } catch (e) { reportError(e); }
         currentCtx = ctx;
         try {
           return orig.apply(this, arguments);
@@ -3379,14 +3466,18 @@
               face: p[0] == null ? "" : String(p[0]),
               faceIndex: typeof p[1] === "number" ? p[1] : 0,
               speaker: p[4] == null ? "" : String(p[4]),
-              text: joinedText(this._list, i + 1, 401)
+              text: joinedText(this._list, i + 1, 401),
+              voice: takeVoices(this)
             };
             // capturing: the pictures are read once the text starts drawing (Window_Message.updateMessage),
             // after same-frame erases and sprite-level hides have applied
-            emit("message", mrec, capturePictures);
+            var recorded = emit("message", mrec, capturePictures);
+            var root = voiceRoot(this);
+            voiceMessage = recorded ? { seq: recorded.seq, root: root, list: root && root._list, epoch: root && root._rpgvVoiceRun, opening: true } : null;
           }
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
+        if (voiceMessage) voiceMessage.opening = false;
         try { if (pendingMsgKey !== null && !messageHasText()) pendingMsgKey = null; } catch (e2) { pendingMsgKey = null; reportError(e2); }
         return r;
       };
@@ -3426,6 +3517,9 @@
     });
 
     var GM = G.Game_Message && G.Game_Message.prototype;
+    hook(GM, "Game_Message", "clear", function (orig) {
+      return function () { clearVoices(); return orig.apply(this, arguments); };
+    });
     hook(GM, "Game_Message", "setChoiceCallback", function (orig) {
       return function (callback) {
         var args = arguments;
@@ -3553,6 +3647,7 @@
         var was = false;
         try {
           was = !!this.isTransferring();
+          if (was) clearVoices();
           if (was && run === null && deferredNewGame && !inTitleScene()) startBranch("newGame", meta.nextRun++, null, null);
         } catch (e) { reportError(e); }
         var r = orig.apply(this, arguments);
@@ -3587,6 +3682,7 @@
     var BM = G.BattleManager;
     hook(BM, "BattleManager", "setup", function (orig) {
       return function (troopId) {
+        clearVoices();
         var r = orig.apply(this, arguments);
         battleSetupPending = true;
         beginBattle(this, troopId);
@@ -3604,6 +3700,7 @@
     };
     hook(BM, "BattleManager", "endBattle", function (orig) {
       return function (result) {
+        clearVoices();
         try {
           var names = ["win", "escape", "lose"];
           var fields = { phase: "end", troopId: G.$gameTroop ? G.$gameTroop._troopId : 0 };
@@ -3671,6 +3768,7 @@
       };
     });
     try { ensureActionHook(); } catch (eh) { reportError(eh); }
+    try { ensureVoiceHooks(); } catch (ev) { reportError(ev); }
     try { ensureNoticeHooks(); } catch (en) { reportError(en); }
 
     // 1.10.0 screen watch: every image of the picture folder passes through these

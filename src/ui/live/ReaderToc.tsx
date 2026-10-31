@@ -21,6 +21,7 @@ import {
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { readerNodeAtTop } from "./readPosition";
 
 /** 목차 서랍: PC는 오른쪽 Sheet, 휴대폰은 아래 Drawer */
 export function ReaderTocShell({ open, onOpenChange, mobile, children }: {
@@ -338,7 +339,7 @@ export function TocHiddenRules({ rules, counts, onRemove }: {
 
 /**
  * 화면 위 지금 위치 한 줄(`10월 28일 밤 10:05 · 37%`): 읽기 영역 맨 위에 보이는 항목의 큰 단위와 전체 중 위치.
- * 스크롤할 때 한 프레임에 한 번만 본다(항목 노드는 순서대로라 이분 탐색).
+ * 스크롤할 때 한 프레임에 한 번만 본다(화면에 걸친 실제 항목만).
  */
 export function ReaderPosition({ scroller, items, start, end, heads, varId, data, className }: {
   scroller: RefObject<HTMLDivElement | null>; items: readonly ReaderItem[]; start: number; end: number;
@@ -351,15 +352,7 @@ export function ReaderPosition({ scroller, items, start, end, heads, varId, data
     let raf = 0;
     const update = () => {
       raf = 0;
-      const nodes = el.querySelectorAll<HTMLElement>("[data-key]");
-      if (nodes.length === 0) { setTopKey(null); return; }
-      const top = el.getBoundingClientRect().top + 1;
-      let lo = 0, hi = nodes.length - 1, ans = nodes.length - 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (nodes[mid].getBoundingClientRect().bottom > top) { ans = mid; hi = mid - 1; } else lo = mid + 1;
-      }
-      setTopKey(nodes[ans].dataset.key ?? null);
+      setTopKey(readerNodeAtTop(el)?.dataset.key ?? null);
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
     raf = requestAnimationFrame(update);
