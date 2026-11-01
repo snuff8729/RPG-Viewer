@@ -30,6 +30,17 @@ describe("voice player lifetime", () => {
     player.stop();
     expect(revoke).toHaveBeenCalledTimes(2);
   });
+  it("scales by the global gain, including a clip that is already playing", async () => {
+    const { player } = setup();
+    player.setGain(0.5);
+    await player.play([sound]);
+    const clip = FakeAudio.instances[0];
+    expect(clip.volume).toBeCloseTo(0.4);
+    player.setGain(0);
+    expect(clip.volume).toBe(0);
+    player.setGain(1);
+    expect(clip.volume).toBeCloseTo(0.8);
+  });
   it("never starts a stale asynchronous clip after stop or a newer line", async () => {
     let resolve!: (b: Blob) => void;
     const { player, revoke } = setup(() => new Promise(r => { resolve = r; }));

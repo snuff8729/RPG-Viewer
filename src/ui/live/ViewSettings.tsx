@@ -1,10 +1,13 @@
 import { useState, type ReactNode } from "react";
-import { Settings2 } from "lucide-react";
+import { Settings2, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { toggleVoiceMute, useVoiceVolume } from "./voiceVolume";
 
 /** 보기 설정 한 줄: 이름 왼쪽, 스위치 오른쪽(children은 스위치 앞에) */
 export function SettingRow({ id, label, checked, onChange, disabled, children }: {
@@ -15,6 +18,35 @@ export function SettingRow({ id, label, checked, onChange, disabled, children }:
       <Label htmlFor={id} className="min-w-0 flex-1">{label}</Label>
       {children}
       <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
+
+/** 보기 설정의 `음성 소리`: 이 브라우저 전체에 하나(다시 듣기·자동 재생 모두). */
+export function VoiceVolumeRow() {
+  const [v, setV] = useVoiceVolume();
+  const silent = v.muted || v.volume === 0;
+  const muteLabel = silent ? "소리 켜기" : "음소거";
+  return (
+    <div className="flex min-h-9 items-center gap-3">
+      <Label id="reader-voice-volume-label" className="shrink-0">음성 소리</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label={muteLabel} aria-pressed={silent} onClick={() => setV(toggleVoiceMute(v))}>
+            {silent ? <VolumeX /> : <Volume2 />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{muteLabel}</TooltipContent>
+      </Tooltip>
+      <Slider
+        aria-labelledby="reader-voice-volume-label"
+        data-vaul-no-drag
+        className="min-w-0 flex-1 py-2"
+        min={0} max={100} step={1}
+        value={[silent ? 0 : v.volume]}
+        onValueChange={([n]) => setV({ volume: n, muted: false })}
+      />
+      <span className="w-10 shrink-0 text-right text-sm text-muted-foreground tabular-nums">{silent ? 0 : v.volume}%</span>
     </div>
   );
 }

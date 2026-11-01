@@ -44,7 +44,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 import { isRemoteView } from "@/app/share";
 import { cn } from "@/lib/utils";
-import { SettingRow, ViewSettingsButton } from "./ViewSettings";
+import { SettingRow, ViewSettingsButton, VoiceVolumeRow } from "./ViewSettings";
 import { ReaderVoiceProvider } from "./ReaderVoiceProvider";
 import { useReaderAutoVoice } from "./useReaderAutoVoice";
 import { loadVoiceAuto, saveVoiceAuto } from "./voiceAuto";
@@ -820,6 +820,7 @@ export function ReaderView({ mobile = false, toolbarStart }: { mobile?: boolean;
             )}
             <SettingRow id="reader-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
             <SettingRow id="reader-voice-auto" label="음성 자동 재생" checked={voiceAuto} onChange={onVoiceAuto} />
+            <VoiceVolumeRow />
             {(picturesOn || hasPictureRecords) && (
               <SettingRow id="reader-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
             )}
