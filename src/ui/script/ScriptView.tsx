@@ -1,10 +1,12 @@
-import { ExternalLink } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import type { Location, Ref, ScriptNode } from "@/core/types";
 import { ScriptLocation } from "./ScriptLocation";
 import { useGame } from "@/app/GameProvider";
 import { Button } from "@/components/ui/button";
 import { openPage } from "@/ui/navigation";
-import { firstClickableRef } from "@/ui/RefBadge";
+import { firstClickableRef, REF_CHIP } from "@/ui/RefBadge";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { BlockNode } from "./BlockNode";
 import { MessageNode, ScrollNode } from "./MessageNode";
 import { OtherNode } from "./OtherNode";
@@ -78,12 +80,15 @@ function NodeView({ node, path, onRefClick }: { node: ScriptNode; path: number[]
       const target = onRefClick ? firstClickableRef(node.refs) : undefined;
       return (
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span className="min-w-0">⚙ {node.description}</span>
-          {target && (
-            <Button variant="ghost" size="icon-xs" aria-label="참조 보기" onClick={() => onRefClick!(target)}>
-              <ExternalLink />
-            </Button>
-          )}
+          {target ? (
+            // 눌리는 참조는 칩 전체가 단추(조건 칩과 같은 모양)
+            <Badge asChild variant="outline" className={cn(REF_CHIP, "text-muted-foreground")}>
+              <button type="button" title="쓰는 곳 보기" onClick={() => onRefClick!(target)}>
+                ⚙ {node.description}
+                <ArrowUpRight data-icon="inline-end" aria-hidden />
+              </button>
+            </Badge>
+          ) : <span className="min-w-0">⚙ {node.description}</span>}
         </div>
       );
     }
