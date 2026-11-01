@@ -3,6 +3,9 @@ import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { useReaderItemState } from "../live/readerItemState";
 import { useGame } from "@/app/GameProvider";
 import { DEFAULT_SCREEN, type ScreenShot } from "@/core/addons/screenPictures";
+import { motionNames, type PictureMotion } from "@/core/addons/pictureMotion";
+import { MotionCanvas } from "./MotionCanvas";
+import { usePictureMotionOn } from "./motionDisplay";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
 import { HidePicturesMenu } from "./HidePicturesMenu";
@@ -20,15 +23,18 @@ const FRAME_MS = 120;
  * 이벤트 그림이 있는 컷인(화면을 덮는 것)은 화면 그대로, 아니면 모든 장면이 차지하는 부분으로 잘라(장면을 넘겨도 크기가 그대로).
  * 한 가지 색으로만 덮은 장면 하나뿐인 것(화면 전환용 검은·흰 그림)은 보이지 않는다.
  */
-export function CutinPictures({ frames, best, stateKey }: { frames: ScreenShot[]; best: number; stateKey: string }) {
-  return <PictureViewport><CutinPicturesBody frames={frames} best={best} stateKey={stateKey} /></PictureViewport>;
+export function CutinPictures({ frames, best, stateKey, motion }: { frames: ScreenShot[]; best: number; stateKey: string; motion?: PictureMotion }) {
+  return <PictureViewport><CutinPicturesBody frames={frames} best={best} stateKey={stateKey} motion={motion} /></PictureViewport>;
 }
 
-function CutinPicturesBody({ frames, best, stateKey }: { frames: ScreenShot[]; best: number; stateKey: string }) {
+/** motion(기록 시각대로의 움직임)이 있고 `그림 움직임`이 켜져 있으면 장면 넘기기 대신 그대로 움직여 보인다. */
+function CutinPicturesBody({ frames, best, stateKey, motion: recorded }: { frames: ScreenShot[]; best: number; stateKey: string; motion?: PictureMotion }) {
   const active = usePicturesNearViewport();
   const { data } = useGame();
   const guessed = data?.screenSize ?? DEFAULT_SCREEN;
-  const names = useMemo(() => [...new Set(frames.flatMap((f) => f.pictures.map((p) => p.name)))], [frames]);
+  const [motionOn] = usePictureMotionOn();
+  const motion = motionOn ? recorded : undefined;
+  const names = useMemo(() => [...new Set([...frames.flatMap((f) => f.pictures.map((p) => p.name)), ...motionNames(motion)])], [frames, motion]);
   const { images, status, retry } = usePictureImages(names);
   const [index, setIndex] = useReaderItemState("cutin:" + stateKey, Math.max(0, Math.min(best, frames.length - 1)));
   const [playing, setPlaying] = useState(false);
@@ -55,6 +61,25 @@ function CutinPicturesBody({ frames, best, stateKey }: { frames: ScreenShot[]; b
   const only = count === 1 && shot.pictures.length === 1 ? images.get(shot.pictures[0].name) : undefined;
   if (only && isFlatImage(only)) return null;
   const view = cg ? { left: 0, top: 0, width: size.width, height: size.height } : standView(all.pictures, size, images);
+  const missing = names.filter((n) => status(n) === "missing");
+  const failed = names.some((n) => status(n) === "failed");
+  if (motion) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-start gap-1">
+          <figure className="flex min-w-0 flex-1 flex-col gap-1">
+            <MotionCanvas
+              motion={motion} images={images} stand={!cg} label="컷인" ready={names.every((n) => status(n) !== "loading")}
+              view={cg ? view : standView(motion.frames.flatMap((f) => f.pictures), size, images)}
+            />
+            <figcaption className="text-xs text-muted-foreground">컷인</figcaption>
+          </figure>
+          <HidePicturesMenu shot={all} />
+        </div>
+        <PictureLoadNotes missing={missing} failed={failed} retry={retry} />
+      </div>
+    );
+  }
   const step = (d: number) => { setPlaying(false); setIndex((n) => (Math.min(n, count - 1) + d + count) % count); };
   const frameNames = [...new Set(shot.pictures.map((p) => p.name))];
   return (
@@ -78,7 +103,7 @@ function CutinPicturesBody({ frames, best, stateKey }: { frames: ScreenShot[]; b
         </figure>
         <HidePicturesMenu shot={all} />
       </div>
-      <PictureLoadNotes missing={names.filter((n) => status(n) === "missing")} failed={names.some((n) => status(n) === "failed")} retry={retry} />
+      <PictureLoadNotes missing={missing} failed={failed} retry={retry} />
     </div>
   );
 }
