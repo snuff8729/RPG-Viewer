@@ -1,11 +1,14 @@
-/** 휴대폰 너비 플레이 화면: 아래 탭(맵·보조·치트·읽기) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
+/**
+ * 휴대폰 너비 플레이 화면: 아래 탭(맵·보조·치트) 기억과 새 대사 수. 읽기는 따로 화면(#/read)이라 플레이 탭이 아니에요.
+ * 저장소 오류로 예외를 던지지 않는다.
+ */
 import type { LogRecord } from "@/core/live/types";
 import { extendsArray } from "@/core/live/lineage";
 
-export type PlayTab = "assist" | "cheat" | "map" | "read";
+export type PlayTab = "assist" | "cheat" | "map";
 
-/** 탭 순서(아래 탭 줄) */
-export const PLAY_TABS: readonly PlayTab[] = ["map", "assist", "cheat", "read"];
+/** 탭 순서(아래 탭 줄. 그 뒤에 읽기·더보기) */
+export const PLAY_TABS: readonly PlayTab[] = ["map", "assist", "cheat"];
 
 /** 지금 탭 기억(보조·치트가 탭이 된 뒤) */
 const KEY = "rpgv.play.mobileTab2";
@@ -24,7 +27,7 @@ function defaultStore(): TabStore | null {
 }
 
 export function isPlayTab(v: unknown): v is PlayTab {
-  return v === "assist" || v === "cheat" || v === "map" || v === "read";
+  return v === "assist" || v === "cheat" || v === "map";
 }
 
 /**

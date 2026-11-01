@@ -25,6 +25,9 @@ export function AppHeader({ route, onSearch }: { route: Route; onSearch: () => v
           <TabsTrigger value="play" asChild>
             <a href="#/play">{terms.play}</a>
           </TabsTrigger>
+          <TabsTrigger value="read" asChild>
+            <a href="#/read">{terms.read}</a>
+          </TabsTrigger>
           <TabsTrigger value="browse" asChild>
             <a href="#/browse/events">{terms.browse}</a>
           </TabsTrigger>

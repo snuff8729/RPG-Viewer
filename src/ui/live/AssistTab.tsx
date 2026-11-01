@@ -123,7 +123,6 @@ function AssistCards({ session, active }: { session: AssistSession; active: bool
   const backup = useBackupControls();
   /** 게임이 기억하는 이겨 본 적 종류 수(플러그인 1.24.0) */
   const knownEnemies: unknown = live?.assist?.knownEnemies;
-  const { statusText, hpSent, saveSent } = session;
   // 위에 업데이트 알림이 있으면 단축키 칸의 업데이트 안내는 겹쳐 보이지 않아요
   const updateShown = useUpdateNoticeShown();
   const showMismatch = session.showMismatch && !updateShown;
@@ -191,13 +190,11 @@ function AssistCards({ session, active }: { session: AssistSession; active: bool
           {inBattle && !canLose && loseKey !== null && (
             <p className={note}>지금 {withObjectParticle(keyLabel(loseKey))} 누르면 게임 오버가 돼요</p>
           )}
-          {statusText !== null && !hpSent && !saveSent && <p className={note}>{statusText}</p>}
         </div>
         <div className="flex flex-col gap-2">
           <Label>내 체력</Label>
           <HpControls favorite={pin} />
           {hpSupported && <p className={note}>파티 전원에게 적용돼요. 100%는 쓰러진 동료도 살려요</p>}
-          {statusText !== null && hpSent && <p className={note}>{statusText}</p>}
         </div>
       </Section>
 
@@ -209,7 +206,6 @@ function AssistCards({ session, active }: { session: AssistSession; active: bool
             맵에서 이벤트가 없을 때만 돼요(불러오기는 타이틀에서도).{typeof liveSlot === "number" ? ` 지금 퀵 세이브 칸: ${liveSlot}번` : ""}
           </p>
         )}
-        {statusText !== null && saveSent && <p className={note}>{statusText}</p>}
         {backup && (
           <>
             <Separator />

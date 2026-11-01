@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { bannerText, connectionGuide, installResultText, needsPluginBanner } from "./connectionGuide";
+import { bannerText, connectionGuide, installResultText, lastSeenText, needsPluginBanner, panelAction } from "./connectionGuide";
 
 const pc = { remote: false, canLaunch: true };
+
+describe("connection panel", () => {
+  it("offers install/update, launch only when installed and off, nothing on the phone", () => {
+    expect(panelAction("install", pc)).toBe("install");
+    expect(panelAction("update", pc)).toBe("update");
+    expect(panelAction("off", pc)).toBe("launch");
+    expect(panelAction("off", { remote: false, canLaunch: false })).toBeNull();
+    expect(panelAction("connected", pc)).toBeNull();
+    expect(panelAction("install", { remote: true, canLaunch: true })).toBeNull();
+  });
+  it("describes the last record time briefly", () => {
+    const now = new Date(2026, 10, 1, 12, 0).getTime();
+    expect(lastSeenText(null, now)).toBe("기록 없음");
+    expect(lastSeenText(now - 10_000, now)).toBe("마지막 기록 방금");
+    expect(lastSeenText(now - 5 * 60_000, now)).toBe("마지막 기록 5분 전");
+    expect(lastSeenText(now - 3 * 3_600_000, now)).toBe("마지막 기록 3시간 전");
+    expect(lastSeenText(new Date(2026, 9, 3, 9).getTime(), now)).toBe("마지막 기록 10월 3일");
+  });
+});
 
 describe("connectionGuide", () => {
   it("connected has no guide", () => {

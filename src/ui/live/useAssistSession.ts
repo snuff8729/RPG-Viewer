@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import {
-  COMMAND_RESPONSE_MS, commandStatus, commandStatusText, ENCOUNTER_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HP_COMMAND_MIN_VERSION, isHpCommand, isSaveCommand,
+  COMMAND_RESPONSE_MS, commandStatus, commandStatusText, ENCOUNTER_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HP_COMMAND_MIN_VERSION,
   liveHotkeys, SAVE_COMMAND_MIN_VERSION, sameHotkeys, versionAtLeast, WALK_SPEED_MIN_VERSION,
 } from "@/core/live/assist";
+
+/** 이미 토스트로 알린 명령 응답(명령 id:상태). 이 훅을 쓰는 곳이 여럿이거나 다시 그려져도 한 번만 알려요. */
+const announced = new Set<string>();
 
 /** 게임에 걸린 단축키가 설정과 이만큼 오래 다르면 안내한다. */
 const HOTKEY_MISMATCH_MS = 5000;
@@ -29,16 +33,10 @@ export function useAssistGuards() {
 }
 
 /**
- * 게임 보조 창의 남는 상태: 보낸 명령의 응답 글, 단축키 불일치 안내.
- * 창(Popover)이 닫혀 있어도 시간을 재야 하므로 덮개 쪽(항상 그려진 곳)에서 부른다.
+ * 게임 보조의 남는 상태: 보낸 명령의 응답(토스트로 알려요 — 보조·위쪽 막대·전투 막대 어디서 보냈든), 단축키 불일치 안내.
+ * 탭이 숨어 있어도 시간을 재야 하므로 늘 그려진 곳에서 부른다.
  */
 export interface AssistSession {
-  /** 마지막 명령의 응답 글(없으면 null) */
-  statusText: string | null;
-  /** 마지막 명령이 체력 명령이면 응답을 체력 칸에 보인다 */
-  hpSent: boolean;
-  /** 마지막 명령이 세이브·로드 명령이면 응답을 세이브 칸에 보인다 */
-  saveSent: boolean;
   /** 게임에 걸린 단축키가 설정과 5초 넘게 다르다 */
   showMismatch: boolean;
 }
@@ -55,7 +53,18 @@ export function useAssistSession(): AssistSession {
     return () => clearTimeout(id);
   }, [sentCommand]);
   const status = commandStatus(sentCommand, live?.assist?.lastCommand, sentCommand !== null && timedOutId === sentCommand.id);
-  const statusText = status === null ? null : commandStatusText(status, sentCommand?.kind);
+  // 응답은 화면 배치를 밀지 않게 토스트로: 보내는 중 → 적용됐어요(성공) / 무시·실패·응답 없음(오류). 같은 토스트를 바꿔 가요.
+  useEffect(() => {
+    if (!sentCommand || status === null) return;
+    const key = `${sentCommand.id}:${status}`;
+    if (announced.has(key)) return;
+    announced.add(key);
+    const text = commandStatusText(status, sentCommand.kind);
+    const opts = { id: `assist-${sentCommand.id}` };
+    if (status === "sent") toast.loading(text, opts);
+    else if (status === "applied") toast.success(text, opts);
+    else toast.error(text, opts);
+  }, [sentCommand, status]);
 
   // 게임이 보고한 단축키가 설정과 5초 넘게 다르면 플러그인 업데이트를 안내한다.
   const hotkeys = settings.hotkeys;
@@ -70,9 +79,6 @@ export function useAssistSession(): AssistSession {
   }, [mismatchKey]);
 
   return {
-    statusText,
-    hpSent: isHpCommand(sentCommand?.kind),
-    saveSent: isSaveCommand(sentCommand?.kind),
     showMismatch: mismatchKey !== null && staleKey === mismatchKey,
   };
 }

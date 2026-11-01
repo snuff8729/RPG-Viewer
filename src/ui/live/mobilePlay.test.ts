@@ -14,8 +14,9 @@ describe("mobile play tab", () => {
     expect(loadPlayTab(mem())).toBe("map");
     expect(loadPlayTab(null)).toBe("map");
   });
-  it("tab order is map, assist, cheat, read", () => {
-    expect(PLAY_TABS).toEqual(["map", "assist", "cheat", "read"]);
+  it("tab order is map, assist, cheat (reading is its own page)", () => {
+    expect(PLAY_TABS).toEqual(["map", "assist", "cheat"]);
+    expect(isPlayTab("read")).toBe(false);
   });
   it("round-trips under rpgv.play.mobileTab2", () => {
     const s = mem();
@@ -31,8 +32,11 @@ describe("mobile play tab", () => {
     expect(loadPlayTab(old("story"))).toBe("map");
     expect(loadPlayTab(old("read"))).toBe("map");
     const s = old("story");
-    savePlayTab("read", s);
-    expect(loadPlayTab(s)).toBe("read");
+    savePlayTab("cheat", s);
+    expect(loadPlayTab(s)).toBe("cheat");
+    const stale = mem();
+    stale.setItem("rpgv.play.mobileTab2", "read");
+    expect(loadPlayTab(stale)).toBe("map");
     expect(migrateOldTab(null)).toBe("map");
   });
   it("ignores junk and broken storage", () => {

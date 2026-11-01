@@ -1,5 +1,6 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, Heart, HeartCrack, History, Save, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { useAssist } from "@/app/LiveProvider";
 import {
   AUTO_SPEEDS, DEFAULT_HOTKEYS, HOTKEY_ACTIONS, HOTKEY_GROUPS, hotkeyCode, isAutoSpeed, isQuickSlot, isSpeed, keyLabel, sameHotkeys, SPEEDS,
@@ -314,13 +315,11 @@ export const HotkeySettings = memo(function HotkeySettings({ showMismatch, activ
   const { settings, setSettings, supported } = useAssist();
   const hotkeys = settings.hotkeys;
   const [capturing, setCapturing] = useState<HotkeyAction | null>(null);
-  const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   /** 잡는 중에 누르고 있는 조합 키("Ctrl+Shift+") */
   const [heldMods, setHeldMods] = useState("");
-  if (!active && (capturing !== null || heldMods !== "" || hotkeyError !== null)) {
+  if (!active && (capturing !== null || heldMods !== "")) {
     setCapturing(null);
     setHeldMods("");
-    setHotkeyError(null);
   }
   useEffect(() => {
     if (capturing === null) return;
@@ -333,10 +332,10 @@ export const HotkeySettings = memo(function HotkeySettings({ showMismatch, activ
       if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.key === "Meta") { setHeldMods(modsOf(e)); return; }
       const code = hotkeyCode(e.keyCode, { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
       const err = validateHotkey(code, capturing, hotkeys);
-      setHotkeyError(err);
       setCapturing(null);
       setHeldMods("");
       if (err === null) setSettings({ ...settings, hotkeys: { ...hotkeys, [capturing]: code } });
+      else toast.error(err);
     };
     const onKeyUp = (e: KeyboardEvent) => setHeldMods(modsOf(e));
     window.addEventListener("keydown", onKey, true);
@@ -348,7 +347,6 @@ export const HotkeySettings = memo(function HotkeySettings({ showMismatch, activ
   }, [capturing, hotkeys, settings, setSettings]);
 
   const setHotkey = (action: HotkeyAction, code: number | null) => {
-    setHotkeyError(null);
     setCapturing(null);
     setHeldMods("");
     setSettings({ ...settings, hotkeys: { ...hotkeys, [action]: code } });
@@ -376,7 +374,7 @@ export const HotkeySettings = memo(function HotkeySettings({ showMismatch, activ
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="outline" size="sm" disabled={!supported}
-                    onClick={() => { setHotkeyError(null); setHeldMods(""); setCapturing(capturing === action ? null : action); }}
+                    onClick={() => { setHeldMods(""); setCapturing(capturing === action ? null : action); }}
                   >
                     {capturing === action ? `${heldMods}키를 누르세요…` : code === null ? "꺼짐" : keyLabel(code)}
                   </Button>
@@ -389,10 +387,8 @@ export const HotkeySettings = memo(function HotkeySettings({ showMismatch, activ
           })}
         </div>
       ))}
-      {capturing !== null && (
-        <p className="text-xs text-muted-foreground">Ctrl·Shift·Alt를 누른 채로 누르면 조합 키가 돼요 (Esc: 취소)</p>
-      )}
-      {hotkeyError && <p className="text-xs text-destructive">{hotkeyError}</p>}
+      {/* 누른 뒤에 글이 생겨 배치가 밀리지 않게 늘 보여요. 잘못 고른 키는 토스트로 알려요 */}
+      <p className="text-xs text-muted-foreground">단추를 누르고 키를 누르면 바뀌어요. Ctrl·Shift·Alt를 누른 채로 누르면 조합 키가 돼요 (Esc: 취소)</p>
       {showMismatch && (
         <p className="text-xs text-muted-foreground">게임에 적용되지 않은 단축키가 있어요 — 플러그인을 업데이트해 주세요</p>
       )}

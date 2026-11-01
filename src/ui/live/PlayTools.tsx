@@ -1,6 +1,6 @@
 import { terms } from "@/ui/terms";
 import { useRoute } from "@/app/route";
-import { ReadModule } from "./ReadModule";
+import { PlayReadModule } from "./ReadModule";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Gauge, PanelRightClose, PanelRightOpen, WandSparkles, type LucideIcon } from "lucide-react";
 import type { PopoutModule } from "@/app/popout";
@@ -24,7 +24,7 @@ const TOOL_LABEL: Record<ToolTab, string> = { assist: terms.assist, cheat: terms
 export function ReaderFill() {
   return (
     <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3">
-      <ReadModule />
+      <PlayReadModule />
     </div>
   );
 }

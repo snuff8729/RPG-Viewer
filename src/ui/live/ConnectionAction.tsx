@@ -13,6 +13,11 @@ export interface ConnectionAction {
   guide: ConnectionGuide | null;
   busy: boolean;
   run(action: GuideAction): void;
+  /** 게임을 실행할 수 있는 곳인지(뷰어 서버·폴더 열기로 연 게임) */
+  canLaunch: boolean;
+  /** 직접 정한 게임 위치가 있으면 바꿀 수 있어요 */
+  canChangePath: boolean;
+  changePath(): void;
   /** 게임 위치 창(실행할 때 위치를 모르면 열려요). 화면에 늘 그려 둬요. */
   dialog: ReactNode;
 }
@@ -58,7 +63,11 @@ export function useConnectionAction(): ConnectionAction {
     else window.location.hash = "#/manage/connection";
   };
 
-  return { status, guide, busy: busy || launcher.busy, run, dialog: launcher.dialog };
+  return {
+    status, guide, busy: busy || launcher.busy, run,
+    canLaunch: launcher.visible, canChangePath: launcher.canChangePath, changePath: launcher.changePath,
+    dialog: launcher.dialog,
+  };
 }
 
 /** 안내의 버튼 하나(누르는 동안 Spinner) */
