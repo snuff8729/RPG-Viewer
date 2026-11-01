@@ -108,7 +108,7 @@ export function QuickBar() {
   // 휴대폰 보기는 백업·복원을 하지 않아요(PC에서)
   const ids = quickBarItems(assistFavorites, { hidden: isRemoteView() ? ["backup", "restore"] : [] });
   return (
-    <BarRow label="위쪽 막대(고정한 보조 기능)">
+    <BarRow label="빠른 막대(고정한 보조 기능)">
       {ids.length === 0
         ? <span className="text-xs text-muted-foreground">보조에서 핀을 누르면 여기에 고정돼요</span>
         : ids.map((id, i) => (

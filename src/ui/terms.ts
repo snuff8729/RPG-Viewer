@@ -19,7 +19,7 @@ export const terms = {
   diagnose: "진단",
   appearance: "화면",
   games: "게임 바꾸기",
-  pinAssist: "위쪽 막대에 고정",
+  pinAssist: "빠른 막대에 고정",
   connected: "게임 켜짐",
   disconnected: "게임 꺼짐",
   checking: "연결 확인 중",

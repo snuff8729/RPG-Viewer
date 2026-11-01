@@ -24,7 +24,7 @@ export function AssistPinToggle({ id, className }: { id: AssistFavoriteId; class
           <Pin className={cn(on && "fill-current")} />
         </Toggle>
       </TooltipTrigger>
-      <TooltipContent>{on ? "위쪽 막대에서 풀기" : terms.pinAssist}</TooltipContent>
+      <TooltipContent>{on ? "빠른 막대에서 빼기" : "플레이 화면 맨 위 빠른 막대에 고정해요. 어느 탭에서든 바로 누를 수 있어요."}</TooltipContent>
     </Tooltip>
   );
 }
