@@ -11,12 +11,14 @@ import { CheatContent, onOpenCheatRequest } from "./cheat/CheatContent";
 import { useCheatSession } from "./cheat/useCheatSession";
 import { isPlayTab, loadPlayTab, savePlayTab, type PlayTab } from "./mobilePlay";
 import { NotConnectedEmpty } from "./NotConnectedEmpty";
-import { MapChips, MapList, MapPicture, PlayMapProvider } from "./PlayMap";
+import { MapBelowTabs } from "./MapBelowTabs";
+import { MapChips, MapPicture, PlayMapProvider } from "./PlayMap";
 import { useAssistSession } from "./useAssistSession";
 import { usePlayMap } from "./usePlayMapState";
 
 /**
- * 맵 탭: 위에 구역 칩 줄, 맵 그림이 화면을 채우고, 아래 손잡이(`해 볼 것 N · 다음 스토리`)를 누르거나 끌어 올리면 Drawer로 목록.
+ * 맵 탭: 위에 구역 칩 줄, 맵 그림이 화면을 채우고, 아래 손잡이(`해 볼 것 N · 다음 스토리`)를 누르거나 끌어 올리면
+ * Drawer로 탭 목록(다음 스토리 | 해 볼 것 N).
  * 해 볼 것 줄을 누르면 Drawer를 닫고 맵이 그 점으로 가요.
  */
 function MobileMapTab() {
@@ -37,12 +39,12 @@ function MobileMapTab() {
             <ChevronUp />
           </Button>
         </DrawerTrigger>
-        <DrawerContent className="max-h-[85svh]">
+        <DrawerContent className="h-[85svh] max-h-[85svh]">
           <DrawerHeader className="sr-only">
             <DrawerTitle>{handle}</DrawerTitle>
-            <DrawerDescription>이 맵에서 해 볼 것과 다음 스토리</DrawerDescription>
+            <DrawerDescription>다음 스토리와 이 맵에서 해 볼 것</DrawerDescription>
           </DrawerHeader>
-          <MapList className="min-h-0 overflow-y-auto px-3 pt-3 pb-6" onChoose={() => setOpen(false)} />
+          <MapBelowTabs className="flex-1 pt-1" contentClassName="px-3 pt-2 pb-6" onChoose={() => setOpen(false)} />
         </DrawerContent>
       </Drawer>
     </div>

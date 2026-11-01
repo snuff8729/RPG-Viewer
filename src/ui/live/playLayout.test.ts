@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  loadToolTab, safeStore, saveToolTab,
+  loadBelowTab, loadToolTab, safeStore, saveBelowTab, saveToolTab,
   type KeyValueStore,
 } from "./playLayout";
 
@@ -23,5 +23,16 @@ describe("remembered tabs", () => {
     expect(loadToolTab(s)).toBe("assist");
     expect(loadToolTab(safeStore(broken))).toBe("assist");
     expect(() => saveToolTab("read", safeStore(broken))).not.toThrow();
+  });
+
+  it("below tab is unset until chosen, remembers, ignores junk and broken storage", () => {
+    const s = memory();
+    expect(loadBelowTab(s)).toBeNull();
+    saveBelowTab("todo", s);
+    expect(loadBelowTab(s)).toBe("todo");
+    s.setItem("rpgv.play.belowTab", "nope");
+    expect(loadBelowTab(s)).toBeNull();
+    expect(loadBelowTab(safeStore(broken))).toBeNull();
+    expect(() => saveBelowTab("story", safeStore(broken))).not.toThrow();
   });
 });
