@@ -7,6 +7,7 @@ import { screenSizeOf } from "@/core/addons/screenPictures";
 import { noticePluginsOf } from "@/core/addons/notices";
 import { enabledPluginsOf } from "@/core/adapters/manifest";
 import { pictureFolderRulesFromPlugins } from "@/core/assets/pictureFolders";
+import { advTalkNameLineFromPlugins } from "@/core/text/advTalk";
 import { afterMenuCommonEventFromPlugins, menuCommonEventIdsFromPlugins } from "@/core/live/menuScenes";
 import { detectEngine } from "./engine";
 import { expandTemplateEvents, templateKeepEventIdFromPlugins, templateMapIdFromPlugins } from "./templateEvent";
@@ -187,6 +188,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
   const menuCommonEvents = menuCommonEventIdsFromPlugins(pluginsText);
   const afterMenuCommonEvent = afterMenuCommonEventFromPlugins(pluginsText);
   const pictureFolders = pictureFolderRulesFromPlugins(pluginsText);
+  const advTalkNameLine = advTalkNameLineFromPlugins(pluginsText);
   // 엔진: js/ 의 코어 파일(rmmz_core.js / rpg_core.js)이 가장 확실하다
   let jsFiles: unknown = [];
   try {
@@ -212,6 +214,7 @@ export async function loadGame(folder: GameFolder): Promise<LoadResult> {
       ...(menuCommonEvents.length > 0 ? { menuCommonEvents } : {}),
       ...(afterMenuCommonEvent !== null ? { afterMenuCommonEvent } : {}),
       ...(pictureFolders.length > 0 ? { pictureFolders } : {}),
+      ...(advTalkNameLine ? { advTalkNameLine } : {}),
     },
   };
 }

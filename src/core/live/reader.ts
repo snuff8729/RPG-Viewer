@@ -1,6 +1,7 @@
 import { formatText } from "../text/escape";
 import { battleActionOf, battleLogText, type BattleAction } from "./battleLine";
 import { dTextCaption } from "../text/textPicture";
+import { messageParts } from "../text/advTalk";
 import { locationKey } from "../index/locations";
 import {
   coarseShotKey, ctxAt, DEFAULT_SCREEN, knownScreenAt, nextShot, screenAt, visibleScene, withScreen,
@@ -78,8 +79,9 @@ const BATTLE_RESULTS = new Set<string>(["win", "lose", "escape", "abort"]);
 const safe = (s: unknown): string => typeof s === "string" ? s : "";
 const lines = (text: unknown, data: GameData): string[] => formatText(safe(text), data).split("\n");
 
-function speakerOf(r: RecordOf<"message">, data: GameData): string {
-  const named = safe(r.speaker) ? formatText(r.speaker, data) : "";
+/** rawSpeaker = 기록의 화자 원문(ADVTalkSystem 이름 줄이면 글의 첫 줄 — core/text/advTalk). */
+function speakerOf(r: RecordOf<"message">, rawSpeaker: string, data: GameData): string {
+  const named = rawSpeaker ? formatText(rawSpeaker, data) : "";
   if (named) return named;
   if (!r.face) return "";
   const actor = (data?.actors ?? []).find(a => a && a.faceName === r.face && a.faceIndex === r.faceIndex);
@@ -87,11 +89,12 @@ function speakerOf(r: RecordOf<"message">, data: GameData): string {
 }
 
 function messageItem(r: RecordOf<"message">, data: GameData, repeat?: number): Extract<ReaderItem, { kind: "message" }> {
+  const parts = messageParts(r.speaker, r.text, data);
   const item: Extract<ReaderItem, { kind: "message" }> = {
-    kind: "message", key: `r${r.seq}`, seq: r.seq, speaker: speakerOf(r, data), face: safe(r.face),
-    faceIndex: typeof r.faceIndex === "number" ? r.faceIndex : 0, lines: lines(r.text, data),
-    rawText: safe(r.text),
-    ...(safe(r.speaker) && formatText(r.speaker, data) ? { rawSpeaker: r.speaker } : {}),
+    kind: "message", key: `r${r.seq}`, seq: r.seq, speaker: speakerOf(r, parts.speaker, data), face: safe(r.face),
+    faceIndex: typeof r.faceIndex === "number" ? r.faceIndex : 0, lines: lines(parts.text, data),
+    rawText: parts.text,
+    ...(parts.speaker && formatText(parts.speaker, data) ? { rawSpeaker: parts.speaker } : {}),
     src: r.src ?? null, cmd: typeof r.cmd === "number" ? r.cmd : null,
     voice: r.voice,
   };
