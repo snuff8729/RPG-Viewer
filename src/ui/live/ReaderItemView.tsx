@@ -24,7 +24,7 @@ import { BATTLE_RESULT_LABEL } from "./battleDisplay";
 import { BattleActionLine } from "./BattleActionLine";
 import { NoticeLine } from "./NoticeLine";
 import { isRepeatOpen, setRepeatOpen } from "./repeatOpen";
-import { battleActionLabel, type BattleAction } from "@/core/live/battleLine";
+import { battleActionLabel, shownWhenLogFolded, type BattleAction } from "@/core/live/battleLine";
 import { ReaderMessageText, ReaderScrollText } from "./RichMessageText";
 
 function MessageLines({ item }: { item: Extract<ReaderItem, { kind: "message" }> }) {
@@ -134,8 +134,8 @@ function LogLine({ line }: { line: BattleLogItem }) {
 }
 
 /**
- * 전투 묶음 안: 대사·그림·알림 문구(캐릭터 대사 등)는 늘 보이고, 전투 로그 줄은 펼쳤을 때만
- * (줄의 화면 그림은 접혀 있어도 보인다).
+ * 전투 묶음 안: 대사·그림·알림 문구(캐릭터 대사 등)와 누가 무엇을 누구에게 쓴 줄은 늘 보이고,
+ * 나머지 전투 로그 줄(피해·상태 등)은 펼쳤을 때만(줄의 화면 그림은 접혀 있어도 보인다).
  */
 function BattleBody({ item }: { item: BattleReaderItem }) {
   const [logOpen, setLogOpen] = useReaderItemState<boolean>("battle-log:" + item.key, false);
@@ -143,24 +143,26 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
   const hidden = useLineHidden();
   const inner = item.items.filter(x => !hidden(x));
   const logLines = Math.max(0, item.logLines - item.items.filter(x => isLogLine(x) && hidden(x)).length);
+  // 접어 둬도 보이는 사용 줄을 뺀 나머지 줄 수
+  const foldedLines = Math.max(0, logLines - inner.filter(x => x.kind === "battlelog" && shownWhenLogFolded(x)).length);
   return (
     <div className="space-y-3">
-      {logLines > 0 && (
+      {(logOpen || foldedLines > 0) && (
         <Button variant="ghost" size="sm" className="text-muted-foreground" aria-expanded={logOpen} onClick={() => setLogOpen(o => !o)}>
-          {logOpen ? "전투 기록 접기" : `전투 기록 ${logLines}줄`}
+          {logOpen ? "전투 기록 접기" : `전투 기록 ${foldedLines}줄 더 보기`}
         </Button>
       )}
       {item.screen && <Screen shot={item.screen} />}
       {groupLog(inner).map(g => {
         if (!Array.isArray(g)) return <ReaderItemView key={g.key} item={g} />;
         if (!logOpen) {
-          const kept = g.filter(l => l.kind === "notice" || l.screen);
+          const kept = g.filter(l => shownWhenLogFolded(l) || (l.kind === "battlelog" && l.screen));
           if (kept.length === 0) return null;
           return (
             <div key={g[0].key} className="space-y-0.5 text-sm leading-snug">
-              {kept.map(l => l.kind === "notice"
-                ? <NoticeLine key={l.key} text={l.text} source={l.source} kind={l.noticeKind} />
-                : <Screen key={l.key} shot={l.screen!} />)}
+              {kept.map(l => shownWhenLogFolded(l)
+                ? <LogLine key={l.key} line={l} />
+                : l.kind === "battlelog" && l.screen ? <Screen key={l.key} shot={l.screen} /> : null)}
             </div>
           );
         }
@@ -177,7 +179,7 @@ function BattleBody({ item }: { item: BattleReaderItem }) {
   );
 }
 
-/** 전투 한 번: 머리(적 무리·결과) + 안의 대사·그림, `전투 기록 N줄`로 로그 펼치기. 다시 본 같은 전투는 통째로 접는다. */
+/** 전투 한 번: 머리(적 무리·결과) + 안의 대사·그림, 사용 줄은 늘, 나머지는 `전투 기록 N줄 더 보기`로 펼치기. 다시 본 같은 전투는 통째로 접는다. */
 function BattleBlock({ item }: { item: BattleReaderItem }) {
   const [open, setOpen] = useReaderItemState<boolean>("battle:" + item.key, false);
   const label = item.result ? BATTLE_RESULT_LABEL[item.result] : item.ended ? "끝남" : "진행 중";
