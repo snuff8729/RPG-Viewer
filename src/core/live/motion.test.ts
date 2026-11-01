@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventCommand, GameData } from "../types";
-import type { PictureContext, ScreenPicture } from "../addons/screenPictures";
+import { picturesBySeq, scenesBySeq, type PictureContext, type ScreenPicture } from "../addons/screenPictures";
 import { motionAt, MOTION_MAX_MS } from "../addons/pictureMotion";
 import { branchPath, buildHistory, foldTimeline } from "./history";
 import { readerItems, type ReaderItem } from "./reader";
@@ -33,10 +33,12 @@ const pic = (ce: number, cmd: number, id: number, name: string, t: number, extra
 let line = 0;
 const msg = (t: number) => { line++; return R({ type: "message", src: common(3), cmd: line, face: "", faceIndex: 0, speaker: "", text: `line ${line}` }, t); };
 
-function read(recs: LogRecord[]): ReaderItem[] {
+function read(recs: LogRecord[], captured = false): ReaderItem[] {
   const model = buildHistory(recs);
   const path = branchPath(recs, model, 1);
-  return readerItems(foldTimeline(path, model, {}), data, new Map(), model, null, null, { compose: { ctx } }).filter(i => i.kind !== "chapter");
+  // captured: 화면 그림 따라 그리기(기록의 pics)를 켠 게임처럼
+  const scenes = captured ? scenesBySeq(picturesBySeq(path), ctx) : null;
+  return readerItems(foldTimeline(path, model, {}), data, new Map(), model, null, scenes, { compose: { ctx } }).filter(i => i.kind !== "chapter");
 }
 const messages = (items: ReaderItem[]) => items.filter((i): i is Extract<ReaderItem, { kind: "message" }> => i.kind === "message");
 const names = (pics: ScreenPicture[]) => pics.map(p => p.name).join("+");
@@ -106,5 +108,26 @@ describe("picture motion from the play log", () => {
     ];
     const cut = read(recs).find((i): i is Extract<ReaderItem, { kind: "cutin" }> => i.kind === "cutin");
     expect(cut?.motion?.frames.map(f => [Math.round(f.t), names(f.pictures)])).toEqual([[0, "Cut_0001"], [50, "Cut_0002"], [100, "Cut_0003"]]);
+  });
+
+  it("in battle: a skill cut-in still on screen at the next log line plays on that line; a long idle before it is shortened", () => {
+    const pics = (names: string[]) => names.map((n, i) => [i + 1, n, 0, 0, 0, 100, 100, 255, 0]);
+    const recs = [
+      ...start(),
+      R({ type: "battle", phase: "start", troopId: 1, troopName: "Slime" }, 10),
+      pic(3, 0, 1, "Battle_Bg", 100, v(0)),
+      R({ type: "battlelog", text: "Slime appears!", pics: pics(["Battle_Bg"]) }, 200),
+      // the enemy is redrawn, the player chooses a command for 5 s, then the skill plays the cut-in
+      pic(3, 0, 1, "Battle_Bg_Hit", 300, v(0)),
+      pic(3, 0, 2, "Skill_0001", 5250, v(0)), pic(3, 0, 2, "Skill_0002", 5300, v(0)), pic(3, 0, 2, "Skill_0003", 5350, v(0)),
+      R({ type: "battlelog", text: "Mermeia uses Break!", pics: pics(["Battle_Bg_Hit", "Skill_0003"]) }, 5400),
+      R({ type: "battle", phase: "end", troopId: 1, result: "win" }, 6000),
+    ];
+    const battle = read(recs, true).find((i): i is Extract<ReaderItem, { kind: "battle" }> => i.kind === "battle")!;
+    const line = battle.items.filter((i): i is Extract<ReaderItem, { kind: "battlelog" }> => i.kind === "battlelog")[1];
+    const m = line.screen!.motion!;
+    expect(m.frames.map(f => [Math.round(f.t), names(f.pictures)])).toEqual([
+      [0, "Battle_Bg_Hit"], [600, "Battle_Bg_Hit+Skill_0001"], [650, "Battle_Bg_Hit+Skill_0002"], [700, "Battle_Bg_Hit+Skill_0003"],
+    ]);
   });
 });

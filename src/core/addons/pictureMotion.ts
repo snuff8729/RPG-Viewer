@@ -308,6 +308,20 @@ export function finishMotion(m: PictureMotion | null | undefined): PictureMotion
   }
 }
 
+/**
+ * 첫 장면(움직이는 것 없음)이 lead(ms)보다 오래 이어지면 lead로 줄인다(뒤 장면들을 당긴다). 바꿀 것이 없으면 그대로.
+ */
+export function trimLead(m: PictureMotion | null, lead: number): PictureMotion | null {
+  try {
+    if (!m || m.frames.length < 2 || frameMoves(m.frames[0])) return m;
+    const extra = m.frames[1].t - m.frames[0].t - lead;
+    if (!(extra > 0)) return m;
+    return { frames: [m.frames[0], ...m.frames.slice(1).map(f => shifted(f, -extra))], end: m.end - extra };
+  } catch {
+    return m;
+  }
+}
+
 /** 두 움직임이 같은가(읽기 항목 비교용 — 장면 수·끝 시각·마지막 장면 모습) */
 export function sameMotion(a: PictureMotion | null | undefined, b: PictureMotion | null | undefined): boolean {
   if (!a || !b) return !a && !b;
