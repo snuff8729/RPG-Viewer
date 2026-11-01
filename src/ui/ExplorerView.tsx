@@ -14,40 +14,57 @@ import { buildExplorerTree, filterExplorerTree, firstPage, type EventItem, type 
 import { mapKey, type ExplorerState } from "./useExplorerState";
 import { useConditionsLive } from "./live/useConditionsLive";
 import { openPage } from "./navigation";
+import { cn } from "@/lib/utils";
+import type { Location } from "@/core/types";
+
+function sameEvent(a: Location, b: Location): boolean {
+  if (a.source === "map" && b.source === "map") return a.mapId === b.mapId && a.eventId === b.eventId;
+  if (a.source === "common" && b.source === "common") return a.commonEventId === b.commonEventId;
+  if (a.source === "troop" && b.source === "troop") return a.troopId === b.troopId;
+  return false;
+}
 
 
-function Group({ open, onOpenChange, title, children }: {
-  open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode;
+function Group({ open, onOpenChange, title, children, pane }: {
+  open: boolean; onOpenChange: (o: boolean) => void; title: ReactNode; children: ReactNode; pane?: boolean;
 }) {
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="rounded-md border">
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left text-sm">
-        <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+      <CollapsibleTrigger className="group flex w-full items-start gap-2 px-3 py-2 text-left text-sm">
+        <ChevronRight className="mt-0.5 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
         {title}
       </CollapsibleTrigger>
       {/* 접힌 그룹은 CollapsibleContent가 내용을 렌더하지 않는다 */}
-      <CollapsibleContent className="grid grid-cols-1 gap-1 border-t p-2 sm:grid-cols-2 lg:grid-cols-3">{children}</CollapsibleContent>
+      <CollapsibleContent className={cn("grid grid-cols-1 gap-1 border-t p-2", !pane && "sm:grid-cols-2 lg:grid-cols-3")}>{children}</CollapsibleContent>
     </Collapsible>
   );
 }
 
-function Events({ items }: { items: EventItem[] }) {
-  return items.map((it) => (
-    <Button key={it.key} variant="ghost" size="sm" className="justify-start" onClick={() => openPage(firstPage(it.first))}>
-      <span className="truncate">{it.title}</span>
-    </Button>
-  ));
+function Events({ items, active }: { items: EventItem[]; active?: Location }) {
+  return items.map((it) => {
+    const on = !!active && sameEvent(it.first, active);
+    return (
+      <Button
+        key={it.key} variant={on ? "secondary" : "ghost"} size="sm" aria-current={on ? "page" : undefined}
+        className="h-auto min-h-8 justify-start py-1 text-left whitespace-normal wrap-anywhere"
+        onClick={() => openPage(firstPage(it.first))}
+      >
+        {it.title}
+      </Button>
+    );
+  });
 }
 
 function MapTitle({ m, current, isTemplate, newCount }: { m: MapNode; current: boolean; isTemplate: boolean; newCount: number }) {
   return (
     <>
-      <span className="min-w-0 truncate">
+      {/* 맵 이름은 자르지 않고 줄바꿈해요 */}
+      <span className="min-w-0 flex-1 wrap-anywhere">
         {m.parents.length > 0 && <span className="text-muted-foreground">{m.parents.join(" › ")} › </span>}
         <span className="font-medium">{m.info.name}</span>
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">{m.events.length}</span>
-      {current && <Badge className="shrink-0">지금 이 맵</Badge>}
+      {current && <Badge className="shrink-0">지금 여기</Badge>}
       {isTemplate && <Badge variant="outline" className="shrink-0 text-muted-foreground">템플릿</Badge>}
       {newCount > 0 && <Badge variant="outline" className="shrink-0">새 {newCount}</Badge>}
       {m.errors.length > 0 && (
@@ -64,9 +81,12 @@ function MapTitle({ m, current, isTemplate, newCount }: { m: MapNode; current: b
   );
 }
 
-/** 찾아보기: 모든 맵·공통 이벤트·전투의 이벤트 목록 */
-export function ExplorerView({ state, onStateChange }: {
-  state: ExplorerState; onStateChange: (f: (s: ExplorerState) => ExplorerState) => void;
+/**
+ * 찾아보기 › 이벤트 목록: 모든 맵·공통 이벤트·전투 이벤트.
+ * pane = PC 두 칸의 왼쪽 칸(한 줄씩), active = 오른쪽에 열린 이벤트(목록에서 표시).
+ */
+export function ExplorerView({ state, onStateChange, pane, active }: {
+  state: ExplorerState; onStateChange: (f: (s: ExplorerState) => ExplorerState) => void; pane?: boolean; active?: Location;
 }) {
   const { data, index } = useGame();
   const { live, connection, coverage } = useLive();
@@ -92,8 +112,8 @@ export function ExplorerView({ state, onStateChange }: {
   const empty = shown.maps.length === 0 && shown.common.length === 0 && shown.troops.length === 0;
 
   return (
-    <div className="space-y-4 p-1">
-      <div className="flex flex-wrap items-center gap-4">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Input
           className="h-8 max-w-xs"
           placeholder="이벤트 이름으로 찾기"
@@ -116,6 +136,7 @@ export function ExplorerView({ state, onStateChange }: {
           {shown.maps.map((m) => (
             <Group
               key={m.info.id}
+              pane={pane}
               open={isOpen(mapKey(m.info.id))}
               onOpenChange={setOpen(mapKey(m.info.id))}
               title={(
@@ -127,7 +148,7 @@ export function ExplorerView({ state, onStateChange }: {
                 />
               )}
             >
-              <Events items={m.events} />
+              <Events items={m.events} active={active} />
             </Group>
           ))}
         </section>
@@ -137,20 +158,22 @@ export function ExplorerView({ state, onStateChange }: {
           <h2 className="text-sm font-medium text-muted-foreground">그 밖의 이벤트</h2>
           {shown.common.length > 0 && (
             <Group
+              pane={pane}
               open={isOpen("common")}
               onOpenChange={setOpen("common")}
               title={<><span className="font-medium">공통 이벤트</span><span className="text-xs text-muted-foreground">{shown.common.length}</span></>}
             >
-              <Events items={shown.common} />
+              <Events items={shown.common} active={active} />
             </Group>
           )}
           {shown.troops.length > 0 && (
             <Group
+              pane={pane}
               open={isOpen("troop")}
               onOpenChange={setOpen("troop")}
-              title={<><span className="font-medium">전투</span><span className="text-xs text-muted-foreground">{shown.troops.length}</span></>}
+              title={<><span className="font-medium">전투 이벤트</span><span className="text-xs text-muted-foreground">{shown.troops.length}</span></>}
             >
-              <Events items={shown.troops} />
+              <Events items={shown.troops} active={active} />
             </Group>
           )}
         </section>
