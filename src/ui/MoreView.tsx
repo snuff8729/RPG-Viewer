@@ -14,10 +14,10 @@ export function MoreView({ onSearch }: { onSearch: () => void }) {
         {(
           [
             ["#/browse/events", terms.browse, FolderSearch],
-            ["#/manage", terms.manage, Settings],
+            [attention.href, terms.manage, Settings],
           ] as const
         ).map(([href, label, Icon]) => (
-          <Item key={href} variant="outline" asChild>
+          <Item key={label} variant="outline" asChild>
             <a href={href}>
               <ItemMedia>
                 <Icon className="size-5" />
@@ -25,7 +25,7 @@ export function MoreView({ onSearch }: { onSearch: () => void }) {
               <ItemContent>
                 <ItemTitle>
                   {label}
-                  {href === "#/manage" && attention.count > 0 && (
+                  {Icon === Settings && attention.count > 0 && (
                     <Badge variant={attention.variant}>{attention.count}</Badge>
                   )}
                 </ItemTitle>

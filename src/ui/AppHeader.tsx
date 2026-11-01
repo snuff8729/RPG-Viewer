@@ -32,7 +32,7 @@ export function AppHeader({ route, onSearch }: { route: Route; onSearch: () => v
             <a href="#/browse/events">{terms.browse}</a>
           </TabsTrigger>
           <TabsTrigger value="manage" asChild>
-            <a href="#/manage">
+            <a href={attention.href}>
               {terms.manage}
               {attention.count > 0 && <Badge variant={attention.variant}>{attention.count}</Badge>}
             </a>
