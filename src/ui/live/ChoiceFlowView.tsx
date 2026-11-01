@@ -119,7 +119,7 @@ export function ChoiceFlowView({ branch, onSelectBranch }: { branch: number; onS
 
   return (
     <ReaderHideContext.Provider value={isHidden}>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div data-reader-scroll className="min-h-0 flex-1 overflow-y-auto">
         {/* 갈래가 바뀌면 펼침 상태를 처음으로 */}
         <div key={branch} className="mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed">
           <p className="text-center text-sm text-muted-foreground">— {branchLabel(model, branch)} · 처음부터 —</p>

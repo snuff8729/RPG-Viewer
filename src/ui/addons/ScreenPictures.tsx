@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { missingAssetText } from "../script/assetText";
 import { HidePicturesMenu } from "./HidePicturesMenu";
 import { drawPictures } from "./drawPictures";
-import { MotionCanvas } from "./MotionCanvas";
+import { MotionCanvas, ZOOM_CANVAS } from "./MotionCanvas";
 import { usePictureMotionOn } from "./motionDisplay";
 import { motionNames } from "@/core/addons/pictureMotion";
 import { PictureViewport } from "./PictureViewport";
@@ -18,7 +18,7 @@ import { usePicturesNearViewport } from "./pictureViewportContext";
 import { standView, usePictureImages, type View } from "./pictureImages";
 
 /** 캔버스에 그림들을 번호 순으로 그린다(위치·기준점·크기·투명도·블렌드·색조·회전). view: 그릴 화면 부분. */
-function ScreenCanvas({ pictures, view, images, className }: {
+export function ScreenCanvas({ pictures, view, images, className }: {
   pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; className?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -46,9 +46,10 @@ function groupText(g: StandGroup): { label: string; title: string | null } {
   return { label: label ?? standGroupLabel(g), title };
 }
 
-/** 그림 한 장(누르면 크게 보기) */
-export function ShotButton({ pictures, view: nextView, images, stand, title, names, caption }: {
+/** 그림 한 장(누르면 크게 보기). zoom을 주면 큰 보기 안을 그것으로 바꾼다(컷인 장면 넘기기 등). */
+export function ShotButton({ pictures, view: nextView, images, stand, title, names, caption, zoom, open, onOpenChange }: {
   pictures: ScreenPicture[]; view: View; images: Map<string, ImageBitmap>; stand: boolean; title: string; names: string[]; caption?: string;
+  zoom?: (view: View) => ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
   // Keep crop geometry while bitmap leases are released/reloaded.
   const [retained, setRetained] = useState(nextView);
@@ -56,7 +57,7 @@ export function ShotButton({ pictures, view: nextView, images, stand, title, nam
   const view = images.size > 0 ? nextView : retained;
   const label = `${title} ${pictures.length}개: ${names.join(", ")}`;
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <button
           type="button"
@@ -71,7 +72,7 @@ export function ShotButton({ pictures, view: nextView, images, stand, title, nam
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="break-all">{caption ? `${caption} — ` : ""}{names.join(", ")}</DialogDescription>
         </DialogHeader>
-        <ScreenCanvas pictures={pictures} view={view} images={images} className="mx-auto block h-auto max-h-[75vh] w-auto max-w-full rounded-md border bg-muted" />
+        {zoom ? zoom(view) : <ScreenCanvas pictures={pictures} view={view} images={images} className={ZOOM_CANVAS} />}
       </DialogContent>
     </Dialog>
   );

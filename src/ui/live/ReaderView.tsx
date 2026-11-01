@@ -838,8 +838,8 @@ export function ReaderView({ mobile = false, toolbarStart }: { mobile?: boolean;
             {(picturesOn || hasPictureRecords) && (
               <>
                 <SettingRow id="reader-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
-                {/* 대사 사이에 그림이 바뀌거나 움직였으면 GIF처럼 움직여 보인다 */}
-                <SettingRow id="reader-picture-motion" label="그림 움직임" checked={motionOn} onChange={setMotionOn} disabled={!screenShown} />
+                {/* 대사 사이에 그림이 바뀌거나 움직였으면 GIF처럼 움직여 보인다(컷인 장면 넘기기 포함) */}
+                <SettingRow id="reader-picture-motion" label="그림 움직임" description="화면에 보이는 그림만 저절로 움직여요" checked={motionOn} onChange={setMotionOn} disabled={!screenShown} />
               </>
             )}
           </ViewSettingsButton>

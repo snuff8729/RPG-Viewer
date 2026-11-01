@@ -217,7 +217,7 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
         </div>
       </div>
       <div className="relative min-h-0 flex-1">
-        <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto pr-1">
+        <div ref={scroller} data-reader-scroll onScroll={onScroll} className="h-full overflow-y-auto pr-1">
           <div ref={content} className="space-y-1">
           {ctx ? (
             <>
