@@ -31,11 +31,11 @@ describe("shouldAnimate", () => {
 
 describe("motionSetting", () => {
   it("keeps a stored value", () => {
-    expect(motionSetting("0", false)).toBe(false);
-    expect(motionSetting("1", true)).toBe(true);
+    expect(motionSetting("0")).toBe(false);
+    expect(motionSetting("1")).toBe(true);
   });
-  it("defaults from the device reduced-motion only when never set", () => {
-    expect(motionSetting(null, false)).toBe(true);
-    expect(motionSetting(null, true)).toBe(false);
+  it("defaults to on when never set", () => {
+    expect(motionSetting(null)).toBe(true);
+    expect(motionSetting("")).toBe(true);
   });
 });

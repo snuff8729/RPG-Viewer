@@ -18,9 +18,7 @@ export function shouldAnimate({ wants, onScreen, ready = true }: { wants: boolea
   return wants && onScreen && ready;
 }
 
-/** `그림 움직임` 설정값: 저장된 값이 있으면 그대로, 처음이면 기기의 `동작 줄이기`가 꺼져 있을 때만 켬 */
-export function motionSetting(stored: string | null, reducedMotion: boolean): boolean {
-  if (stored === "0") return false;
-  if (stored === "1") return true;
-  return !reducedMotion;
+/** `그림 움직임` 설정값: 저장된 값이 있으면 그대로, 처음이면 켬(기기의 `동작 줄이기`는 따르지 않음) */
+export function motionSetting(stored: string | null): boolean {
+  return stored !== "0";
 }
