@@ -12,7 +12,7 @@ import { ReaderDisplayCache, type DisplayConfig } from "@/core/live/readerDispla
 import type { Bookmark } from "@/core/live/readerFile";
 import { menuCommonEventsOf } from "@/core/live/menuScenes";
 import { useReaderFile } from "@/app/ReaderFileProvider";
-import { ChevronsDown, Info, ListTree, Settings2, X } from "lucide-react";
+import { ChevronsDown, Info, ListTree, X } from "lucide-react";
 import { ReaderPosition, ReaderTocShell, TocBookmarks, TocChapterVar, TocHiddenRules, TocJumps, TocParts, type BookmarkRow } from "./ReaderToc";
 import { ReaderLineMenu, type LineAction } from "./ReaderLineMenu";
 import { openGameSettings } from "../addons/gameSettingsOpen";
@@ -20,8 +20,6 @@ import { dismissLayeredHint, layeredHintDismissed } from "./layeredHint";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,7 +44,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isReaderMode, loadReaderMode, saveReaderMode, type ReaderMode } from "./readerMode";
 import { isRemoteView } from "@/app/share";
 import { cn } from "@/lib/utils";
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { SettingRow, ViewSettingsButton } from "./ViewSettings";
 import { ReaderVoiceProvider } from "./ReaderVoiceProvider";
 import { useReaderAutoVoice } from "./useReaderAutoVoice";
 import { loadVoiceAuto, saveVoiceAuto } from "./voiceAuto";
@@ -116,6 +114,9 @@ interface BodyOpts {
   jump: PendingJump | null;
   /** jump를 썼다(다시 이 갈래를 열 때 또 가지 않게) */
   onJumpDone: (n: number) => void;
+  /** 목차(바깥 도구 줄의 목차 단추가 연다) */
+  tocOpen: boolean;
+  onTocOpenChange: (open: boolean) => void;
 }
 
 /** 갈래를 바꾼 뒤 갈 줄. n은 같은 줄로 다시 가도 새 요청이 되게 하는 번호 */
@@ -141,7 +142,7 @@ function FullReader({ branch, withLive, ...opts }: { branch: number | null; with
 }
 
 /** withLive(최신 갈래)일 때만 끝에 지금 선택지·다음 대사 카드를 붙인다. */
-function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone, voiceAuto, onVoiceAuto }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
+function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, onFollowOn, mobile, onJumpBranch, jump, onJumpDone, voiceAuto, tocOpen, onTocOpenChange: setTocOpen }: { gameKey: string; branch: number | null; withLive: boolean } & BodyOpts) {
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, live: liveNow } = useLive();
   const readerFile = useReaderFile();
@@ -163,7 +164,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const { overrides } = usePluginOverrides();
   // 화면 그림 따라 그리기(이 게임에서 켰을 때만): 대사마다 그때 화면 그림
   const picturesOn = useAddons().isOn("screenPictures");
-  const [screenShown, setScreenShown] = useScreenPicturesShown();
+  const [screenShown] = useScreenPicturesShown();
   // 그림 표시 명령 기록이 있으면(그림 따라 그리기가 꺼졌어도) 그림 명령으로 화면을 다시 쌓아 보인다
   const hasPictureRecords = facts?.hasPictureRecords ?? false;
   const pictureCtx = usePictureContext(records, picturesOn, hasPictureRecords);
@@ -575,7 +576,6 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   }, [next]);
 
   // ── 바로 가기(목차·북마크) ───────────────────────────────────
-  const [tocOpen, setTocOpen] = useState(false);
   /** idx 항목으로 간다: 구간을 그 둘레로 다시 잡고 그 항목을 위로. 자동으로 맨 아래로는 끈다. */
   const jumpToIdx = useCallback((requested: number) => {
     const idx = visibleReaderIndex(items, requested, screenShown);
@@ -666,28 +666,9 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   if (!data) return null;
   const empty = total === 0 && !live?.choice;
 
-  const tocButton = (
-    <Button
-      variant="outline"
-      size={mobile ? "icon" : "sm"}
-      className={mobile ? "absolute right-16 bottom-3 size-10 bg-background shadow-md" : undefined}
-      aria-label="목차"
-      onClick={() => setTocOpen(true)}
-    >
-      <ListTree />
-      {!mobile && "목차"}
-    </Button>
-  );
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {!mobile && (
-        <div className="mx-auto flex w-full max-w-2xl shrink-0 items-center gap-3 px-2">
-          {tocButton}
-          <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="min-w-0 flex-1" />
-        </div>
-      )}
-      {mobile && total > 0 && (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {total > 0 && (
         <ReaderPosition scroller={scroller} items={items} start={range.start} end={range.end} heads={heads} varId={varId} data={data} className="shrink-0 px-2 text-center text-xs" />
       )}
       <ReaderTocShell open={tocOpen} onOpenChange={setTocOpen} mobile={mobile}>
@@ -721,8 +702,8 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
       )}
       <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scroller} data-reader-scroll onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className={cn("min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]", !screenShown && "[&_[data-reader-picture-row]]:hidden")}>
-        {/* 휴대폰: 아래에 떠 있는 버튼에 마지막 줄이 가리지 않게 아래 여백을 둔다 */}
-        <div ref={content} className={cn("mx-auto max-w-2xl space-y-4 px-2 py-4 text-base leading-relaxed", mobile && "pb-20")}>
+        {/* 아래에 떠 있는 단추에 마지막 줄이 가리지 않게 아래 여백을 둔다 */}
+        <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 pt-4 pb-20 text-base leading-relaxed">
           {empty ? (
             <p className="text-center text-sm text-muted-foreground">게임을 진행하면 지나간 대사가 여기에 쌓여요</p>
           ) : (
@@ -751,64 +732,27 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
           )}
         </div>
       </div>
-      {/* 휴대폰: 맨 아래가 아닐 때만 떠 있는 다음·맨 아래로(나머지 설정은 보기 설정 서랍) */}
-      {mobile && total > 0 && !(atBottom && atEnd && unread === 0) && (
+      {/* 맨 아래가 아닐 때만 떠 있는 다음·맨 아래로(PC·휴대폰 같음). 보기 설정은 위 도구 줄 */}
+      {total > 0 && !(atBottom && atEnd && unread === 0) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center gap-2">
-          <Button className="pointer-events-auto h-10 shadow-md" onClick={next}>
-            ↓ 다음{unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
+          <Button className="pointer-events-auto h-10 shadow-md" onClick={next} title={isRemoteView() ? undefined : "Space"}>
+            ↓ 다음{unread > 0 && <Badge variant="info">새 대사 {unread}</Badge>}
           </Button>
           <Button variant="outline" size="icon" className="pointer-events-auto size-10 bg-background shadow-md" aria-label="맨 아래로" onClick={goBottom}>
             <ChevronsDown />
           </Button>
         </div>
       )}
-      {/* 휴대폰: 보기 설정(ReaderView, 오른쪽 아래) 옆의 목차 */}
-      {mobile && tocButton}
       </div>
-      {/* 좁은 화면(휴대폰)에서는 줄을 바꾼다 */}
-      {!mobile && <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2">
-        <Button size="sm" onClick={next} disabled={total === 0}>
-          ↓ 다음{!isRemoteView() && <span className="pointer-coarse:hidden"> (Space)</span>}
-        </Button>
-        <Button variant="outline" size="sm" onClick={goBottom} disabled={atBottom && atEnd && unread === 0}>맨 아래로</Button>
-        {unread > 0 && <Badge variant="secondary">새 대사 {unread}</Badge>}
-        <div className="flex items-center gap-2">
-          <Switch id="reader-voice-auto" checked={voiceAuto} onCheckedChange={onVoiceAuto} />
-          <Label htmlFor="reader-voice-auto">음성 자동 재생</Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch id="reader-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
-          <Label htmlFor="reader-auto-follow">자동으로 맨 아래로</Label>
-        </div>
-        {(picturesOn || hasPictureRecords) && (
-          <div className="flex items-center gap-2">
-            <Switch id="reader-screen-pictures" checked={screenShown} onCheckedChange={setScreenShown} />
-            <Label htmlFor="reader-screen-pictures">그림 보기</Label>
-          </div>
-        )}
-      </div>}
-    </div>
-  );
-}
-
-/** 스위치 한 줄(휴대폰 보기 설정 서랍): 이름 왼쪽, 스위치 오른쪽 */
-function SettingRow({ id, label, checked, onChange, children }: {
-  id: string; label: string; checked: boolean; onChange: (on: boolean) => void; children?: ReactNode;
-}) {
-  return (
-    <div className="flex min-h-10 items-center gap-3">
-      <Label htmlFor={id} className="min-w-0 flex-1">{label}</Label>
-      {children}
-      <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }
 
 /**
- * 읽기 탭 — 회차·갈래 고르기와 보기 방식(전체 읽기 / 선택 흐름).
- * mobile(휴대폰 너비 플레이 화면)이면 위 도구 줄 대신 `보기 설정` 서랍에 모으고 본문이 화면을 거의 다 쓴다.
+ * 읽기 › 이야기 — 회차·갈래 고르기와 보기 방식(전체 읽기 / 선택 흐름).
+ * 도구 줄 하나: toolbarStart(이야기 | 모든 기록) · 갈래 고르기 · 목차(전체 읽기에서만) · 보기 설정(PC Popover, 휴대폰 Drawer).
  */
-export function ReaderView({ mobile = false }: { mobile?: boolean }) {
+export function ReaderView({ mobile = false, toolbarStart }: { mobile?: boolean; toolbarStart?: ReactNode }) {
   const data = useLiveData();
   const { records, model, latestBranch, logEpoch } = useLive();
   // 사용자가 고르기 전엔 최신 갈래(새 갈래가 생기면 따라간다)
@@ -823,7 +767,7 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
   // 읽은 위치·갈래 고르기는 대표 갈래 id 기준(이어진 갈래 id가 들어와도 대표 갈래로)
   const selected = picked !== null && model.branches.has(picked) ? representative(model, picked) : latestBranch;
   const [mode, setMode] = useState<ReaderMode>(loadReaderMode);
-  // 자동으로 맨 아래로(본문과 휴대폰 보기 설정 서랍이 함께 쓴다)
+  // 자동으로 맨 아래로(본문과 보기 설정이 함께 쓴다)
   const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
   const [voiceAuto, setVoiceAuto] = useState(loadVoiceAuto);
   const onVoiceAuto = useCallback((on: boolean) => { setVoiceAuto(on); saveVoiceAuto(on); }, []);
@@ -834,11 +778,11 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
     saveAutoFollow(on);
     if (on) followOn.current?.();
   }, []);
-  // 휴대폰 보기 설정 서랍의 `그림 보기`(본문 아래 줄과 같은 조건: 그림 따라 그리기를 켰거나 그림 표시 기록이 있을 때)
+  // 보기 설정의 `그림 보기`: 그림 따라 그리기를 켰거나 그림 표시 기록이 있을 때
   const [screenShown, setScreenShown] = useScreenPicturesShown();
   const picturesOn = useAddons().isOn("screenPictures");
-  const hasPictureRecords = useMemo(() => mobile && records.some(r => r.type === "picture" && r.op === undefined && !!r.name), [mobile, records]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const hasPictureRecords = useMemo(() => records.some(r => r.type === "picture" && r.op === undefined && !!r.name), [records]);
+  const [tocOpen, setTocOpen] = useState(false);
   const onMode = (v: string) => {
     if (!isReaderMode(v)) return; // 이미 눌린 항목을 다시 누르면 빈 값 — 무시
     setMode(v);
@@ -847,65 +791,41 @@ export function ReaderView({ mobile = false }: { mobile?: boolean }) {
 
   if (!data) return null;
   const hasBranch = records.length > 0 && selected !== null;
-  const body = hasBranch && mode === "flow"
+  const full = !(hasBranch && mode === "flow");
+  const body = !full
     ? <ChoiceFlowView branch={selected} onSelectBranch={setPicked} />
-    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} voiceAuto={voiceAuto} onVoiceAuto={onVoiceAuto} />;
+    : <FullReader branch={selected} withLive={selected === latestBranch} autoFollow={autoFollow} onAutoFollow={onAutoFollow} onFollowOn={onFollowOn} mobile={mobile} onJumpBranch={onJumpBranch} jump={jump} onJumpDone={onJumpDone} voiceAuto={voiceAuto} onVoiceAuto={onVoiceAuto} tocOpen={tocOpen} onTocOpenChange={setTocOpen} />;
   const voicedBody = <ReaderVoiceProvider key={`${gameKeyOf(data)}.${selected}.${mode}.${logEpoch}`} auto={voiceAuto}>{body}</ReaderVoiceProvider>;
 
-  if (mobile) {
-    return (
-      <div className="relative flex h-full min-h-0 flex-col">
-        {voicedBody}
-        <Button
-          variant="outline"
-          size="icon"
-          className="absolute right-3 bottom-3 size-10 bg-background shadow-md"
-          aria-label="보기 설정"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Settings2 />
-        </Button>
-        <Drawer open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>보기 설정</DrawerTitle>
-              <DrawerDescription>읽기 화면에 무엇을 어떻게 보일지 골라요.</DrawerDescription>
-            </DrawerHeader>
-            <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-6">
-              {hasBranch && (
-                <>
-                  <BranchPicker selected={selected} onSelect={setPicked} />
-                  <ToggleGroup type="single" variant="outline" value={mode} onValueChange={onMode} className="w-full">
-                    <ToggleGroupItem value="full" className="flex-1">전체 읽기</ToggleGroupItem>
-                    <ToggleGroupItem value="flow" className="flex-1">선택 흐름</ToggleGroupItem>
-                  </ToggleGroup>
-                  <Separator />
-                </>
-              )}
-              <SettingRow id="reader-m-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
-              <SettingRow id="reader-m-voice-auto" label="음성 자동 재생" checked={voiceAuto} onChange={onVoiceAuto} />
-              {(picturesOn || hasPictureRecords) && (
-                <SettingRow id="reader-m-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
-              )}
-            </div>
-          </DrawerContent>
-        </Drawer>
-      </div>
-    );
-  }
-
   return (
-    // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
-    <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
-      {hasBranch && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <BranchPicker selected={selected} onSelect={setPicked} />
-          <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={onMode}>
-            <ToggleGroupItem value="full">전체 읽기</ToggleGroupItem>
-            <ToggleGroupItem value="flow">선택 흐름</ToggleGroupItem>
-          </ToggleGroup>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        {toolbarStart}
+        {hasBranch && <div className="min-w-0 flex-1"><BranchPicker selected={selected} onSelect={setPicked} triggerClassName="w-full" /></div>}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {full && (
+            <Button variant="outline" size="icon-sm" aria-label="목차" title="목차" onClick={() => setTocOpen(true)}>
+              <ListTree />
+            </Button>
+          )}
+          <ViewSettingsButton mobile={mobile} description="이야기를 어떻게 보일지 골라요.">
+            {hasBranch && (
+              <>
+                <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={onMode} className="w-full">
+                  <ToggleGroupItem value="full" className="flex-1">전체 읽기</ToggleGroupItem>
+                  <ToggleGroupItem value="flow" className="flex-1">선택 흐름</ToggleGroupItem>
+                </ToggleGroup>
+                <Separator />
+              </>
+            )}
+            <SettingRow id="reader-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
+            <SettingRow id="reader-voice-auto" label="음성 자동 재생" checked={voiceAuto} onChange={onVoiceAuto} />
+            {(picturesOn || hasPictureRecords) && (
+              <SettingRow id="reader-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
+            )}
+          </ViewSettingsButton>
         </div>
-      )}
+      </div>
       {voicedBody}
     </div>
   );

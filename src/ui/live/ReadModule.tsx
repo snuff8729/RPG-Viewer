@@ -1,29 +1,32 @@
 import { useLive } from "@/app/LiveProvider";
-import { NotConnectedEmpty } from "./NotConnectedEmpty";
 import { useRoute } from "@/app/route";
-import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { NotConnectedEmpty } from "./NotConnectedEmpty";
 import { ReaderView } from "./ReaderView";
 import { HistoryView } from "./HistoryView";
 
-/** 기록 화면은 읽기 안에서 접근해요. 보기 설정 통합은 단위 3에서 해요. */
+/**
+ * 읽기 모듈: 맨 앞 `이야기 | 모든 기록`(주소 #/play/read/story·history와 함께 바뀌어요) + 각 보기의 도구 줄.
+ * mobile이면 보기 설정이 Drawer로 열려요.
+ */
 export function ReadModule({ mobile = false }: { mobile?: boolean }) {
   const [route] = useRoute();
   const { connection } = useLive();
   if (connection !== "connected") return <NotConnectedEmpty />;
   const history = route.kind === "play" && route.mode === "history";
+  const modeSwitch = (
+    <ToggleGroup
+      type="single" variant="outline" size="sm" className="shrink-0" aria-label="읽기 보기"
+      value={history ? "history" : "story"}
+      onValueChange={(v) => { if (v === "story" || v === "history") window.location.hash = `#/play/read/${v}`; }}
+    >
+      <ToggleGroupItem value="story">이야기</ToggleGroupItem>
+      <ToggleGroupItem value="history">모든 기록</ToggleGroupItem>
+    </ToggleGroup>
+  );
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex shrink-0 gap-2">
-        <Button size="sm" variant={history ? "ghost" : "secondary"} asChild>
-          <a href="#/play/read/story">이야기</a>
-        </Button>
-        <Button size="sm" variant={history ? "secondary" : "ghost"} asChild>
-          <a href="#/play/read/history">모든 기록</a>
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 *:h-full! *:min-h-0">
-        {history ? <HistoryView /> : <ReaderView mobile={mobile} />}
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
+      {history ? <HistoryView mobile={mobile} toolbarStart={modeSwitch} /> : <ReaderView mobile={mobile} toolbarStart={modeSwitch} />}
     </div>
   );
 }

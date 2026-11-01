@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import { ChevronRight, ChevronsUpDown, EllipsisVertical } from "lucide-react";
 import { useLive, useLiveData } from "@/app/LiveProvider";
@@ -35,7 +36,11 @@ type Confirm = { kind: "tidy"; count: number } | { kind: "upTo"; id: number; cou
  * 갈래 고르기 + 정리(이름·고정·숨기기). 숨기기는 목록에서만 빠진다 — 기록·이어하기·처음부터 읽기(조상 경로)는 그대로.
  * selected·onSelect는 대표 갈래 id.
  */
-export function BranchPicker({ selected, onSelect }: { selected: number; onSelect: (id: number) => void }) {
+export function BranchPicker({ selected, onSelect, triggerClassName = "w-72 max-w-full" }: {
+  selected: number; onSelect: (id: number) => void;
+  /** 고르기 단추 너비(도구 줄에서는 남은 칸을 채움) */
+  triggerClassName?: string;
+}) {
   const data = useLiveData();
   const { records, model, latestBranch } = useLive();
   const { overrides } = usePluginOverrides();
@@ -114,7 +119,7 @@ export function BranchPicker({ selected, onSelect }: { selected: number; onSelec
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="w-72 max-w-full justify-between font-normal">
+          <Button variant="outline" className={cn(triggerClassName, "justify-between font-normal")}>
             <span className="truncate">{prefs.branches[String(current)]?.pinned ? "★ " : ""}{nameOf(current)}</span>
             <ChevronsUpDown className="opacity-50" />
           </Button>

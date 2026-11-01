@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronsDown } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { useLive, useLiveData } from "@/app/LiveProvider";
 import { branchPath, foldTimeline } from "@/core/live/history";
@@ -7,7 +8,9 @@ import { findNodePathByCmd } from "@/core/interpret/interpret";
 import type { Location } from "@/core/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { SettingRow, ViewSettingsButton } from "./ViewSettings";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { openPage } from "../navigation";
 import { highlightNode } from "../highlight";
@@ -40,8 +43,8 @@ function useStableByKey<T>(value: T, key: string): T {
   return kept.key === key ? kept.value : value;
 }
 
-/** 기록 탭 — 회차·갈래·종류 선택, 스크롤되는 타임라인, 하단 고정 카드. */
-export function HistoryView() {
+/** 읽기 › 모든 기록 — 도구 줄(이야기 | 모든 기록 · 갈래 · 보기 설정), 스크롤되는 타임라인, 하단 고정 카드. */
+export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean; toolbarStart?: ReactNode }) {
   const { index } = useGame();
   const data = useLiveData();
   const { records, model, noisy, uncertainSeqs, changedSeqs, latestBranch, connection, install } = useLive();
@@ -181,32 +184,31 @@ export function HistoryView() {
   const installed = install?.state === "installed" && connection !== "noPlugin";
   const visible = filtered.slice(Math.max(0, filtered.length - shown));
 
+  const hasBranch = !empty && selected !== null;
   return (
-    // 헤더(h-12) + main 위아래 패딩(p-4)을 뺀 높이
-    <div className="flex h-[calc(100svh-5rem)] flex-col gap-3">
-      {!empty && selected !== null && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <BranchPicker selected={selected} onSelect={onSelect} />
-          <ToggleGroup type="multiple" variant="outline" size="sm" className="max-w-full flex-wrap" value={[...kinds]} onValueChange={onKinds}>
-            {KIND_LABELS.map(([k, label]) => <ToggleGroupItem key={k} value={k}>{label}</ToggleGroupItem>)}
-          </ToggleGroup>
-          <div className="flex items-center gap-2">
-            <Switch id="history-auto-follow" checked={autoFollow} onCheckedChange={onAutoFollow} />
-            <Label htmlFor="history-auto-follow">자동으로 맨 아래로</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch id="history-plugin-all" checked={showAllPlugins} onCheckedChange={setShowAllPlugins} />
-            <Label htmlFor="history-plugin-all">플러그인 명령 모두 보기</Label>
-          </div>
-          {hasNotices && (
-            <div className="flex items-center gap-2">
-              <Switch id="history-notices" checked={noticesShown} onCheckedChange={setNoticesShown} />
-              <Label htmlFor="history-notices">알림 문구 보기</Label>
-              <NoticeKindsMenu disabled={!noticesShown} />
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        {toolbarStart}
+        {hasBranch && <div className="min-w-0 flex-1"><BranchPicker selected={selected} onSelect={onSelect} triggerClassName="w-full" /></div>}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <ViewSettingsButton mobile={mobile} description="모든 기록에서 무엇을 보일지 골라요.">
+            <div className="flex flex-col gap-2">
+              <Label>보일 종류</Label>
+              <ToggleGroup type="multiple" variant="outline" size="sm" spacing={1} className="flex-wrap" value={[...kinds]} onValueChange={onKinds}>
+                {KIND_LABELS.map(([k, label]) => <ToggleGroupItem key={k} value={k}>{label}</ToggleGroupItem>)}
+              </ToggleGroup>
             </div>
-          )}
+            <Separator />
+            <SettingRow id="history-auto-follow" label="자동으로 맨 아래로" checked={autoFollow} onChange={onAutoFollow} />
+            <SettingRow id="history-plugin-all" label="플러그인 명령 모두 보기" checked={showAllPlugins} onChange={setShowAllPlugins} />
+            {hasNotices && (
+              <SettingRow id="history-notices" label="알림 문구 보기" checked={noticesShown} onChange={setNoticesShown}>
+                <NoticeKindsMenu disabled={!noticesShown} />
+              </SettingRow>
+            )}
+          </ViewSettingsButton>
         </div>
-      )}
+      </div>
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto pr-1">
           {ctx ? (
@@ -223,9 +225,11 @@ export function HistoryView() {
           )}
         </div>
         {!atBottom && (
-          <Button size="sm" className="absolute right-4 bottom-3 shadow-md" onClick={scrollToBottom}>
-            {fresh > 0 ? `최신으로 · 새 ${fresh}` : "최신으로"}
-          </Button>
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+            <Button className="pointer-events-auto h-10 shadow-md" onClick={scrollToBottom}>
+              <ChevronsDown />맨 아래로{fresh > 0 && <Badge variant="info">새 {fresh}</Badge>}
+            </Button>
+          </div>
         )}
       </div>
       <div className="max-h-[50%] shrink-0 space-y-2 overflow-y-auto empty:hidden">
