@@ -115,3 +115,13 @@ await __rpgViewer.simulateFixtureLog()   // 픽스처 기록·상태를 rpg-view
 await __rpgViewer.appendLog({ type: "..." })  // 기록 한 줄 추가
 await __rpgViewer.setLive({ mapId: 1 })       // live.json 갱신(인자 없으면 하트비트)
 ```
+
+## 기여 방향
+
+RPG Viewer는 기능과 게임별 호환성 개선을 이 저장소에 모아 함께 유지하는 것을 지향합니다. 여러 도구를 따로 찾아 설치할 필요를 줄일 수 있도록, 개선 사항은 가능하면 이 저장소에 이슈나 PR로 제안해 주세요. 게임별 지원과 확장 기능도 본 프로젝트 안에서 함께 유지하는 방향을 권장합니다.
+
+이는 기여를 권장하는 프로젝트 운영 방향이며, GPL이 허용하는 포크·수정·재배포의 권리를 제한하거나 PR 제출을 의무화하는 조건은 아닙니다. 자세한 제안 방법은 [기여 가이드](CONTRIBUTING.md)를 참고하세요.
+
+## 라이선스
+
+RPG Viewer는 GNU General Public License v3.0 (GPL-3.0-only)에 따라 배포됩니다. 전문은 [LICENSE](LICENSE)를 참고하세요.
