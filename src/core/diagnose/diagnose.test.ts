@@ -106,6 +106,19 @@ describe("diagnoseGame on a DOP-like synthetic game", () => {
     expect(f?.evidence).toEqual(["missing_one (맵 1 이벤트 3(적2) p1)"]);
   });
 
+  it("a picture missing from the whole game (all img/ folders) is only reported as ok", () => {
+    const nowhere = diagnoseGame(g.data, g.plugins, { ...g.files, others: ["Actor1"] }, null, { pluginSources: g.pluginSources, adapters: g.adapters });
+    expect(find(nowhere, "missing-pictures")).toMatchObject({
+      status: "ok", title: "게임에도 없는 그림 1개 — 게임에서 뺀 장면이라 뷰어에서도 빈 자리로 보여요",
+      evidence: ["missing_one (맵 1 이벤트 3(적2) p1)"],
+    });
+    // the same name in another img/ folder (or a pictures sub-folder) may be read from there by a plugin
+    const elsewhere = diagnoseGame(g.data, g.plugins, { ...g.files, others: ["missing_one"] }, null, { pluginSources: g.pluginSources, adapters: g.adapters });
+    expect(find(elsewhere, "missing-pictures")?.status).toBe("unknown");
+    const sub = diagnoseGame(g.data, g.plugins, { pictures: [...g.files.pictures, "x/missing_one"], others: [] }, null, { pluginSources: g.pluginSources, adapters: g.adapters });
+    expect(find(sub, "missing-pictures")?.status).toBe("unknown");
+  });
+
   it("recommends add-ons and the matching adapter (not other adapters)", () => {
     expect(find(report, "layered-stands")).toMatchObject({ status: "needs-addon", action: { kind: "enable-addon", addon: "screenPictures" } });
     expect(find(report, "cutins")?.evidence).toContain("그림 Actor1_CutIn");
@@ -230,6 +243,8 @@ describe("gatherDiagnosisInput", () => {
       "www/img/pictures/one.png": "x",
       "www/img/pictures/two.rpgmvp": "x",
       "www/img/pictures/cg_09/three.png_": "x",
+      "www/img/faces/Actor1.png": "x",
+      "www/img/system/deep/Window.png": "x",
       "www/rpg-viewer/log.jsonl": '{"v":1,"seq":1,"t":0,"run":1,"branch":1,"type":"save","slot":1}\nbroken\n',
       "www/rpg-viewer/addons.json": JSON.stringify({ v: 1, enabled: { notices: true }, adapters: { "x-y": true } }),
     });
@@ -237,6 +252,7 @@ describe("gatherDiagnosisInput", () => {
     const g = await gatherDiagnosisInput(folder, game(), { readLog: true });
     expect(Object.keys(g.pluginSources)).toEqual(["A"]);
     expect(g.files?.pictures.sort()).toEqual(["cg_09/three", "one", "two"]);
+    expect(g.files?.others?.sort()).toEqual(["Actor1", "Window"]);
     expect(g.log).toHaveLength(1);
     expect(settingsOfAddonFile(g.addonFile)).toEqual({ addons: { notices: true }, adapters: { "x-y": true } });
     expect(JSON.stringify(await folder.list("www"))).toBe(before);
