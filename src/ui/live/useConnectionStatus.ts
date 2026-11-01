@@ -1,47 +1,22 @@
-import { useEffect, useState } from "react";
-import { useLive, useLiveStatus } from "@/app/LiveProvider";
-import { branchLabel } from "@/core/live/history";
+import { useLive } from "@/app/LiveProvider";
 import { isRemoteView } from "@/app/share";
+import { terms } from "@/ui/terms";
 
-function agoText(lastSeenT: number | null, now: number): string {
-  if (lastSeenT === null) return "";
-  const min = Math.floor(Math.max(0, now - lastSeenT) / 60000);
-  return min < 1 ? "방금" : `${min}분 전`;
-}
-
-/** 연결 상태 글과 모양(상단 Badge·휴대폰 더보기 메뉴 공용) */
-export function useConnectionStatus(): { text: string; variant: "secondary" | "outline"; muted: boolean; connected: boolean } {
-  const { connection, model, supported, install } = useLive();
-  const { lastLive, lastSeenT } = useLiveStatus();
-  const [now, setNow] = useState(() => Date.now());
-
-  // "N분 전" 갱신용 시계(자기 재예약)
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = () => { setNow(Date.now()); timer = setTimeout(tick, 15000); };
-    timer = setTimeout(tick, 15000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  let text: string;
-  let variant: "secondary" | "outline" = "outline";
-  let muted = false;
-  if (supported && install === null) {
-    // 설치 상태를 읽는 중: "플러그인 미설치"가 깜빡이지 않게
-    text = "확인 중…";
-    muted = true;
-  } else if (connection === "connected") {
-    const branch = lastLive?.branch ?? model.latestBranch;
-    text = branch !== null && branch !== undefined ? `● 연결됨 · ${branchLabel(model, branch)}` : "● 연결됨";
-    variant = "secondary";
-  } else if (connection === "stale") {
-    text = lastSeenT !== null ? `○ 게임 꺼짐 · 마지막 기록 ${agoText(lastSeenT, now)}` : "○ 게임 꺼짐";
-  } else if (connection === "waiting") {
-    text = "○ 게임 꺼짐";
-  } else {
-    // 휴대폰 보기에서는 설치할 수 없으니 설치 안내 대신 꺼짐으로만 보여 준다
-    text = isRemoteView() ? "○ 게임 꺼짐" : "플러그인 미설치";
-  }
-
-  return { text, variant, muted, connected: connection === "connected" };
+export function useConnectionStatus() {
+  const { connection, supported, install } = useLive();
+  const remote = isRemoteView();
+  const state = connection === "connected" ? "connected"
+    : !supported || install?.state === "unsupported" ? "unsupported"
+    : install === null ? "checking"
+    : install.state === "notInstalled" ? "install"
+    : install.outdated ? "update" : "off";
+  const labels = { connected: terms.connected, checking: terms.checking, off: terms.disconnected, install: "플러그인 필요", update: "업데이트 필요", unsupported: "기록 못 함" };
+  const descriptions = {
+    connected: "게임의 현재 상태와 기록을 받고 있어요.", checking: "기록 플러그인과 게임 상태를 확인하고 있어요.",
+    off: "게임을 실행하면 현재 상태와 기록을 볼 수 있어요.", install: "기록 플러그인을 설치하면 게임과 연결할 수 있어요.",
+    update: "기록 플러그인을 업데이트하고 게임을 다시 실행해 주세요.", unsupported: "이 환경에서는 게임 기록을 받을 수 없어요.",
+  };
+  return { state, text: labels[state], description: descriptions[state], remote,
+    dot: state === "connected" ? "bg-success" : ["checking", "install", "update"].includes(state) ? "bg-warning" : "bg-muted-foreground",
+    connected: state === "connected", variant: "outline" as const, muted: state === "checking" };
 }

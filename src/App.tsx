@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { ThemeProvider } from "@/app/ThemeProvider";
 import { GameProvider, useGame } from "@/app/GameProvider";
 import { formatRoute, useRoute } from "@/app/route";
 import { locationKey } from "@/core/index/locations";
@@ -194,7 +195,7 @@ function Shell() {
 
 export default function App() {
   return (
-    <TooltipProvider>
+    <ThemeProvider><TooltipProvider>
       <GameProvider>
         <AddonsProvider>
           <LiveProvider>
@@ -210,6 +211,6 @@ export default function App() {
           </LiveProvider>
         </AddonsProvider>
       </GameProvider>
-    </TooltipProvider>
+    </TooltipProvider></ThemeProvider>
   );
 }
