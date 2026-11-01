@@ -27,6 +27,15 @@ npm run lint
 npm run build
 ```
 
+AI 도구(Claude Code, Codex, Gemini CLI, Cursor 등)가 작성한 커밋에는 메시지 끝에 어떤 AI가 작업했는지 적어 주세요. 모델 이름을 모르면 `unknown`으로 둡니다.
+
+```text
+AI-Tool: Claude Code
+AI-Model: claude-opus-5-5
+```
+
+PR 본문에도 `작업한 AI: <도구> / <모델>`을 한 줄 남겨 주세요. 게임별 어댑터를 만드는 순서는 `.claude/skills/onboard-game/SKILL.md`에 있습니다.
+
 PR에는 실행한 검사와 결과를 적고, 실제 게임에서 확인한 경우 확인 환경과 결과도 남겨 주세요. 실제 게임 확인 항목은 [체크리스트](docs/live-checklist.md)를 참고하세요. 문서만 변경한 경우에는 링크와 내용을 확인하면 됩니다.
 
 ## 기여 코드의 라이선스

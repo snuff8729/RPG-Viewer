@@ -78,11 +78,23 @@ npm run diagnose -- "<게임 폴더>"   # 다시 돌려 해당 항목이 `켜면
 
 ## 5. 마무리 / Finish
 
-- 커밋 메시지는 영어, 끝에 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- 커밋 메시지는 영어. 이 스킬은 Claude Code가 아닌 다른 AI 도구도 돌릴 수 있으므로, **AI가 쓴 커밋에는 반드시 어떤 AI가 했는지** 끝에 적는다
+  (서브에이전트 커밋·브랜치로 합치는 커밋 모두):
+
+  ```text
+  AI-Tool: <도구 이름, 예: Claude Code / Codex CLI / Gemini CLI / Cursor>
+  AI-Model: <정확한 모델 이름이나 ID, 예: claude-opus-5-5>
+  ```
+
+  도구가 정한 서명 줄(예: Claude Code의 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`)이 있으면 그것도 함께 둔다.
+  모델 이름을 모르면 지어내지 말고 `AI-Model: unknown`으로 쓴 뒤 사용자에게 묻는다. 사람이 직접 고친 커밋이면 이 줄을 붙이지 않는다.
+  Every AI-written commit must end with `AI-Tool:` and `AI-Model:` trailers (plus the tool's own co-author line if it has one).
+  Never guess the model; write `unknown` and ask. Human-only commits don't get these trailers.
 - 워크트리 작업을 검토한 뒤 `onboard/<id>` 브랜치로 합친다(master는 건드리지 않음). 브랜치 위에서 4번 검증을 다시 돌린다.
 - 사용자에게는 짧은 한국어로: 무엇이 이제 되는지, 브랜치 이름과 확인 방법(예: `git switch onboard/<id>` 후 `npm run dev`),
   뷰어에서 무엇을 누르면 되는지(예: `게임 진단 → 추천 설정 모두 적용`, 게임 다시 시작).
 - 그리고 **PR로 올리자고 제안**한다. 좋다고 하면 `git push -u origin onboard/<id>` 후 `gh pr create`로 올린다.
-  PR 본문: 어떤 플러그인/증상을 다뤘는지, 바뀐 파일(어댑터·core·진단 규칙), 검증 결과, 남은 `확인 필요` 항목.
+  PR 본문: 어떤 플러그인/증상을 다뤘는지, 바뀐 파일(어댑터·core·진단 규칙), 검증 결과, 남은 `확인 필요` 항목,
+  그리고 `작업한 AI: <AI-Tool> / <AI-Model>` 한 줄.
   가린 사본의 토큰은 써도 되지만 원래 게임 글·실제 게임 파일·사용자 경로는 넣지 않는다. 끝에 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
   Merge the reviewed worktree into an `onboard/<id>` branch (not master), re-verify there, tell the user how to check it, and offer to open a PR.
