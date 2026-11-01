@@ -102,9 +102,9 @@ function scanCommands(data: GameData): StaticScan {
   return s;
 }
 
-/** 그림 이름이 그림 목록에 있는가(BY_PictureClassify 하위 폴더 규칙 포함, 대소문자 무시) */
-function pictureResolver(files: ImageListing, rules: readonly FolderRule[]): (name: string) => boolean {
-  const have = new Set(arr<string>(files.pictures).map(n => String(n).toLowerCase()));
+/** 그림 이름이 그림 목록(names)에 있는가(BY_PictureClassify 하위 폴더 규칙 포함, 대소문자 무시) */
+function pictureResolver(names: unknown, rules: readonly FolderRule[]): (name: string) => boolean {
+  const have = new Set(arr<string>(names).map(n => String(n).toLowerCase()));
   return (name: string) => {
     const n = name.toLowerCase();
     if (have.has(n)) return true;
@@ -112,6 +112,23 @@ function pictureResolver(files: ImageListing, rules: readonly FolderRule[]): (na
     return moved !== null && have.has(moved.toLowerCase());
   };
 }
+
+/** 게임 폴더에 파일이 없는 그림을 기록 플러그인이 복사해 두기 시작한 버전(rpg-viewer/pictures/<이름>.png) */
+export const PICTURE_COPY_MIN_VERSION = "1.31.0";
+
+/** 플레이 기록에서 게임이 띄운 그림 이름 → 횟수(그림 기록과 화면 그림, 플러그인 그림은 빼고) */
+function drawnPictureNames(records: readonly unknown[]): Map<string, number> {
+  const names = new Map<string, number>();
+  const add = (n: string) => names.set(n, (names.get(n) ?? 0) + 1);
+  for (const r of records) {
+    if (!isObj(r)) continue;
+    if (r.type === "picture" && r.op === undefined && typeof r.name === "string" && r.name) add(r.name);
+    const pics = (r as { pics?: unknown }).pics;
+    if (pics !== undefined) for (const p of parsePics(pics) ?? []) if (p.kind !== "sprite") add(p.name);
+  }
+  return names;
+}
+
 
 /**
  * 그림 이름(폴더 뺀 끝 이름)이 img/ 어디에도 없는가(pictures 하위 폴더 포함, 대소문자 무시).
@@ -249,23 +266,35 @@ function run(
   });
 
   // ---- 그림: 이벤트가 부르는 그림 파일 ----
-  const resolves = files ? pictureResolver(files, rules) : null;
+  const resolves = files ? pictureResolver(files.pictures, rules) : null;
+  // 기록 플러그인(1.31.0)이 복사해 둔 그림(rpg-viewer/pictures): 게임 실행 파일 안에 묶여 폴더에 없는 그림
+  const copied = pictureResolver(files?.copies, rules);
+  const drawn = drawnPictureNames(records);
   step(() => {
     if (!resolves || scan.pictureRefs.size === 0) return;
-    const missing = [...scan.pictureRefs].filter(([name]) => !resolves(name));
+    const notOnDisk = [...scan.pictureRefs].filter(([name]) => !resolves(name));
+    const missing = notOnDisk.filter(([name]) => !copied(name));
+    const copiedNote = notOnDisk.length > missing.length ? ` 그중 ${notOnDisk.length - missing.length}개는 기록 플러그인이 복사해 둔 그림으로 보여줘요.` : "";
     const nowhere = files ? absentFromGame(files) : null;
+    const shownLower = new Set([...drawn.keys()].map(n => n.toLowerCase()));
+    const shown = missing.filter(([name]) => shownLower.has(name.toLowerCase())).length;
     push(missing.length === 0
       ? {
         id: "missing-pictures", area: "그림", status: "ok", title: "이벤트 그림을 모두 찾았어요",
-        detail: `이벤트가 띄우는 그림 ${scan.pictureRefs.size}개가 모두 게임 폴더에 있어요.`, evidence: [],
+        detail: `이벤트가 띄우는 그림 ${scan.pictureRefs.size}개를 모두 찾았어요.${copiedNote}`, evidence: [],
       }
       : nowhere && missing.every(([name]) => nowhere(name))
       ? {
-        // 그림 폴더 규칙으로도 못 찾고 img/ 어디에도 같은 이름이 없음: 게임 자체에 없는 그림(뺀 장면) — 알려주기만
+        // img/ 어디에도 같은 이름이 없음: 게임에서 뺀 장면이거나 게임 실행 파일 안에 묶인 그림 — 알려주기만
+        // (플레이 중에 보인 것은 아래 기록 항목이 따로 다룬다)
         id: "missing-pictures", area: "그림", status: "ok",
-        title: `게임에도 없는 그림 ${missing.length}개 — 게임에서 뺀 장면이라 뷰어에서도 빈 자리로 보여요`,
-        detail: "이벤트가 띄우는 그림인데 게임 폴더(img/ 아래 모든 폴더)에 같은 이름의 파일이 없어요. 게임에서도 보이지 않는 그림이라 고칠 것은 없어요.",
-        evidence: cap(missing.map(([name, at]) => `${name} (${at})`)),
+        title: `게임 폴더에 없는 그림 ${missing.length}개`,
+        detail: "이벤트가 띄우는 그림인데 게임 폴더(img/ 아래 모든 폴더)에 같은 이름의 파일이 없어요. 게임에서 뺀 장면이거나, 게임 실행 파일 안에 묶여 있는 그림일 수 있어요. " +
+          `묶인 그림은 게임에서 한 번 보이면 기록 플러그인(${PICTURE_COPY_MIN_VERSION} 이상)이 복사해 둬서 읽기에서도 보여요.${copiedNote}`,
+        evidence: [
+          ...(shown > 0 ? [`플레이 중에 보인 그림 ${shown}개 — 게임 안에 묶여 있어요`] : []),
+          ...cap(missing.map(([name, at]) => `${name} (${at})`)),
+        ],
       }
       : {
         id: "missing-pictures", area: "그림", status: "unknown", title: `이벤트 그림 ${missing.length}개를 찾지 못했어요`,
@@ -447,19 +476,28 @@ function run(
   if (records.length > 0) {
     step(() => {
       if (!resolves) return;
-      const names = new Map<string, number>();
-      const add = (n: string) => names.set(n, (names.get(n) ?? 0) + 1);
-      for (const r of records) {
-        if (!isObj(r)) continue;
-        if (r.type === "picture" && r.op === undefined && typeof r.name === "string" && r.name) add(r.name);
-        const pics = (r as { pics?: unknown }).pics;
-        if (pics !== undefined) for (const p of parsePics(pics) ?? []) if (p.kind !== "sprite") add(p.name);
+      // 파일이 게임 폴더에 없는데 게임은 띄운 그림: 게임 실행 파일 안에 묶여 있다(가상 파일 시스템 등)
+      const bad = [...drawn].filter(([n]) => !resolves(n)).sort((a, b) => b[1] - a[1]);
+      if (bad.length === 0) return;
+      const waiting = bad.filter(([n]) => !copied(n));
+      const list = (l: [string, number][]) => cap(l.map(([n, c]) => `${n} ×${c}`));
+      if (waiting.length === 0) {
+        push({
+          id: "log-missing-pictures", area: "그림", status: "auto-fixed", title: `게임 안에 묶인 그림 ${bad.length}개`,
+          detail: "게임 안에 묶인 그림을 기록 플러그인이 복사해 둬서 보여줘요.",
+          evidence: list(bad),
+        });
+        return;
       }
-      const bad = [...names].filter(([n]) => !resolves(n));
-      if (bad.length > 0) push({
-        id: "log-missing-pictures", area: "그림", status: "unknown", title: `기록된 그림 ${bad.length}개의 파일이 없어요`,
-        detail: "게임이 화면에 띄운 그림인데 img/pictures에서 파일을 찾지 못했어요. 읽기에서 빈 자리로 보일 수 있어요.",
-        evidence: cap(bad.sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ×${c}`)),
+      // 기록에는 플러그인 버전이 없다: 새 버전으로 바꾸는 것과 다시 보는 것을 함께 안내한다
+      const done = bad.length - waiting.length;
+      push({
+        id: "log-missing-pictures", area: "그림", status: "needs-addon", action: { kind: "none" },
+        title: `게임 안에 묶인 그림 ${waiting.length}개 — 아직 읽기에서 안 보여요`,
+        detail: "게임이 화면에 띄운 그림인데 게임 폴더에 파일이 없어요(게임 실행 파일 안에 묶여 있어요). " +
+          `기록 플러그인이 새 버전(${PICTURE_COPY_MIN_VERSION} 이상)이면 게임에서 그 그림이 다시 보일 때 복사해 둬서 읽기에서도 보여요.` +
+          (done > 0 ? ` ${done}개는 이미 복사해 뒀어요.` : ""),
+        evidence: list(waiting),
       });
     });
     step(() => {

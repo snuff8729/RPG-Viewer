@@ -45,7 +45,7 @@ async function* feed(folder: GameFolder, dataRoot: string, ctx: MaskContext): As
     }
     yield;
   };
-  for (const d of ["img", "audio", "movies"]) yield* walk(`${b}${d}`, 0);
+  for (const d of ["img", "audio", "movies", "rpg-viewer/pictures"]) yield* walk(`${b}${d}`, 0);
   for (const f of ["log.jsonl", "live.json", "addons.json", "meta.json"]) { await maskFile(`${b}rpg-viewer/${f}`); yield; }
 }
 

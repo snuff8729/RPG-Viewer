@@ -54,6 +54,8 @@
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
  * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
+ * 1.31.0: 게임 폴더에 파일이 없는데 게임이 띄운 그림(실행 파일 안에 묶인 그림 등)은 한 번만
+ *   rpg-viewer/pictures/<이름>.png로 복사해 두어 RPG Viewer가 보여줄 수 있게 합니다.
  * 1.30.0: WinGetInfo가 띄우는 획득 알림(아이템·돈·변수 증가)도 알림 문구 기록에 획득으로 남깁니다.
  * 1.29.1: 건너뛰지 않은 전투는 끝 기록에 그 까닭(notSkipped)을 남깁니다.
  * 1.29.0: 현재 조건에서 볼 대화를 이미 본 전투는 건너뛰며, 이겨 본 적의 전투 변경 명령도 허용합니다.
@@ -73,7 +75,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.30.0",
+    VERSION: "1.31.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -2575,6 +2577,82 @@
     dest[DRAWN_KEY] = null;
     markScreenDirty();
   }
+
+  // 1.31.0: a picture the game shows but whose file is not in the game folder (packed inside the game exe, e.g. a
+  // virtual file system) is saved once as a plain PNG to rpg-viewer/pictures/<name>.png so the viewer can show it.
+  // Once per name per session; nothing is written when the file is on disk or the copy already exists.
+  var PIC_CACHE_DIR = path.join(DIR, "pictures");
+  var PIC_EXTS = [".png", ".rpgmvp", ".png_"];
+  var picExportSeen = {}, picExportCount = 0, PIC_EXPORT_MAX = 5000;
+  // "a/b" -> ["a", "b"]; null when it could leave the folder (.., absolute, drive) or is empty
+  function picSegments(name) {
+    if (typeof name !== "string" || name === "" || name.length > 400 || /[\0:]/.test(name)) return null;
+    var segs = name.replace(/\\/g, "/").split("/");
+    for (var i = 0; i < segs.length; i++) if (segs[i] === "" || segs[i] === "." || segs[i] === "..") return null;
+    return segs;
+  }
+  function picCachePath(segs) { return path.join.apply(path, [PIC_CACHE_DIR].concat(segs)) + ".png"; }
+  function pictureOnDisk(segs) {
+    var base = path.join.apply(path, [baseDir, "img", "pictures"].concat(segs));
+    for (var i = 0; i < PIC_EXTS.length; i++) if (fs.existsSync(base + PIC_EXTS[i])) return true;
+    return false;
+  }
+  // what the bitmap holds, drawable onto a canvas (MV / MZ keep the loaded image; a drawn-on bitmap its canvas)
+  function bitmapSource(b) {
+    if (b._canvas) return b._canvas;
+    if (b._image) return b._image;
+    var bt = b.__baseTexture || b._baseTexture;
+    if (bt && bt.source) return bt.source;
+    if (bt && bt.resource && bt.resource.source) return bt.resource.source;
+    return null;
+  }
+  function savePictureCopy(segs, b) {
+    if (!b || (typeof b.isError === "function" && b.isError())) return;
+    var w = numOr(b.width, 0), h = numOr(b.height, 0);
+    if (!(w > 0 && h > 0)) return;
+    var src = bitmapSource(b), doc = G.document;
+    if (!src || !doc || typeof doc.createElement !== "function") return;
+    var file = picCachePath(segs);
+    if (fs.existsSync(file)) return;
+    var cv = doc.createElement("canvas");
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(src, 0, 0);
+    var m = /^data:image\/png;base64,(.+)$/.exec(String(cv.toDataURL("image/png")));
+    var B = typeof Buffer !== "undefined" ? Buffer : G.Buffer;
+    if (!m || !B || typeof B.from !== "function") return;
+    ensureDir();
+    var dir = DIR, parts = ["pictures"].concat(segs.slice(0, -1));
+    for (var i = 0; i < parts.length; i++) {
+      dir = path.join(dir, parts[i]);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    }
+    fs.writeFileSync(file, B.from(m[1], "base64"));
+  }
+  // name: the picture name the game asked for (what the viewer looks up); b: its bitmap (loading or loaded)
+  function notePictureFile(name, b) {
+    if (!b || typeof b !== "object" || typeof name !== "string" || name === "") return;
+    var key = "p:" + name;
+    if (picExportSeen[key] === true || picExportCount >= PIC_EXPORT_MAX) return;
+    picExportSeen[key] = true;
+    picExportCount++;
+    var segs = picSegments(name);
+    if (!segs) return;
+    // the file the engine loads (a picture-folder plugin may have moved it into a subfolder)
+    var u = bitmapUrl(b);
+    var loaded = u ? picSegments(pictureNameOfUrl(u)) : null;
+    if (pictureOnDisk(loaded || segs) || fs.existsSync(picCachePath(segs))) return;
+    var done = false;
+    var save = function () {
+      if (done) return;
+      done = true;
+      try { savePictureCopy(segs, b); } catch (e) { reportError(e); }
+    };
+    if (typeof b.addLoadListener === "function" && typeof b.isReady === "function" && !b.isReady()) b.addLoadListener(save);
+    else save();
+  }
+
   function scanScene(sc) {
     if (!sc || (!sc._spriteset && !extCaptures(sc))) return null;
     var SP = G.Sprite_Picture;
@@ -4043,6 +4121,7 @@
         return function () {
           var b = orig.apply(this, arguments);
           try { watchBitmap(b); } catch (e) { reportError(e); }
+          try { notePictureFile(arguments[0], b); } catch (e2) { reportError(e2); } // 1.31.0
           return b;
         };
       });
@@ -4051,7 +4130,10 @@
     hook(IM, "ImageManager", "loadNormalBitmap", function (orig) {
       return function (path) {
         var b = orig.apply(this, arguments);
-        try { if (typeof path === "string" && pictureNameOfUrl(path) !== null) watchBitmap(b); } catch (e) { reportError(e); }
+        try {
+          var pn = typeof path === "string" ? pictureNameOfUrl(path) : null;
+          if (pn !== null) { watchBitmap(b); notePictureFile(pn, b); }
+        } catch (e) { reportError(e); }
         return b;
       };
     });

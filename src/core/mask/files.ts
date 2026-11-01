@@ -26,6 +26,8 @@ export function mirrorKindOf(rel: string, base: string): MirrorKind | null {
   if (segs[0] === "js" && segs[1] === "plugins" && segs.length >= 3 && r.endsWith(".js")) return "pluginJs";
   if (segs.length === 2 && segs[0] === "rpg-viewer" && RV_FILES.has(segs[1])) return segs[1].endsWith(".jsonl") ? "jsonl" : "json";
   if ((segs[0] === "img" || segs[0] === "audio" || segs[0] === "movies") && segs.length >= 2) return "placeholder";
+  // 기록 플러그인(1.31.0)이 복사해 둔 그림(게임 실행 파일 안에 묶인 그림): img/처럼 이름만 남긴다
+  if (segs[0] === "rpg-viewer" && segs[1] === "pictures" && segs.length >= 3) return "placeholder";
   return null;
 }
 
