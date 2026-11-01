@@ -107,7 +107,11 @@ export async function runMaskPass(root: string, adapters: AdapterManifest[] = re
   return { ctx, entries, report: d.report, base, engine: d.engine };
 }
 
-const isImagePath = (rel: string, base: string) => rel.toLowerCase().startsWith(base ? `${base}/img/`.toLowerCase() : "img/");
+const isImagePath = (rel: string, base: string) => {
+  const b = base ? `${base}/`.toLowerCase() : "";
+  const r = rel.toLowerCase();
+  return r.startsWith(`${b}img/`) || r.startsWith(`${b}rpg-viewer/pictures/`); // 기록 플러그인이 복사해 둔 그림도
+};
 
 /** 그림 파일의 크기·바이트 수. 앞 몇십 바이트만 읽는다(암호화 파일은 머리만 풀어 IHDR을 본다) */
 export function imageInfoOf(file: string): ImageInfo | undefined {
@@ -174,6 +178,8 @@ This folder is a **read-only masked mirror** of an RPG Maker game. The original 
   ASCII identifiers, numbers, paths and English code are kept. Line numbers in JS files match the original.
 - \`img/\`, \`audio/\`, \`movies/\` 아래 파일은 이름만 있는 **빈 파일**입니다.
   Files under \`img/\`, \`audio/\`, \`movies/\` are **empty placeholders** (names only).
+  \`rpg-viewer/pictures/\`(있으면)도 빈 파일입니다: 게임 폴더에 파일이 없는데 게임이 띄운 그림(게임 실행 파일 안에 묶인 그림)을 기록 플러그인이 복사해 둔 것입니다.
+  \`rpg-viewer/pictures/\` (if present) also holds placeholders: pictures packed inside the game exe that the recording plugin copied when shown.
 - 게임은 절대 고치지 않습니다. 고칠 점은 RPG-Viewer 저장소(adapters/ 등)에 만들고, 게임 이름·플러그인 이름·파일 이름은 토큰 그대로 씁니다
   (manifest의 match·spriteRoles, bridge.js) — 뷰어가 열린 게임에서 원래 글로 바꿉니다. 저장소 파일을 unmask하지 마세요.
   The game is never edited. Put fixes in the RPG-Viewer repo (adapters/ etc.) and write game/plugin/file names as tokens

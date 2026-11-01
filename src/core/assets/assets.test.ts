@@ -3,7 +3,7 @@ import type { GameData } from "@/core/types";
 import { loadGame } from "@/core/loader/loadGame";
 import { loadFixtureFolder } from "../../../tests/helpers/fixtureFolder";
 import { MemoryFolder, type GameFolder } from "@/core/fs/folder";
-import { AssetStore, RETRY_BACKOFF_MS } from "./assets";
+import { AssetStore, pictureCopyPath, RETRY_BACKOFF_MS } from "./assets";
 
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const head = async (b: Blob | null) => [...new Uint8Array(await b!.arrayBuffer()).slice(0, 8)];
@@ -169,9 +169,9 @@ describe("AssetStore missing vs failed", () => {
   it("caches missing (every extension absent) and does not read again", async () => {
     const s = await setup(async () => null);
     expect(await s.store.fetch("pictures", "nope")).toEqual({ status: "missing" });
-    expect(s.calls()).toBe(3);
+    expect(s.calls()).toBe(4);
     expect(await s.store.fetch("pictures", "nope")).toEqual({ status: "missing" });
-    expect(s.calls()).toBe(3);
+    expect(s.calls()).toBe(4);
   });
 
   it("does not cache read failures; reads again on the next request after the backoff", async () => {
@@ -226,5 +226,33 @@ describe("AssetStore missing vs failed", () => {
     expect(second.value).not.toBe(first.value);
     await second.value;
     second.release();
+  });
+});
+
+/** 게임 폴더에 없는 그림은 기록 플러그인(1.31.0)이 복사해 둔 rpg-viewer/pictures/<이름>.png로 보여준다. */
+describe("AssetStore picture copies", () => {
+  it("pictureCopyPath sits next to the game's data folder and never leaves it", () => {
+    expect(pictureCopyPath("www/data", "cut/in 1")).toBe("www/rpg-viewer/pictures/cut/in 1.png");
+    expect(pictureCopyPath("data", "a")).toBe("rpg-viewer/pictures/a.png");
+    expect(pictureCopyPath("data", "../a")).toBeNull();
+    expect(pictureCopyPath("data", "C:/a")).toBeNull();
+    expect(pictureCopyPath("data", "")).toBeNull();
+  });
+
+  it("falls back to the copy only when the picture file is missing", async () => {
+    const { data } = await open("sample-mv");
+    const mz = await open("sample-mz");
+    const png = new Uint8Array((await mz.folder.readBinary("img/faces/actor1.png"))!);
+    const other = new Uint8Array([...png, 0]);
+    const store = new AssetStore(new MemoryFolder({
+      "www/rpg-viewer/pictures/packed/cut.png": png,
+      "www/rpg-viewer/pictures/both.png": other,
+      "www/img/pictures/both.png": png,
+      "www/rpg-viewer/pictures/empty.png": new Uint8Array(0),
+    }), { ...data, system: { ...data.system, hasEncryptedImages: true } });
+    expect(new Uint8Array(await (await store.load("pictures", "packed/cut"))!.arrayBuffer())).toEqual(png);
+    expect(new Uint8Array(await (await store.load("pictures", "both"))!.arrayBuffer())).toEqual(png);
+    expect(await store.load("pictures", "empty")).toBeNull();
+    expect(await store.load("faces", "packed/cut")).toBeNull();
   });
 });

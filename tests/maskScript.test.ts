@@ -50,6 +50,9 @@ function makeGame(): string {
   const enc = Buffer.concat([Buffer.from([0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0]), pngHead(576, 288)]);
   for (let i = 16; i < 32; i++) enc[i] ^= 0x5a;
   fs.writeFileSync(path.join(g, "img/faces/Actor1.png_"), enc);
+  // 기록 플러그인(1.31.0)이 복사해 둔 그림(게임 실행 파일 안에 묶인 그림)
+  fs.mkdirSync(path.join(g, "rpg-viewer/pictures"), { recursive: true });
+  fs.writeFileSync(path.join(g, "rpg-viewer/pictures/秘密.png"), pngHead(100, 50));
   write(g, "save/file1.rmmzsave", "x");
   write(g, "index.html", "<html><head><title>アリスの冒険</title></head></html>");
   return g;
@@ -95,12 +98,15 @@ describe("mask-game", () => {
       "AI-README.md", "REPORT.md", "data/CommonEvents.json", "data/Map001.json", "data/MapInfos.json", "data/System.json",
       `img/pictures/${tokenOf("アリス")}.png`, "index.html", "js/plugins.js", plugin,
       "IMAGES.json", `img/faces/${tokenOf("アリス顔")}.png`, "img/faces/Actor1.png_",
+      `rpg-viewer/pictures/${tokenOf("秘密")}.png`,
     ].sort());
+    expect(fs.statSync(path.join(out, `rpg-viewer/pictures/${tokenOf("秘密")}.png`)).size).toBe(0);
     const images = JSON.parse(fs.readFileSync(path.join(out, "IMAGES.json"), "utf8"));
     expect(images).toEqual({
       "img/faces/Actor1.png_": { width: 576, height: 288, bytes: 49, cols: 4, rows: 2 },
       [`img/faces/${tokenOf("アリス顔")}.png`]: { width: 144, height: 144, bytes: 33, cols: 1, rows: 1 },
       [`img/pictures/${tokenOf("アリス")}.png`]: { bytes: 7 },
+      [`rpg-viewer/pictures/${tokenOf("秘密")}.png`]: { width: 100, height: 50, bytes: 33 },
     });
     expect(fs.readFileSync(path.join(out, "AI-README.md"), "utf8")).toContain("engine: MZ");
     expect(fs.readFileSync(path.join(out, "REPORT.md"), "utf8")).toContain("engine: MZ");

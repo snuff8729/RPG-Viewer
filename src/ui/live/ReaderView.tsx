@@ -37,6 +37,7 @@ import {
 import { ReaderItemView } from "./ReaderItemView";
 import { ReaderItemStateContext } from "./readerItemState";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
+import { isNearBottom, stillAtBottom } from "./stickToBottom";
 import { usePluginOverrides } from "./pluginDisplay";
 import { ReaderHideContext } from "./readerHide";
 import { compileHideRules, matchHide } from "@/core/live/hideRules";
@@ -268,13 +269,24 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     bottomRef.current = true;
     setAtBottom(true);
   }, []);
+  /** 우리가 위치를 옮긴 뒤(맨 위·항목으로 가기·다음 등) 지금 위치로 맨 아래 여부를 잰다 */
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
     const delta = el.scrollTop - previousTop.current;
     if (Math.abs(delta) > 1) scrollDirection.current = Math.sign(delta);
     previousTop.current = el.scrollTop;
-    bottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    bottomRef.current = isNearBottom(el);
+    setAtBottom(bottomRef.current);
+  }, []);
+  /** 스크롤 이벤트(사용자 스크롤, 또는 앞서 우리가 붙인 위치가 늦게 알려진 것): 위로 올렸을 때만 맨 아래에서 떨어진다 */
+  const onScrollEvent = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const delta = el.scrollTop - previousTop.current;
+    if (Math.abs(delta) > 1) scrollDirection.current = Math.sign(delta);
+    bottomRef.current = stillAtBottom(bottomRef.current, previousTop.current, el);
+    previousTop.current = el.scrollTop;
     setAtBottom(bottomRef.current);
   }, []);
   /** 항목을 읽기 영역 위쪽(margin px 아래)으로. 그 항목이 없으면 false */
@@ -701,7 +713,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         </Alert>
       )}
       <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} data-reader-scroll onScroll={onScroll} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className={cn("min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]", !screenShown && "[&_[data-reader-picture-row]]:hidden")}>
+      <div ref={scroller} data-reader-scroll onScroll={onScrollEvent} onWheel={arm} onTouchMove={arm} onPointerDown={arm} onKeyDown={arm} className={cn("min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]", !screenShown && "[&_[data-reader-picture-row]]:hidden")}>
         {/* 아래에 떠 있는 단추에 마지막 줄이 가리지 않게 아래 여백을 둔다 */}
         <div ref={content} className="mx-auto max-w-2xl space-y-4 px-2 pt-4 pb-20 text-base leading-relaxed">
           {empty ? (

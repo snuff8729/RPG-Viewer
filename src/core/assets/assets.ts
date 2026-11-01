@@ -24,6 +24,18 @@ function extensionsFor(data: GameData): string[] {
   return data.engine === "MZ" ? [".png_", ".rpgmvp", ".png"] : [".rpgmvp", ".png_", ".png"];
 }
 
+/**
+ * 기록 플러그인(1.31.0)이 복사해 둔 그림의 경로: <게임 바탕>/rpg-viewer/pictures/<이름>.png(평문 PNG).
+ * 이름이 폴더 밖으로 나갈 수 있으면(.. · 절대 경로 · 드라이브) null.
+ */
+export function pictureCopyPath(dataRoot: string, name: string): string | null {
+  if (typeof name !== "string" || name === "" || /[\0:]/.test(name)) return null;
+  const segs = name.replace(/\\/g, "/").split("/");
+  if (segs.some((s) => s === "" || s === "." || s === "..")) return null;
+  const base = dataRoot.split("/").filter((s) => s !== "" && s !== ".").slice(0, -1).join("/");
+  return `${base ? `${base}/` : ""}rpg-viewer/pictures/${segs.join("/")}.png`;
+}
+
 export interface AssetStoreOptions {
   now?: () => number;
   /** Decoded bytes (width * height * 4); active leases may temporarily exceed this. */
@@ -136,12 +148,33 @@ export class AssetStore {
     // 그림 하위 폴더 플러그인(BY_PictureClassify): 게임은 옮긴 경로에서 읽는다. 거기 없으면 이름 그대로도 본다.
     const moved = kind === "system" ? null : classifiedName(name, this.data.pictureFolders);
     let failed = false;
-    for (const n of moved !== null ? [moved, name] : [name]) {
+    const names = moved !== null ? [moved, name] : [name];
+    for (const n of names) {
       const r = await this.readAt(kind, n);
       if (r.status === "ok") return r;
       if (r.status === "failed") failed = true;
     }
+    // 게임 폴더에 없는 그림(게임 실행 파일 안에 묶인 그림 등): 기록 플러그인(1.31.0)이 게임에서 보일 때 복사해 둔 PNG
+    if (kind === "pictures") {
+      for (const n of names) {
+        const r = await this.readFile(pictureCopyPath(this.data.dataRoot, n));
+        if (r.status === "ok") return r;
+        if (r.status === "failed") failed = true;
+      }
+    }
     return failed ? { status: "failed" } : { status: "missing" };
+  }
+
+  private async readFile(path: string | null): Promise<AssetResult> {
+    if (path === null) return { status: "missing" };
+    let buf: ArrayBuffer | null;
+    try {
+      buf = this.folder.readBinaryStrict ? await this.folder.readBinaryStrict(path) : await this.folder.readBinary(path);
+    } catch {
+      return { status: "failed" };
+    }
+    const img = buf ? decodeImage(buf, this.data.system?.encryptionKey) : null;
+    return img ? { status: "ok", blob: new Blob([img.bytes], { type: img.type }) } : { status: "missing" };
   }
 
   private async readAt(kind: AssetKind, name: string): Promise<AssetResult> {

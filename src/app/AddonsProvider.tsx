@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useGame } from "./GameProvider";
 import { addonFileText, loadAddonFile, readAddonFolderFile, updateAddonFile } from "./addons";
+import { syncPictureWants } from "./pictureWants";
 import { isWritableFolder } from "@/core/fs/folder";
 import { addonControlFlags, type AddonId, type AddonState } from "@/core/addons/registry";
 import { cleanStoryProgress, type AddonFile } from "@/core/addons/settings";
@@ -100,6 +101,12 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
     return () => { cancelled = true; };
   }, [ready, folder, dataRoot, gameKey]);
+
+  // 게임을 열 때 한 번: 게임 폴더에 없는 그림 목록을 기록 플러그인에 넘긴다(rpg-viewer/missing-pictures.json, 쓸 수 있을 때만)
+  useEffect(() => {
+    if (!ready || !data || !folder) return;
+    void syncPictureWants(folder, data);
+  }, [ready, folder, data]);
 
   const current = loaded && loaded.key === gameKey ? loaded : null;
   const state = current?.file.state ?? EMPTY;

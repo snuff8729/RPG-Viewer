@@ -58,8 +58,10 @@ export interface DiagnosisReport {
 /**
  * img/ 아래 파일 목록. pictures: img/pictures 아래 그림 이름(확장자 뺌, 하위 폴더는 `폴더/이름`).
  * others: img/의 다른 폴더(pictures 말고)에 있는 그림 파일 이름(확장자·폴더 뺌). 없으면 다른 폴더를 보지 않은 것.
+ * copies: 기록 플러그인(1.31.0)이 rpg-viewer/pictures에 복사해 둔 그림 이름(.png 뺌, 하위 폴더는 `폴더/이름`) —
+ * 게임 폴더에 파일이 없는데 게임이 띄운 그림(게임 실행 파일 안에 묶인 그림 등).
  */
-export interface ImageListing { pictures: string[]; others?: string[] }
+export interface ImageListing { pictures: string[]; others?: string[]; copies?: string[] }
 
 /** 지금 이 게임의 설정(이미 켠 것은 추천하지 않는다) */
 export interface DiagnoseSettings {

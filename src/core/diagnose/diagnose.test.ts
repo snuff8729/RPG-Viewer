@@ -5,7 +5,7 @@ import type { LogRecord } from "../live/types";
 import { parseManifest, type AdapterManifest } from "../adapters/manifest";
 import type { CommonEvent, EventCommand, EventPage, GameData, MapData, PageConditions } from "../types";
 import {
-  attentionCount, diagnoseGame, gatherDiagnosisInput, parseLogText, recommendedActions, reportMarkdown, scanPluginSource,
+  attentionCount, diagnoseGame, gatherDiagnosisInput, parseLogText, pictureWants, pictureWantsText, recommendedActions, reportMarkdown, scanPluginSource,
   settingsOfAddonFile, type DiagnosisReport,
 } from "./index";
 
@@ -109,7 +109,7 @@ describe("diagnoseGame on a DOP-like synthetic game", () => {
   it("a picture missing from the whole game (all img/ folders) is only reported as ok", () => {
     const nowhere = diagnoseGame(g.data, g.plugins, { ...g.files, others: ["Actor1"] }, null, { pluginSources: g.pluginSources, adapters: g.adapters });
     expect(find(nowhere, "missing-pictures")).toMatchObject({
-      status: "ok", title: "게임에도 없는 그림 1개 — 게임에서 뺀 장면이라 뷰어에서도 빈 자리로 보여요",
+      status: "ok", title: "게임 폴더에 없는 그림 1개",
       evidence: ["missing_one (맵 1 이벤트 3(적2) p1)"],
     });
     // the same name in another img/ folder (or a pictures sub-folder) may be read from there by a plugin
@@ -194,7 +194,7 @@ describe("diagnoseGame with a play log", () => {
   });
 
   it("checks log pictures, plugin commands, sprite roles and battle lines", () => {
-    expect(find(report, "log-missing-pictures")?.evidence).toEqual(["ghost_pic ×1"]);
+    expect(find(report, "log-missing-pictures")).toMatchObject({ status: "needs-addon", action: { kind: "none" }, evidence: ["ghost_pic ×1"] });
     expect(find(report, "log-plugin-commands")?.evidence).toEqual(["WeirdCmd ×6"]);
     expect(find(report, "log-sprite-roles:stand")).toMatchObject({
       status: "needs-addon", action: { kind: "set-role", target: "sprite", keys: ["actor01_cutin_A"], role: "stand" },
@@ -202,6 +202,60 @@ describe("diagnoseGame with a play log", () => {
     expect(find(report, "log-sprite-unknown")?.evidence).toEqual(["mystery_layer"]);
     expect(find(report, "log-no-battle-lines")?.status).toBe("unknown");
     expect(report.used).toEqual({ log: true, files: true, pluginSources: true, logRecords: log.length });
+  });
+
+  it("pictures drawn in play whose file is missing are packed in the game; copies made by the plugin show them", () => {
+    const packed: LogRecord[] = [
+      rec({ type: "screen", scene: "map", pics: [[71, "missing_one", 1, 270, 300, 100, 100, 255, 0, 0, 0, 575, 375]] }),
+      rec({ type: "picture", src: null, cmd: 0, pictureId: 5, name: "ghost_pic" }),
+    ];
+    const files = { ...g.files, others: ["Actor1"] };
+    const opts = { pluginSources: g.pluginSources, adapters: g.adapters };
+    // no copies yet: the new plugin copies them once they are shown again
+    const old = diagnoseGame(g.data, g.plugins, files, packed, opts);
+    expect(find(old, "log-missing-pictures")).toMatchObject({
+      status: "needs-addon", action: { kind: "none" }, title: "게임 안에 묶인 그림 2개 — 아직 읽기에서 안 보여요",
+      evidence: ["missing_one ×1", "ghost_pic ×1"],
+    });
+    expect(find(old, "log-missing-pictures")?.detail).toContain("1.31.0 이상");
+    expect(find(old, "log-missing-pictures")?.detail).toContain("다음에 게임을 켤 때");
+    expect(recommendedActions(old).some(a => a.kind === "none")).toBe(false);
+    // the static rule no longer says the game lacks it; it points at the ones seen in play
+    const stat = find(old, "missing-pictures")!;
+    expect(stat).toMatchObject({ status: "ok", title: "게임 폴더에 없는 그림 1개" });
+    expect(stat.detail).not.toContain("고칠 것은 없어요");
+    expect(stat.evidence[0]).toBe("플레이 중에 보인 그림 1개 — 게임 안에 묶여 있어요");
+    // one copied (names match case-insensitively): only the other is left
+    const newer = diagnoseGame(g.data, g.plugins, { ...files, copies: ["MISSING_ONE"] }, packed, opts);
+    expect(find(newer, "log-missing-pictures")).toMatchObject({ status: "needs-addon", evidence: ["ghost_pic ×1"] });
+    expect(find(newer, "log-missing-pictures")?.detail).toContain("1개는 이미 복사해 뒀어요");
+    expect(find(newer, "missing-pictures")).toMatchObject({ status: "ok", title: "이벤트 그림을 모두 찾았어요" });
+    // every one copied: handled
+    const all = diagnoseGame(g.data, g.plugins, { ...files, copies: ["missing_one", "ghost_pic"] }, packed, opts);
+    expect(find(all, "log-missing-pictures")).toMatchObject({
+      status: "auto-fixed", title: "게임 안에 묶인 그림 2개", detail: "게임 안에 묶인 그림을 기록 플러그인이 복사해 둬서 보여줘요.",
+    });
+  });
+
+  it("pictureWants lists event and play-log pictures missing from the folder, minus copies", () => {
+    const data = { ...g.data, pictureFolders: [{ token: "cg_09", folder: "cg_09" }] };
+    const drawn = [rec({ type: "picture", src: null, cmd: 0, pictureId: 5, name: "ghost_pic" })];
+    expect(pictureWants(data, g.files, drawn)).toEqual(["ghost_pic", "missing_one"]);
+    expect(pictureWants(data, { ...g.files, copies: ["Missing_One"] }, drawn)).toEqual(["ghost_pic"]);
+    expect(pictureWants(data, null, drawn)).toEqual([]);
+    expect(pictureWantsText(["a"])).toBe('{"v":1,"pictures":["a"]}\n');
+  });
+
+  it("gathers the plugin's picture copies from rpg-viewer/pictures", async () => {
+    const folder = new MemoryFolder({
+      "www/data/System.json": "{}",
+      "www/img/pictures/a.png": new Uint8Array(0),
+      "www/rpg-viewer/pictures/cut.png": new Uint8Array(0),
+      "www/rpg-viewer/pictures/sub/b.png": new Uint8Array(0),
+      "www/rpg-viewer/pictures/note.txt": "x",
+    });
+    const input = await gatherDiagnosisInput(folder, g.data);
+    expect(input.files?.copies?.sort()).toEqual(["cut", "sub/b"]);
   });
 
   it("reports missing battles only after enough play", () => {

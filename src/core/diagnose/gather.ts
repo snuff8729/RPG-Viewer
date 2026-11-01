@@ -64,6 +64,20 @@ export async function listPictures(folder: GameFolder, imgRoot: string): Promise
   return { pictures: [...new Set(out)], others: [...others] };
 }
 
+/** 기록 플러그인(1.31.0)이 복사해 둔 그림 이름(rpg-viewer/pictures 아래 .png, 확장자 뺌, 하위 폴더 두 단계까지). 없으면 빈 목록. */
+export async function listPictureCopies(folder: GameFolder, logDir: string): Promise<string[]> {
+  const out: string[] = [];
+  const walk = async (dir: string, prefix: string, depth: number) => {
+    for (const n of await safe(folder.list(dir), [] as string[])) {
+      if (out.length >= PICTURE_MAX) return;
+      if (/\.png$/i.test(n)) out.push(prefix + n.slice(0, -4));
+      else if (!n.includes(".") && depth < 2) await walk(`${dir}/${n}`, `${prefix}${n}/`, depth + 1);
+    }
+  };
+  await walk(`${logDir}/pictures`, "", 0);
+  return out;
+}
+
 /** log.jsonl 본문 → 기록(못 읽는 줄은 버린다) */
 export function parseLogText(text: string | null | undefined): LogRecord[] {
   const out: LogRecord[] = [];
@@ -99,6 +113,7 @@ export async function gatherDiagnosisInput(
       if (typeof src === "string") out.pluginSources[name] = src.length > PLUGIN_SOURCE_MAX ? src.slice(0, PLUGIN_SOURCE_MAX) : src;
     }
     out.files = await safe(listPictures(folder, data.imgRoot), null);
+    if (out.files) out.files.copies = await safe(listPictureCopies(folder, p.logDir), [] as string[]);
     out.addonFile = parseAddonFile(await safe(folder.readText(`${p.logDir}/addons.json`), null));
     if (opts.readLog) {
       const text = await safe(folder.readText(p.logFile), null);
