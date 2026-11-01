@@ -31,8 +31,8 @@ export interface CheatSession {
   finder: VariableFinder;
 }
 
-/** initialTab = 처음 보일 치트 탭(items · actors · switches). 휴대폰은 변수(switches)부터. */
-export function useCheatSession(initialTab = "items"): CheatSession {
+/** initialTab = 처음 보일 치트 탭(variables · items · actors · switches). */
+export function useCheatSession(initialTab = "variables"): CheatSession {
   const data = useLiveData();
   const { live } = useLive();
   const { sendCheat } = useAssist();

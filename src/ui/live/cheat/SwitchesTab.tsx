@@ -299,7 +299,11 @@ const MODES: { value: FinderMode; label: string; switches?: boolean }[] = [
  * `스위치·변수` 탭(고급): 즐겨찾기·이름·번호(변수는 값·좁혀 찾기·최근 바뀜도)로 찾아 켜고 끄거나 값을 바꾼다.
  * 즐겨찾기가 있으면 즐겨찾기를 먼저 보여 준다.
  */
-export function SwitchesTab({ data, live, disabled, apply, finder }: CheatTabProps & { finder: VariableFinder }) {
+export function SwitchesTab({ data, live, disabled, apply, finder, fixedKind = false }: CheatTabProps & {
+  finder: VariableFinder;
+  /** 바깥 탭(변수 · 스위치)이 종류를 정하면 true: 안쪽 변수·스위치 고르기를 숨겨요 */
+  fixedKind?: boolean;
+}) {
   const { kind, setKind, mode } = finder;
   const [query, setQuery] = useState("");
   const names = kind === "switch" ? data.system.switches : data.system.variables;
@@ -312,10 +316,12 @@ export function SwitchesTab({ data, live, disabled, apply, finder }: CheatTabPro
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
+        {!fixedKind && (
         <ToggleGroup type="single" variant="outline" size="sm" value={kind} onValueChange={(v) => { if (v === "switch" || v === "variable") setKind(v); }}>
           <ToggleGroupItem value="variable">변수</ToggleGroupItem>
           <ToggleGroupItem value="switch">스위치</ToggleGroupItem>
         </ToggleGroup>
+        )}
         <Tabs value={mode} onValueChange={(v) => finder.setMode(v as FinderMode)}>
           <TabsList className="w-full">
             {modes.map((m) => (
