@@ -14,6 +14,8 @@ export const KNOWN_NOTICE_APIS: readonly { source: string; path: string; plugins
   { source: "toast", path: "jQuery.toaster", plugins: ["AXY_Toast"] },
   { source: "achievement", path: "Torigoya.Achievement.Manager.notify", plugins: ["Torigoya_Achievement"] },
   { source: "achievement", path: "Torigoya.Achievement2.manager.unlock", plugins: ["TorigoyaMZ_Achievement2"] },
+  // 1.30.0: WinGetInfo 획득 창(아이템·돈·변수 증가) — 늘 획득으로 기록
+  { source: "getinfo", path: "Game_Screen.prototype._showGetInfo", plugins: ["WinGetInfo"] },
 ];
 
 const PATH_RE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
@@ -59,6 +61,7 @@ export function noticePluginsOf(pluginsText: string | null | undefined): string[
 export function noticeSourceLabel(source: unknown): string {
   if (source === "ticker") return "티커";
   if (source === "toast") return "토스트 알림";
+  if (source === "getinfo") return "획득 알림";
   if (source === "achievement") return "업적";
   if (source === "html") return "화면 위 글(HTML)";
   if (source === "livecomment") return "코멘트";
@@ -88,7 +91,7 @@ export function classifyNotice(source: unknown, text: unknown, kind?: unknown): 
   if (kind === "gain" || kind === "quest" || kind === "achievement") return kind;
   if (source === "achievement") return "achievement";
   if (source === "quest") return "quest";
-  if (source === "gain") return "gain";
+  if (source === "gain" || source === "getinfo") return "gain";
   const t = typeof text === "string" ? text : "";
   if (ACHIEVEMENT_RE.test(t)) return "achievement";
   if (QUEST_RE.test(t)) return "quest";

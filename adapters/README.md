@@ -51,3 +51,5 @@
 - `ddaggeo-mode`: CallStand·CallCutin·Ticker 게임의 그림 구분 기본값.
 - `toast-achievement-notices`: AXY_Toast·Torigoya_Achievement 게임 — 알림 문구 기록을 켜서 획득·경험치·퀘스트 토스트와 업적 달성을 읽기에 보여줌(기록 플러그인 1.19.0+).
 - `by-work-element`: BYWorkElement·BY_Cosplay·BY_Scenes 게임 — 맵·전투 옆 주인공 스탠딩(`tachie/`)을 기록하도록 그림 따라 그리기를 켜고 구분 기본값을 줌(기록 플러그인 1.18.0+).
+- `adv-talk-system`: ADVTalkSystem 게임 — 대화 때 좌우에 자동으로 띄우는 스탠딩(그림 91·92번)을 기록하도록 그림 따라 그리기를 켜고 스탠딩으로 구분. 대사 첫 줄 이름을 화자로 보는 것은 `src/core/text/advTalk.ts`가 늘 처리.
+- `win-get-info`: WinGetInfo 게임 — 아이템·돈·변수 획득 창을 알림 문구 기록으로 남겨 읽기의 획득으로 보여줌(기록 플러그인 1.30.0+).

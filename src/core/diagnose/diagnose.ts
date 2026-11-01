@@ -113,6 +113,17 @@ function pictureResolver(files: ImageListing, rules: readonly FolderRule[]): (na
   };
 }
 
+/**
+ * 그림 이름(폴더 뺀 끝 이름)이 img/ 어디에도 없는가(pictures 하위 폴더 포함, 대소문자 무시).
+ * 다른 폴더 목록(others)을 보지 않았으면 null — 판단하지 않는다.
+ */
+function absentFromGame(files: ImageListing): ((name: string) => boolean) | null {
+  if (!Array.isArray(files.others)) return null;
+  const base = (n: string) => n.slice(n.lastIndexOf("/") + 1).toLowerCase();
+  const have = new Set([...arr<string>(files.pictures), ...files.others].map(n => base(String(n))));
+  return (name: string) => !have.has(base(name));
+}
+
 /** 플러그인 명령 기록의 이름 열쇠(MZ: 플러그인:명령, MV: 첫 낱말) */
 function pluginCommandKey(r: Extract<LogRecord, { type: "plugin" }>): { key: string; plugin: string | null } {
   if (typeof r.plugin === "string" && r.plugin) return { key: `${r.plugin}:${r.name ?? ""}`, plugin: r.plugin };
@@ -242,10 +253,19 @@ function run(
   step(() => {
     if (!resolves || scan.pictureRefs.size === 0) return;
     const missing = [...scan.pictureRefs].filter(([name]) => !resolves(name));
+    const nowhere = files ? absentFromGame(files) : null;
     push(missing.length === 0
       ? {
         id: "missing-pictures", area: "그림", status: "ok", title: "이벤트 그림을 모두 찾았어요",
         detail: `이벤트가 띄우는 그림 ${scan.pictureRefs.size}개가 모두 게임 폴더에 있어요.`, evidence: [],
+      }
+      : nowhere && missing.every(([name]) => nowhere(name))
+      ? {
+        // 그림 폴더 규칙으로도 못 찾고 img/ 어디에도 같은 이름이 없음: 게임 자체에 없는 그림(뺀 장면) — 알려주기만
+        id: "missing-pictures", area: "그림", status: "ok",
+        title: `게임에도 없는 그림 ${missing.length}개 — 게임에서 뺀 장면이라 뷰어에서도 빈 자리로 보여요`,
+        detail: "이벤트가 띄우는 그림인데 게임 폴더(img/ 아래 모든 폴더)에 같은 이름의 파일이 없어요. 게임에서도 보이지 않는 그림이라 고칠 것은 없어요.",
+        evidence: cap(missing.map(([name, at]) => `${name} (${at})`)),
       }
       : {
         id: "missing-pictures", area: "그림", status: "unknown", title: `이벤트 그림 ${missing.length}개를 찾지 못했어요`,

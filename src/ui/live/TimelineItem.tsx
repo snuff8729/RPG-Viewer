@@ -2,6 +2,7 @@ import { memo, useState, type ReactNode } from "react";
 import { branchLabel, representative } from "@/core/live/history";
 import type { HistoryItem, HistoryModel, LogRecord, RecordOf } from "@/core/live/types";
 import { formatText } from "@/core/text/escape";
+import { messageParts } from "@/core/text/advTalk";
 import type { GameData, Location } from "@/core/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,13 +71,14 @@ function Line({ ctx, src, cmd, uncertain, changed, rec, children }: { ctx: Timel
 }
 
 function MessageLine({ r, ctx, uncertain, changed }: { r: RecordOf<"message">; ctx: TimelineCtx; uncertain?: boolean; changed?: boolean }) {
+  const m = messageParts(r.speaker, r.text, ctx.data);
   return (
     <Line ctx={ctx} src={r.src} cmd={r.cmd} uncertain={uncertain} changed={changed} rec={r}>
       <div className="flex gap-3">
         <div className="size-10 shrink-0">{r.face && <FaceImage name={r.face} index={r.faceIndex} />}</div>
         <div className="min-w-0 flex-1">
-          {r.speaker && <div className="whitespace-pre-line font-semibold"><RichText text={r.speaker} data={ctx.data} colorsOnly /></div>}
-          <div className="whitespace-pre-line"><RichText text={r.text} data={ctx.data} /></div>
+          {m.speaker && <div className="whitespace-pre-line font-semibold"><RichText text={m.speaker} data={ctx.data} colorsOnly /></div>}
+          <div className="whitespace-pre-line"><RichText text={m.text} data={ctx.data} /></div>
         </div>
       </div>
     </Line>

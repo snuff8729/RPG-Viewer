@@ -47,7 +47,21 @@ export async function listPictures(folder: GameFolder, imgRoot: string): Promise
     }
   };
   await walk(root, "", top, 0);
-  return { pictures: [...new Set(out)] };
+  // 다른 img/ 폴더(faces·characters 등, 한 단계 하위 폴더까지)의 그림 이름: 빠진 그림이 게임 어디에도 없는지 보려고
+  const others = new Set<string>();
+  const imgTop = await safe(folder.list(imgRoot), [] as string[]);
+  const walkOther = async (dir: string, names: string[], depth: number) => {
+    for (const n of names) {
+      if (others.size >= PICTURE_MAX) return;
+      if (IMAGE_EXT.test(n)) others.add(n.replace(IMAGE_EXT, ""));
+      else if (!n.includes(".") && depth < 1) await walkOther(`${dir}/${n}`, await safe(folder.list(`${dir}/${n}`), [] as string[]), depth + 1);
+    }
+  };
+  for (const d of imgTop) {
+    if (d.includes(".") || d.toLowerCase() === "pictures") continue;
+    await walkOther(`${imgRoot}/${d}`, await safe(folder.list(`${imgRoot}/${d}`), [] as string[]), 0);
+  }
+  return { pictures: [...new Set(out)], others: [...others] };
 }
 
 /** log.jsonl 본문 → 기록(못 읽는 줄은 버린다) */

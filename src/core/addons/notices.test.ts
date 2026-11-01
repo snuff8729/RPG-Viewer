@@ -50,6 +50,12 @@ describe("notices add-on", () => {
     expect(noticePluginsOf("garbage")).toEqual([]);
   });
 
+  it("WinGetInfo popups: known plugin, labelled and always a gain", () => {
+    expect(noticePluginsOf(pluginsJs([{ name: "WinGetInfo", status: true, description: "", parameters: {} }]))).toEqual(["WinGetInfo"]);
+    expect(noticeSourceLabel("getinfo")).toBe("획득 알림");
+    expect(classifyNotice("getinfo", "\\I[5]무언가 x1")).toBe("gain");
+  });
+
   it("labels sources", () => {
     expect(noticeSourceLabel("ticker")).toBe("티커");
     expect(noticeSourceLabel("livecomment")).toBe("코멘트");

@@ -1,0 +1,10 @@
+{
+  "id": "adv-talk-system",
+  "label": "대화 스탠딩 (ADVTalkSystem)",
+  "description": "ADVTalkSystem을 쓰는 게임에 맞춘 설정이에요. 대화할 때 얼굴 그림 대신 좌우에 자동으로 띄우는 캐릭터 스탠딩(그림 91·92번)을 기록하도록 화면 그림 따라 그리기를 켜고, 그 두 자리를 스탠딩으로 봐요. 대사 첫 줄에 적힌 이름은 뷰어가 알아서 말하는 사람으로 보여줘요.",
+  "match": { "plugins": ["ADVTalkSystem"] },
+  "defaults": {
+    "addons": { "screenPictures": true },
+    "pictureRoles": { "91-92": "stand" }
+  }
+}
