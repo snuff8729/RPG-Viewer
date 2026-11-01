@@ -1,0 +1,9 @@
+{
+  "id": "win-get-info",
+  "label": "획득 알림 창 (WinGetInfo)",
+  "description": "WinGetInfo를 쓰는 게임에 맞춘 설정이에요. 아이템·무기·방어구·돈을 얻거나 변수가 늘 때 화면 아래에 잠깐 뜨는 획득 창을 알림 문구 기록으로 남겨, 읽기에서 획득으로 보여줘요. 기록 플러그인 1.30.0 이상이 필요해요.",
+  "match": { "plugins": ["WinGetInfo"] },
+  "defaults": {
+    "addons": { "notices": true }
+  }
+}
