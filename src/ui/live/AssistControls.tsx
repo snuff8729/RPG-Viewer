@@ -13,8 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { assistItemLabel, assistItemShortLabel, type AssistCommandItemId, type AssistFavoriteSlot } from "./assistItems";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  assistItemLabel, assistItemShortLabel, commandBlockReason, type AssistCommandItemId, type AssistFavoriteSlot,
+} from "./assistItems";
 import { useAssistGuards } from "./useAssistSession";
 
 /** sm = 게임 보조 창·위 줄(작게), lg = 휴대폰(크게 누르기 쉽게). 버튼·배속 고르기에만 적용된다. */
@@ -148,7 +152,24 @@ export function EncounterControl({ item, favorite, short, id = `assist-${item}` 
   );
 }
 
-const COMMAND_ICON: Partial<Record<AssistCommandItemId, LucideIcon>> = {
+/** 위쪽 막대의 켜고 끄기: 이름이 보이는 Toggle(켜지면 채움). 설정·쓸 수 있는 조건은 보조 모듈의 스위치와 같다. */
+export function AssistToggle({ item, size = "sm" }: { item: "skipSeen" | "autoFast" | EncounterItemId; size?: AssistControlSize }) {
+  const { settings, setSettings, supported } = useAssist();
+  const { encounterSupported } = useAssistGuards();
+  const encounter = item !== "skipSeen" && item !== "autoFast";
+  const disabled = !supported || (encounter && !encounterSupported) || (item === "skipKnownOnly" && !settings.skipBattles);
+  return (
+    <Toggle
+      variant="outline" size={size} disabled={disabled} pressed={settings[item]}
+      title={assistItemLabel(item)} aria-label={assistItemLabel(item)}
+      onPressedChange={(on) => setSettings({ ...settings, [item]: on })}
+    >
+      {assistItemShortLabel(item)}
+    </Toggle>
+  );
+}
+
+const COMMAND_ICON:Partial<Record<AssistCommandItemId, LucideIcon>> = {
   enemyHpFull: Heart, enemyHpLow: HeartCrack, hpFull: Heart, hpLow: HeartCrack,
   quickSave: Save, quickLoad: History, saveMenu: Save, loadMenu: FolderOpen,
 };
@@ -163,33 +184,40 @@ const CONFIRM: Partial<Record<AssistCommandItemId, { title: string; description:
  * 게임에 명령 하나를 보내는 버튼(이기기·지기·도망·적 체력·내 체력·세이브·로드).
  * 쓸 수 없을 때(전투 밖·플러그인 버전·도망 못 침)는 꺼지고, 지기(게임 오버 전투)·퀵 로드는 한 번 더 묻는다.
  */
-export function AssistCommandButton({ id, size = "sm", favorite, short }: ControlProps & { id: AssistCommandItemId }) {
+export function AssistCommandButton({ id, size = "sm", favorite, short, label, variant = "outline" }: ControlProps & {
+  id: AssistCommandItemId;
+  /** 이름을 바꿔 보일 때(전투 막대의 `내 체력 100%`) */
+  label?: string;
+  variant?: "outline" | "default";
+}) {
   const { sendCommand } = useAssist();
   const g = useAssistGuards();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const disabled = (() => {
-    switch (id) {
-      case "win": case "lose": return !g.inBattle;
-      case "escape": return !g.inBattle || !g.canEscape;
-      case "enemyHpFull": case "enemyHpLow": return !g.inBattle || !g.enemyHpSupported;
-      case "hpFull": case "hpLow": return !g.hpSupported;
-      case "quickSave": case "quickLoad": case "saveMenu": case "loadMenu": return !g.saveSupported;
-    }
-  })();
+  const reason = commandBlockReason(id, g);
+  const disabled = reason !== null;
   const confirm = CONFIRM[id];
   /** 지기는 게임 오버 전투일 때만 묻는다 */
   const ask = confirm !== undefined && (id !== "lose" || !g.canLose);
   const Icon = COMMAND_ICON[id];
+  const button = (
+    <Button
+      variant={variant} size={size} disabled={disabled} className={favorite ? "min-w-0 flex-1" : undefined}
+      title={!disabled && short && assistItemShortLabel(id) !== assistItemLabel(id) ? assistItemLabel(id) : undefined}
+      onClick={() => { if (ask) setConfirmOpen(true); else sendCommand(id); }}
+    >
+      {Icon && <Icon />}{label ?? (short ? assistItemShortLabel(id) : assistItemLabel(id))}
+    </Button>
+  );
   return (
     <>
       <WithFavorite favorite={favorite}>
-        <Button
-          variant="outline" size={size} disabled={disabled} className={favorite ? "min-w-0 flex-1" : undefined}
-          title={short && assistItemShortLabel(id) !== assistItemLabel(id) ? assistItemLabel(id) : undefined}
-          onClick={() => { if (ask) setConfirmOpen(true); else sendCommand(id); }}
-        >
-          {Icon && <Icon />}{short ? assistItemShortLabel(id) : assistItemLabel(id)}
-        </Button>
+        {disabled ? (
+          <Tooltip>
+            {/* 꺼진 버튼은 포인터를 받지 않아 감싼 칸이 Tooltip을 연다 */}
+            <TooltipTrigger asChild><span tabIndex={0} className={favorite ? "flex min-w-0 flex-1 *:flex-1" : "inline-flex"}>{button}</span></TooltipTrigger>
+            <TooltipContent>{reason}</TooltipContent>
+          </Tooltip>
+        ) : button}
       </WithFavorite>
       {confirm && (
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

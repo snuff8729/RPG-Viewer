@@ -9,7 +9,7 @@ import { livePaths } from "./installer";
 
 describe("assist favorites ids / defaults", () => {
   it("has the default top-bar list, all valid ids", () => {
-    expect(DEFAULT_ASSIST_FAVORITES).toEqual(["speed", "skipSeen", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow"]);
+    expect(DEFAULT_ASSIST_FAVORITES).toEqual(["speed", "skipSeen", "autoFast", "noRandomEncounter", "skipBattles"]);
     for (const id of DEFAULT_ASSIST_FAVORITES) expect(ASSIST_FAVORITE_IDS).toContain(id);
     expect(isAssistFavoriteId("backup")).toBe(true);
     expect(isAssistFavoriteId("walkSpeed")).toBe(true);
