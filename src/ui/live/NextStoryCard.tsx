@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronRight, Star } from "lucide-react";
+import { ChevronRight, Flag } from "lucide-react";
 import type { Confidence, StoryStep } from "@/core/story/nextStep";
 import { CONFIDENCE_LABEL, KIND_LABEL, pathText, stepTitle } from "@/core/story/format";
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +63,7 @@ export function NextStoryCard({ compact = false, action }: { compact?: boolean; 
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-1.5"><Star className="size-4" aria-hidden />{side ? "서브 미션" : "다음 스토리"}</CardTitle>
+        <CardTitle className="flex items-center gap-1.5"><Flag className="size-4" aria-hidden />{side ? "서브 미션" : "다음 스토리"}</CardTitle>
         {best && <CardAction><ConfidenceBadge c={best.confidence} /></CardAction>}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">

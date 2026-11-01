@@ -17,7 +17,9 @@ export function AssistPinToggle({ id, className }: { id: AssistFavoriteId; class
       <TooltipTrigger asChild>
         <Toggle
           size="sm" pressed={on} onPressedChange={() => toggleAssistFavorite(id)}
-          aria-label={`${assistFavoriteLabel(id)} ${terms.pinAssist}`} className={className}
+          aria-label={`${assistFavoriteLabel(id)} ${terms.pinAssist}`}
+          // 켜져도 칸을 채우지 않고 아이콘만 채워요(보조 카드에서 핀이 조작보다 튀지 않게)
+          className={cn("text-muted-foreground aria-pressed:bg-transparent aria-pressed:text-foreground data-[state=on]:bg-transparent data-[state=on]:text-foreground hover:aria-pressed:bg-muted", className)}
         >
           <Pin className={cn(on && "fill-current")} />
         </Toggle>
