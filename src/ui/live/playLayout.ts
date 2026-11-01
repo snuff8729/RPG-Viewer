@@ -37,3 +37,19 @@ export function saveToolTab(tab: ToolTab, store: KeyValueStore = safeStore()): v
   store.setItem(TOOL_TAB_KEY, tab);
 }
 
+/** 맵 칸 아래 목록의 탭(다음 스토리 / 해 볼 것) */
+export type BelowTab = "story" | "todo";
+export const isBelowTab = (v: unknown): v is BelowTab => v === "story" || v === "todo";
+
+const BELOW_TAB_KEY = "rpgv.play.belowTab";
+
+/** 마지막으로 고른 아래 목록 탭. 고른 적이 없거나 모르면 null(그때는 다음 스토리를 찾았는지로 정해요) */
+export function loadBelowTab(store: KeyValueStore = safeStore()): BelowTab | null {
+  const v = store.getItem(BELOW_TAB_KEY);
+  return isBelowTab(v) ? v : null;
+}
+
+export function saveBelowTab(tab: BelowTab, store: KeyValueStore = safeStore()): void {
+  store.setItem(BELOW_TAB_KEY, tab);
+}
+

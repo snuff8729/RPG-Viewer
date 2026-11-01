@@ -21,7 +21,6 @@ import { HereMapArea } from "./HereMapArea";
 import { HereNotConnected } from "./HereNotConnected";
 import { LEGEND_KEYS, legendKeyOf, useMapLegend, type LegendKey } from "./mapLegendState";
 import { openMissingFor } from "./missingFilter";
-import { NextStoryCard } from "./NextStoryCard";
 import { gameKeyOf } from "./readPosition";
 import { eventStyle, sectionStyle, storyStyle, type SectionStyle } from "./sectionStyle";
 import { placesToGo } from "./sidebarItems";
@@ -245,7 +244,7 @@ function OtherMaps() {
 }
 
 /**
- * 맵 아래 목록: 다음 스토리 카드 → 해 볼 것 N(구역별 묶음, 색 점 제목) → 이 맵에서 나오는 적 → 다른 맵.
+ * 맵 아래 목록의 해 볼 것 탭: 해 볼 것 N(구역별 묶음, 색 점 제목) → 이 맵에서 나오는 적 → 다른 맵.
  * 줄을 누르면 맵이 그 점으로, 맵 점을 누르면 목록이 그 줄로. 줄 `⋯`: 어떻게 하나요 / 찾아보기에서 보기.
  * onChoose = 줄을 고른 뒤(휴대폰에서 Drawer를 닫아 맵을 보이기).
  */
@@ -253,7 +252,6 @@ export function MapList({ onChoose, className }: { onChoose?: (ev: ChecklistEven
   const { here, rows } = usePlayMap();
   const [open, setOpen] = useState<Partial<Record<ChipKey, boolean>>>({});
   const [howTo, setHowTo] = useState<ChecklistEvent | null>(null);
-  const [storyHow, setStoryHow] = useState(false);
   const { checklist, selected } = here;
   if (!here.live || !checklist) return null;
   const groups = new Map<ChipKey, ChecklistEvent[]>(CHIP_KEYS.map((k) => [k, []]));
@@ -265,23 +263,7 @@ export function MapList({ onChoose, className }: { onChoose?: (ev: ChecklistEven
   const isOpen = (k: ChipKey) => (selectedGroup && chipOf(selectedGroup) === k) || (open[k] ?? !foldable[k]);
   return (
     <div className={cn("flex flex-col gap-4", className)}>
-      <NextStoryCard
-        compact
-        action={<Button variant="outline" size="sm" className="self-start" onClick={() => setStoryHow(true)}>어떻게 하나요</Button>}
-      />
-      <Sheet open={storyHow} onOpenChange={setStoryHow}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>어떻게 하나요</SheetTitle>
-            <SheetDescription>다음 스토리로 가려면 먼저 할 일과 가는 길이에요.</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-4"><NextStoryCard /></div>
-        </SheetContent>
-      </Sheet>
-      <section className="flex flex-col gap-3">
-        <h3 className="flex items-center gap-2 px-1 text-sm font-semibold">
-          {terms.todo(checklist.remaining)}
-        </h3>
+      <section className="flex flex-col gap-3" aria-label={terms.todo(checklist.remaining)}>
         {checklist.events.length === 0 && <p className="px-1 text-xs text-muted-foreground">이 맵에는 볼 만한 이벤트가 없어요</p>}
         {checklist.events.length > 0 && checklist.remaining === 0 && <p className="px-1 text-xs text-muted-foreground">이 맵에서 할 것을 다 했어요</p>}
         {CHIP_KEYS.map((k) => {

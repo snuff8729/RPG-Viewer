@@ -69,7 +69,8 @@ export function useHereMap() {
     : undefined;
 
   // 다음 스토리: 이 맵에 갈 곳이 있으면 별, 아니면 그쪽 출구(이쪽으로)와 그곳까지 가는 길
-  const { story: nextStory } = useNextStory();
+  const next = useNextStory();
+  const nextStory = next.story;
   const mark = mapId != null ? storyMark(nextStory?.steps[0], mapId) : null;
   const markKey = mark ? `${mark.kind}:${mark.eventId}:${mark.x},${mark.y}` : "";
   const storyRoute = useMemo(() => {
@@ -89,7 +90,7 @@ export function useHereMap() {
 
   return {
     live, checklist, tilesState, tiles, current, listed, numbers, selected, select, route, routeText,
-    avoidEnemies, setAvoidEnemies, story,
+    avoidEnemies, setAvoidEnemies, story, next,
   };
 }
 
