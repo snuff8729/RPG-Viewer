@@ -191,6 +191,47 @@ describe("cut-ins (pictures shown and erased between messages)", () => {
     const b = read(few, new Map([[few[5].seq, rich]]));
     expect(b.map(i => i.kind)).toEqual(["battlelog", "screen", "battlelog"]);
   });
+
+  it("battle: a cut-in over a layered battle picture is not replaced by one screen record of it", () => {
+    // a common event redraws a layered character (body/face/clothes) in battle; another shows an animated cut-in over it,
+    // and the bridge captures the whole screen once during the animation
+    const v = (x = 0, y = 0) => ({ origin: 0, x, y, scaleX: 100, scaleY: 100, opacity: 255, blend: 0 });
+    const layered = (t: number, face: string) => [
+      pic(20, 0, 33, "Battle_Back", t, v()), pic(20, 1, 45, "Hero_Base", t, v(400, 0)),
+      pic(20, 2, 51, face, t, v(400, 0)), pic(20, 3, 55, "Hero_Cloth", t, v(400, 0)),
+    ];
+    let recs: LogRecord[] = [
+      ...start(),
+      R({ type: "battle", phase: "start", troopId: 1, troopName: "Goblin" }),
+      ...layered(900, "Hero_Face"),
+      log("Hero attacks!", 1000),
+      pic(21, 0, 51, "Hero_Hurt", 1100, v(400, 0)),
+      pic(22, 0, 75, "Insert_0001", 1101, v(100, 100)),
+      pic(22, 1, 75, "Insert_0002", 1151, v(100, 100)),
+      R({ type: "screen", scene: "battle", pics: [] }, 1160),
+      pic(22, 2, 75, "Insert_0003", 1201, v(100, 100)),
+      pic(22, 3, 75, "", 1300, { op: "erase" }),
+      log("Goblin attacks Hero!", 1400),
+      R({ type: "battle", phase: "end", troopId: 1, result: "win" }, 1500),
+    ];
+    recs = recs.map((r, i) => ({ ...r, seq: i + 1 }) as LogRecord);
+    const screenSeq = recs.find(r => r.type === "screen")!.seq;
+    const p = (id: number, name: string, x = 0, y = 0) => ({ id, name, origin: 0, x, y, scaleX: 100, scaleY: 100, opacity: 255, blendMode: 0 });
+    // the screen record: the whole battle picture plus one frame of the cut-in (more layers than any cut-in frame)
+    const shot = { cg: [p(33, "Battle_Back"), p(45, "Hero_Base", 400), p(51, "Hero_Hurt", 400), p(55, "Hero_Cloth", 400), p(75, "Insert_0002", 100, 100)], stand: [] };
+    const items = read(recs, new Map([[screenSeq, shot]]));
+    const battle = items.find(i => i.kind === "battle");
+    expect(battle?.kind === "battle" && battle.items.map(i => i.kind)).toEqual(["battlelog", "cutin", "battlelog"]);
+    const [cut] = cutins(items);
+    expect(cut.frames.map(names)).toEqual(["Insert_0001", "Insert_0002", "Insert_0003"]);
+    expect(cut.motion?.frames.length).toBeGreaterThan(1);
+    // a screen record that has more cut-in layers than the stack knows (a plugin-drawn sprite) still wins
+    const sprite = { ...p(1000, "Insert_Glow", 100, 100), kind: "sprite" as const };
+    const richer = { cg: [...shot.cg, sprite, { ...sprite, id: 1001, name: "Insert_Spark" }], stand: [] };
+    const kept = read(recs, new Map([[screenSeq, richer]]));
+    const b2 = kept.find(i => i.kind === "battle");
+    expect(b2?.kind === "battle" && b2.items.map(i => i.kind)).toEqual(["battlelog", "screen", "battlelog"]);
+  });
 });
 
 describe("cutinRuns", () => {

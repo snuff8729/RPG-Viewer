@@ -7,7 +7,7 @@ import { branchPath, buildHistory, foldTimeline } from "./history";
 import { parseLogText } from "./log";
 import { lastSeqOf, readerItems, type ReaderItem } from "./reader";
 import { choiceFlow } from "./choiceFlow";
-import { battleActionLabel, stripLineTags } from "./battleLine";
+import { battleActionLabel, shownWhenLogFolded, stripLineTags } from "./battleLine";
 import type { Coverage, HistoryItem, LogRecord } from "./types";
 import { readStats } from "../../ui/live/readerWindow";
 import { filterItems } from "../../ui/live/historyFilter";
@@ -217,6 +217,20 @@ describe("battle action lines (1.8.1)", () => {
     expect(a).toEqual({ by: "", item: "할퀴기", itemKind: "skill", enemy: false, targets: [] });
     expect(battleActionLabel(a)).toBe("기술: 할퀴기");
     expect(out[1]).not.toHaveProperty("action");
+  });
+
+  it("with the battle log folded, who-used-what-on-whom lines and notices still show; damage/state lines do not", () => {
+    const out = logOf([
+      bs(1), start(2),
+      line(3, "고블린 A의 할퀴기!", { kind: "action", by: "고블린 A", isEnemy: true, item: "할퀴기", itemKind: "skill", targets: ["주인공"] }),
+      line(4, "주인공에게 12의 피해!"),
+      line(5, "<SIMPLE>할퀴기"),
+      end(6, "win"),
+    ]);
+    expect(out.map(shownWhenLogFolded)).toEqual([true, false, true]);
+    expect(shownWhenLogFolded({ kind: "notice" })).toBe(true);
+    expect(shownWhenLogFolded({ kind: "message" })).toBe(false);
+    expect(shownWhenLogFolded(null as never)).toBe(false);
   });
 
   it("battles with the same lines but different users are not folded as repeats", () => {

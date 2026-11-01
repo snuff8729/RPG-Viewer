@@ -375,7 +375,7 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
   /**
    * 구간 끝(경계 기록 앞, 목록 끝이면 boundary null): 예전 기록에서 다음 대사 전에 지운 그림을 지우고(withOldErases),
    * 잠깐 띄웠다 지운 그림을 컷인 항목으로 넣는다. 같은 그림을 보인 화면 항목은 겹이 더 많은 쪽만 남긴다
-   * (화면 기록이 컷인의 가장 완전한 장면보다 겹이 많으면 화면 기록을, 아니면 컷인을).
+   * (화면 기록이 컷인의 가장 완전한 장면보다 컷인 쪽 겹이 많으면 화면 기록을, 아니면 컷인을 — cutinLayersOf).
    */
   const finishSegment = (out: ReaderItem[], boundary: LogRecord | null, open = false) => {
     const s = st.seg;
@@ -393,7 +393,8 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
       const names = new Set(run.frames.flatMap(f => f.pictures.map(p => p.name)));
       const related = s.screens.filter(x => x.item.kind === "screen" && x.item.screen.pictures.some(p => names.has(p.name)));
       const layers = run.frames[run.best]?.pictures.length ?? 0;
-      if (related.some(x => x.bridge && x.item.kind === "screen" && x.item.screen.pictures.length > layers)) continue;
+      const ids = new Set(run.frames.flatMap(f => f.pictures.map(p => p.id)));
+      if (related.some(x => x.bridge && x.item.kind === "screen" && cutinLayersOf(x.item, ids, s.start, steps) > layers)) continue;
       for (const x of related) {
         const i = x.out.indexOf(x.item);
         if (i >= 0) x.out.splice(i, 1);
@@ -402,7 +403,10 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
       const cutin: Extract<ReaderItem, { kind: "cutin" }> = { kind: "cutin", key: `k${run.first}`, seq: run.last, frames: run.frames, best: run.best };
       const motion = cutinMotion(s.start, steps, run.first, run.last, run.frames, data);
       if (motion) cutin.motion = motion;
-      out.push(cutin);
+      // 컷인이 끝난 뒤에 넣은 화면 항목(아직 이어지는 끝 등)보다 앞에
+      const later = s.screens.find(x => x.out === out && x.item.kind === "screen" && x.item.seq > run.last && out.includes(x.item));
+      if (later) out.splice(out.indexOf(later.item), 0, cutin);
+      else out.push(cutin);
     }
   };
   const battles = opts?.battles !== false;
@@ -615,6 +619,31 @@ export class ReaderItemsBuilder {
 
 /** 컷인 구간을 끝내는 기록(대사·스크롤 글·선택지·고른 선택·전투 로그 줄·장소 이동·갈래 시작·전투) */
 const SEGMENT_BOUNDARY = new Set<string>(["message", "scroll", "choices", "choice", "battlelog", "transfer", "branchStart", "battle"]);
+
+/**
+ * 컷인 장면과 견줄 화면 기록의 겹 수: 컷인 그림 번호(ids)의 것, 플러그인이 띄운 그림, 그때 다시 쌓은 그림 묶음에 같은 번호·이름으로
+ * 없는 것만 센다. 묶음에 그대로 있는 컷인 아닌 그림(전투 중 계속 다시 그리는 배경·캐릭터 등)은 컷인 장면이 일부러 빼는 것이라
+ * 세지 않는다 — 그런 겹이 많다고 움직이는 컷인을 화면 기록 한 장(움직임 중 한 순간)으로 바꾸지 않게.
+ */
+function cutinLayersOf(
+  item: Extract<ReaderItem, { kind: "screen" }>, ids: ReadonlySet<number>,
+  start: ReadonlyMap<number, StackPicture>, steps: CutinStep[],
+): number {
+  try {
+    let stack = start;
+    for (const s of steps) {
+      if (s.rec.seq > item.seq) break;
+      stack = s.stack;
+    }
+    let n = 0;
+    for (const p of item.screen.pictures) {
+      if (p.kind === "sprite" || ids.has(p.id) || stack.get(p.id)?.name !== p.name) n++;
+    }
+    return n;
+  } catch {
+    return item.screen?.pictures?.length ?? 0;
+  }
+}
 
 /** 보일 그림들의 투명도 합(같은 그림 중 더 진한 모습 고르기) */
 function opacitySum(shot: ScreenShot): number {

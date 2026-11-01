@@ -45,6 +45,14 @@ export function battleActionOf(r: RecordOf<"battlelog">, data: GameData): Battle
   return item ? { by: "", item, itemKind: "skill", enemy: false, targets: [] } : null;
 }
 
+/**
+ * 전투 기록을 접어 둬도 보이는 줄인가: 누가 무엇을 누구에게 쓴 줄(action)과 알림 문구.
+ * 피해·상태 줄 등 나머지는 펼쳤을 때만(그 줄의 화면 그림은 접혀 있어도 보인다).
+ */
+export function shownWhenLogFolded(line: { kind: string; action?: BattleAction | null }): boolean {
+  return line?.kind === "notice" || (line?.kind === "battlelog" && !!line.action);
+}
+
 /** 사용 줄의 한 줄 글: `{쓴 쪽}: {이름}`(쓴 쪽을 모르면 `기술: {이름}`) */
 export function battleActionLabel(a: BattleAction): string {
   return `${a.by || (a.itemKind === "item" ? "아이템" : "기술")}: ${a.item}`;
