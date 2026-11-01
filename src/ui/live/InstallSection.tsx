@@ -5,6 +5,8 @@ import type { InstallStatus } from "@/core/live/installer";
 import { installResultText } from "./connectionGuide";
 import { fsAccessSupport, type FsAccessWindow } from "../fsAccess";
 import { formatBytes } from "./formatBytes";
+import { pluginNeedsAction } from "../manageAttention";
+import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,8 +66,23 @@ export function InstallSection() {
     }
   };
 
+  const needed = supported && pluginNeedsAction(install);
+
   return (
     <div className="space-y-4">
+      {needed && (
+        <Alert className="flex items-center gap-2 border-warning/50 bg-warning/10">
+          <span aria-hidden className="text-warning">
+            <TriangleAlert className="size-4" />
+          </span>
+          <AlertDescription className="min-w-0 flex-1 text-foreground">
+            {outdated ? "기록 플러그인을 업데이트해 주세요." : "기록 플러그인이 필요해요."}
+          </AlertDescription>
+          <Button size="sm" disabled={busy} onClick={() => void run("install")}>
+            {outdated ? "업데이트" : "설치"}
+          </Button>
+        </Alert>
+      )}
       {!supported ? (
         <Alert>
           <AlertDescription>{access.message ?? "크롬이나 엣지에서 폴더 열기로 연 게임만 지원해요"}</AlertDescription>
@@ -93,9 +110,9 @@ export function InstallSection() {
           )}
         </div>
       )}
-      {supported && install && install.state !== "unsupported" && (
+      {supported && installed && (
         <div className="flex flex-wrap gap-2">
-          {installed && (
+          {
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="destructive" disabled={busy}>
@@ -117,17 +134,7 @@ export function InstallSection() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          )}
-          {!installed && (
-            <Button disabled={busy} onClick={() => void run("install")}>
-              설치
-            </Button>
-          )}
-          {outdated && (
-            <Button disabled={busy} onClick={() => void run("install")}>
-              업데이트
-            </Button>
-          )}
+          }
         </div>
       )}
     </div>

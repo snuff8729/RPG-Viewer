@@ -1,10 +1,10 @@
 import { isRemoteView } from "@/app/share";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ChevronDown, ClipboardCopy, RefreshCw, Wand2 } from "lucide-react";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
 import {
-  attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, type DiagnoseFinding, type DiagnoseStatus,
+  attentionCount, DIAGNOSE_AREAS, needsAttention, recommendedActions, reportMarkdown, type DiagnoseFinding, type DiagnoseStatus,
 } from "@/core/diagnose";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { Skeleton } from "@/components/ui/skeleton";
 import { AiHandoff } from "./AiHandoff";
 import { useApplyDiagnosis } from "./useApplyDiagnosis";
+import type { SectionAttention } from "@/ui/manageAttention";
 
 const LABEL: Record<DiagnoseStatus, string> = { ok: "괜찮아요", "auto-fixed": "자동 처리", "needs-addon": "확인 필요", unsupported: "문제", unknown: "확인 필요" };
 
@@ -21,13 +22,14 @@ const BADGE: Record<DiagnoseStatus, "success" | "secondary" | "destructive" | "w
   ok: "success", "auto-fixed": "secondary", "needs-addon": "warning", unsupported: "destructive", unknown: "warning",
 };
 
-function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => void; busy: boolean }) {
+function FindingItem({ f, onApply, busy, area }: { f: DiagnoseFinding; onApply: () => void; busy: boolean; area?: boolean }) {
   const canApply = f.status === "needs-addon" && !!f.action && f.action.kind !== "none";
   return (
     <Item variant="outline" size="sm" className="items-start">
       <ItemContent>
         <ItemTitle className="flex flex-wrap items-center gap-2">
           <Badge variant={BADGE[f.status]}>{LABEL[f.status]}</Badge>
+          {area && <Badge variant="outline">{f.area}</Badge>}
           {f.title}
         </ItemTitle>
         <ItemDescription className="line-clamp-none">{f.detail}</ItemDescription>
@@ -56,7 +58,7 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
 }
 
 /** `게임 진단` 화면: 이 게임에서 특별한 것과 뷰어가 할 일 */
-export function DiagnoseView() {
+export function DiagnoseView({ need, top }: { need?: SectionAttention; top?: ReactNode }) {
   const { report, loading, rerun } = useDiagnosis();
   const apply = useApplyDiagnosis();
   const [busy, setBusy] = useState(false);
@@ -64,6 +66,7 @@ export function DiagnoseView() {
   if (!report) {
     return (
       <div className="flex flex-col gap-3">
+        {top}
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-40 w-full" />
         {!loading && <p className="text-sm text-muted-foreground">게임을 열면 진단해요.</p>}
@@ -72,7 +75,9 @@ export function DiagnoseView() {
   }
 
   const actions = recommendedActions(report);
-  const n = attentionCount(report);
+  const n = need?.count ?? attentionCount(report);
+  const variant = need?.variant ?? (report.findings.some((f) => f.status === "unsupported") ? "destructive" : "warning");
+  const pending = report.findings.filter((f) => needsAttention(f.status));
   const run = (list: typeof actions) => {
     setBusy(true);
     void apply(list)
@@ -91,7 +96,15 @@ export function DiagnoseView() {
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{n > 0 ? `확인할 것 ${n}개` : "특별히 확인할 것이 없어요"}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {n > 0 ? (
+              <>
+                확인할 것<Badge variant={variant}>{n}개</Badge>
+              </>
+            ) : (
+              "특별히 확인할 것이 없어요"
+            )}
+          </CardTitle>
           <CardDescription>
             게임 데이터와 플러그인을 스스로 살펴본 결과예요.
             {report.used.log
@@ -110,8 +123,23 @@ export function DiagnoseView() {
           {isRemoteView() ? <p className="w-full text-sm text-muted-foreground">AI 기능은 PC에서 해 주세요.</p> : <div className="flex w-full flex-col gap-2"><p className="text-sm text-muted-foreground">AI에게 맡기기는 가린 사본을 만들고, AI 답변 풀어보기는 가린 글을 원래 글로 바꿔요.</p><div className="flex flex-wrap gap-2"><AiHandoff /></div></div>}
         </CardContent>
       </Card>
+      {top}
+      {pending.length > 0 && (
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>먼저 살펴볼 것</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ItemGroup className="gap-2">
+              {pending.map((f) => (
+                <FindingItem key={f.id} f={f} area busy={busy} onApply={() => { if (f.action) run([f.action]); }} />
+              ))}
+            </ItemGroup>
+          </CardContent>
+        </Card>
+      )}
       {DIAGNOSE_AREAS.map((area) => {
-        const list = report.findings.filter((f) => f.area === area);
+        const list = report.findings.filter((f) => f.area === area && !needsAttention(f.status));
         if (list.length === 0) return null;
         return (
           <Card key={area} size="sm">

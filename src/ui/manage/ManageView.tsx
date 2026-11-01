@@ -14,6 +14,8 @@ import { GameSettingsSection } from "@/ui/addons/GameSettingsSection";
 import { DiagnoseView } from "@/ui/diagnose/DiagnoseView";
 import { GameActions } from "@/ui/GameActions";
 import { useLoadErrors } from "@/ui/useLoadErrors";
+import { useManageAttention } from "@/ui/useManageAttention";
+import { Badge } from "@/components/ui/badge";
 import { ConnectionSection } from "./ConnectionSection";
 
 const sections: Record<ManageSection, { title: string; description: string; pc?: boolean }> = {
@@ -46,24 +48,27 @@ function AppearanceSection() {
 }
 function DiagnosisSection() {
   const errors = useLoadErrors();
+  const need = useManageAttention().sections.diagnose;
   return (
-    <div className="space-y-4">
-      {errors.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTitle>불러오기 오류 {errors.length}개가 있어요</AlertTitle>
-          <AlertDescription>
-            <ul className="space-y-1 break-all">
-              {errors.map((e, i) => (
-                <li key={i}>
-                  {e.file}: {casual(e.message)}
-                </li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
-      <DiagnoseView />
-    </div>
+    <DiagnoseView
+      need={need}
+      top={
+        errors.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTitle>불러오기 오류 {errors.length}개가 있어요</AlertTitle>
+            <AlertDescription>
+              <ul className="space-y-1 break-all">
+                {errors.map((e, i) => (
+                  <li key={i}>
+                    {e.file}: {casual(e.message)}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )
+      }
+    />
   );
 }
 export function ManageView({ section }: { section?: ManageSection }) {
@@ -71,20 +76,31 @@ export function ManageView({ section }: { section?: ManageSection }) {
   const remote = isRemoteView();
   const active = section ?? (compact ? null : "connection");
   const item = active ? sections[active] : null;
+  const attention = useManageAttention();
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 min-[900px]:flex-row min-[900px]:p-6">
       {(!compact || !active) && (
         <nav aria-label="관리 섹션" className="flex shrink-0 flex-col gap-1 min-[900px]:w-48">
-          {MANAGE_SECTIONS.map((s) => (
-            <Button
-              key={s}
-              asChild
-              variant={active === s ? "secondary" : "ghost"}
-              className={`justify-start ${remote && sections[s].pc ? "text-muted-foreground" : ""}`}
-            >
-              <a href={`#/manage/${s}`}>{sections[s].title}</a>
-            </Button>
-          ))}
+          {MANAGE_SECTIONS.map((s) => {
+            const need = attention.sections[s];
+            return (
+              <Button
+                key={s}
+                asChild
+                variant={active === s ? "secondary" : "ghost"}
+                className={`justify-start ${remote && sections[s].pc ? "text-muted-foreground" : ""}`}
+              >
+                <a href={`#/manage/${s}`}>
+                  {sections[s].title}
+                  {need && (
+                    <Badge variant={need.variant} className="ml-auto" aria-label={`확인할 것 ${need.count}개`}>
+                      {need.count}
+                    </Badge>
+                  )}
+                </a>
+              </Button>
+            );
+          })}
         </nav>
       )}
       {active && item && (
