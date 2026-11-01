@@ -23,7 +23,7 @@ const sections: Record<ManageSection, { title: string; description: string; pc?:
   backups: { title: terms.backups, description: "세이브를 따로 남기고 필요할 때 복원해요.", pc: true },
   share: { title: terms.share, description: "같은 와이파이의 휴대폰에서 이 게임을 봐요.", pc: true },
   settings: { title: terms.settings, description: "이 게임에 필요한 기록과 표시 방법을 정해요." },
-  diagnose: { title: terms.diagnose, description: "불러오기 오류와 확인할 설정을 살펴봐요." },
+  diagnose: { title: terms.diagnose, description: "이 게임을 뷰어가 잘 읽는지 확인해요." },
   appearance: { title: terms.appearance, description: "이 기기에서 사용할 화면 테마를 골라요." },
   games: { title: terms.games, description: "다른 게임을 열거나 지금 게임을 고정해요.", pc: true },
 };
