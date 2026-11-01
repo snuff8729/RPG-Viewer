@@ -1,11 +1,12 @@
 import { useLive } from "@/app/LiveProvider";
 import { isRemoteView } from "@/app/share";
 import { terms } from "@/ui/terms";
+import type { ConnectionState } from "./connectionGuide";
 
 export function useConnectionStatus() {
   const { connection, supported, install, caughtUp } = useLive();
   const remote = isRemoteView();
-  const state =
+  const state: ConnectionState =
     !supported || install?.state === "unsupported"
       ? "unsupported"
       : install === null

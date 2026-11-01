@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy } from "lucide-react";
+import { Copy } from "lucide-react";
+import { toast } from "sonner";
 import { useGame } from "@/app/GameProvider";
 import {
   DEFAULT_SHARE_DAYS,
@@ -46,12 +47,6 @@ function QrImage({ url }: { url: string }) {
 }
 
 function CopyUrl({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const id = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(id);
-  }, [copied]);
   return (
     <InputGroup>
       <InputGroupInput readOnly value={url} aria-label="휴대폰에서 열 주소" onFocus={(e) => e.target.select()} />
@@ -62,11 +57,11 @@ function CopyUrl({ url }: { url: string }) {
           onClick={() => {
             void navigator.clipboard
               .writeText(url)
-              .then(() => setCopied(true))
-              .catch(() => {});
+              .then(() => toast.success("주소를 복사했어요"))
+              .catch(() => toast.error("복사하지 못했어요. 브라우저가 클립보드를 막았을 수 있어요."));
           }}
         >
-          {copied ? <Check /> : <Copy />}
+          <Copy />
         </InputGroupButton>
       </InputGroupAddon>
     </InputGroup>

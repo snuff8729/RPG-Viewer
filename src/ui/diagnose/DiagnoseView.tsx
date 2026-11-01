@@ -1,11 +1,11 @@
 import { isRemoteView } from "@/app/share";
 import { useState } from "react";
+import { toast } from "sonner";
 import { ChevronDown, ClipboardCopy, RefreshCw, Wand2 } from "lucide-react";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
 import {
   attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, type DiagnoseFinding, type DiagnoseStatus,
 } from "@/core/diagnose";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,7 +59,6 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
 export function DiagnoseView() {
   const { report, loading, rerun } = useDiagnosis();
   const apply = useApplyDiagnosis();
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!report) {
@@ -76,17 +75,16 @@ export function DiagnoseView() {
   const n = attentionCount(report);
   const run = (list: typeof actions) => {
     setBusy(true);
-    setNote(null);
     void apply(list)
-      .then((msg) => setNote({ ok: true, text: msg ?? "추천 설정을 적용했어요. 켠 뒤에 나오는 장면부터 기록돼요." }))
-      .catch(() => setNote({ ok: false, text: "설정을 적용하지 못했어요." }))
+      .then((msg) => toast.success(msg ?? "추천 설정을 적용했어요. 켠 뒤에 나오는 장면부터 기록돼요.", { className: "whitespace-pre-line" }))
+      .catch(() => toast.error("설정을 적용하지 못했어요."))
       .finally(() => setBusy(false));
   };
   const copy = () => {
     const text = reportMarkdown(report);
     void navigator.clipboard.writeText(text)
-      .then(() => setNote({ ok: true, text: "개발용 보고서를 복사했어요. Claude Code에 붙여 넣으면 돼요." }))
-      .catch(() => setNote({ ok: false, text: "복사하지 못했어요. 브라우저가 클립보드를 막았을 수 있어요." }));
+      .then(() => toast.success("개발용 보고서를 복사했어요. Claude Code에 붙여 넣으면 돼요."))
+      .catch(() => toast.error("복사하지 못했어요. 브라우저가 클립보드를 막았을 수 있어요."));
   };
 
   return (
@@ -112,11 +110,6 @@ export function DiagnoseView() {
           {isRemoteView() ? <p className="w-full text-sm text-muted-foreground">AI 기능은 PC에서 해 주세요.</p> : <div className="flex w-full flex-col gap-2"><p className="text-sm text-muted-foreground">AI에게 맡기기는 가린 사본을 만들고, AI 답변 풀어보기는 가린 글을 원래 글로 바꿔요.</p><div className="flex flex-wrap gap-2"><AiHandoff /></div></div>}
         </CardContent>
       </Card>
-      {note && (
-        <Alert variant={note.ok ? "default" : "destructive"}>
-          <AlertDescription className="whitespace-pre-line">{note.text}</AlertDescription>
-        </Alert>
-      )}
       {DIAGNOSE_AREAS.map((area) => {
         const list = report.findings.filter((f) => f.area === area);
         if (list.length === 0) return null;
