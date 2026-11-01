@@ -91,9 +91,18 @@ npm run diagnose -- "<게임 폴더>"   # 다시 돌려 해당 항목이 `켜면
   Every AI-written commit must end with `AI-Tool:` and `AI-Model:` trailers (plus the tool's own co-author line if it has one).
   Never guess the model; write `unknown` and ask. Human-only commits don't get these trailers.
 - 워크트리 작업을 검토한 뒤 `onboard/<id>` 브랜치로 합친다(master는 건드리지 않음). 브랜치 위에서 4번 검증을 다시 돌린다.
-- 사용자에게는 짧은 한국어로: 무엇이 이제 되는지, 브랜치 이름과 확인 방법(예: `git switch onboard/<id>` 후 `npm run dev`),
-  뷰어에서 무엇을 누르면 되는지(예: `게임 진단 → 추천 설정 모두 적용`, 게임 다시 시작).
-- 그리고 **PR로 올리자고 제안**한다. 좋다고 하면 `git push -u origin onboard/<id>` 후 `gh pr create`로 올린다.
+- **그 브랜치로 직접 체크아웃해 둔다**(`git switch onboard/<id>`). 사용자에게 git 명령을 시키지 않는다.
+  지금 작업 폴더에 커밋 안 된 변경이 있으면 건드리지 말고, 그 사실만 알리고 체크아웃은 미룬다.
+  Check out the branch yourself; never ask the user to run git. If the working tree is dirty, don't touch it — say so instead.
+- **사용자에게 하는 말은 모두 한국어**로, 쉬운 말로 쓴다. 사용자가 손으로 할 일(명령 입력·브랜치 바꾸기·파일 고치기)을 남기지 않는다 —
+  할 수 있는 일은 AI가 먼저 다 해 두고, 사용자에게는 **실행 방법만** 알려준다:
+  `npm start`로 뷰어를 연다 → 게임을 연다 → `게임 진단 → 추천 설정 모두 적용` → (기록 플러그인이 바뀌었으면) 뷰어가 안내하는 대로 업데이트 후 게임 다시 시작.
+  그리고 이제 무엇이 되는지 짧게.
+  All user-facing text is Korean and plain. Leave the user no manual steps; do everything you can, then give only how to run it.
+- 마지막에 **다른 사용자들도 이 게임·플러그인을 쓸 수 있도록 Pull Request를 권장**한다고 알리고, **AI가 직접 올릴 수 있다**고 말한다
+  (`git remote`·`gh auth status`로 올릴 수 있는지 먼저 확인하고, 안 되면 무엇이 막혔는지 쉬운 말로).
+  사용자가 좋다고 하면 `git push -u origin onboard/<id>` 후 `gh pr create`로 올리고 PR 주소를 알려준다.
+  Recommend a PR so others benefit, say you can open it yourself, and do it only after the user agrees.
   PR 본문: 어떤 플러그인/증상을 다뤘는지, 바뀐 파일(어댑터·core·진단 규칙), 검증 결과, 남은 `확인 필요` 항목,
   그리고 `작업한 AI: <AI-Tool> / <AI-Model>` 한 줄.
   가린 사본의 토큰은 써도 되지만 원래 게임 글·실제 게임 파일·사용자 경로는 넣지 않는다. 끝에 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
