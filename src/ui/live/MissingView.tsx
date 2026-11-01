@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useLive } from "@/app/LiveProvider";
 import { locationKey } from "@/core/index/locations";
@@ -6,6 +6,7 @@ import { viewGroups, type MissingEventGroup, type MissingGroup, type MissingView
 import type { EvalStatus, MissingItem } from "@/core/live/types";
 import { openPage } from "@/ui/navigation";
 import { highlightNode } from "@/ui/highlight";
+import { clearMissingQuery, peekMissingQuery } from "./missingFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -118,7 +119,7 @@ function GroupList({ groups }: { groups: MissingGroup[] }) {
   );
 }
 
-/** initialQuery: 처음 채울 검색어(사이드바 "가 볼 만한 곳"에서 맵 이름). 바꾸려면 key도 바꿔 다시 마운트한다. */
+/** initialQuery: 처음 채울 검색어. 없으면 맵 목록 "다른 맵"에서 넘긴 맵 이름(openMissingFor). */
 export function MissingView({ initialQuery = "" }: { initialQuery?: string }) {
   const { connection } = useLive();
   const groups = useMissingGroups();
@@ -126,7 +127,8 @@ export function MissingView({ initialQuery = "" }: { initialQuery?: string }) {
   /** 사용자가 고른 보기. 고르기 전엔 연결 상태를 따른다. */
   const [picked, setPicked] = useState<View | null>(null);
   const view: View = picked ?? (offline ? "all" : "reachable");
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(() => initialQuery || peekMissingQuery());
+  useEffect(() => clearMissingQuery(), []);
   const shown = useMemo(() => viewGroups(groups, view, query), [groups, view, query]);
   return (
     <div className="space-y-4 p-1">

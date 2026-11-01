@@ -2,10 +2,12 @@ import { terms } from "@/ui/terms";
 import { useRoute } from "@/app/route";
 import { ReadModule } from "./ReadModule";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Gauge, WandSparkles } from "lucide-react";
+import { BookOpen, Gauge, PanelRightClose, PanelRightOpen, WandSparkles, type LucideIcon } from "lucide-react";
 import type { PopoutModule } from "@/app/popout";
 import { LiveFreeze } from "@/app/LiveProvider";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AssistTab } from "./AssistTab";
 import { CheatContent, onOpenCheatRequest } from "./cheat/CheatContent";
 import { useCheatSession } from "./cheat/useCheatSession";
@@ -15,12 +17,44 @@ import { PopoutButton, PoppedOutNotice, useModulePoppedOut } from "./PopoutContr
 import { useAssistSession } from "./useAssistSession";
 
 const MODULE_OF: Record<ToolTab, PopoutModule> = { cheat: "cheat", assist: "assist", read: "reader" };
+const TOOL_ICON: Record<ToolTab, LucideIcon> = { assist: Gauge, cheat: WandSparkles, read: BookOpen };
+const TOOL_LABEL: Record<ToolTab, string> = { assist: terms.assist, cheat: terms.cheat, read: terms.read };
 
-/** 읽기 화면은 자기 높이를 창 높이로 정한다 — 칸 높이에 맞춘다 */
+/** 읽기 모듈을 칸 높이에 맞춰 채워요(따로 창·도구 칸). */
 export function ReaderFill() {
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3 *:h-full! *:min-h-0">
+    <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3">
       <ReadModule />
+    </div>
+  );
+}
+
+/** 접은 도구 칸: 펼치기 단추와 탭 아이콘(누르면 그 탭으로 펼쳐요). */
+export function CollapsedTools({ onExpand }: { onExpand: () => void }) {
+  return (
+    <div className="flex h-full flex-col items-center gap-1 py-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="도구 칸 펼치기" onClick={onExpand}><PanelRightOpen /></Button>
+        </TooltipTrigger>
+        <TooltipContent side="left">도구 칸 펼치기</TooltipContent>
+      </Tooltip>
+      {(["assist", "cheat", "read"] as const).map((t) => {
+        const Icon = TOOL_ICON[t];
+        return (
+          <Tooltip key={t}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost" size="icon-sm" aria-label={TOOL_LABEL[t]}
+                onClick={() => { saveToolTab(t); window.location.hash = `#/play/${t}`; onExpand(); }}
+              >
+                <Icon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{TOOL_LABEL[t]}</TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -32,7 +66,7 @@ export function ReaderFill() {
  * 떼어 낸 탭은 "따로 창에서 보는 중"만 보인다(치트를 두 곳에서 동시에 켜지 않는다).
  * 다른 곳에서 치트를 열어 달라고 하면(openCheatSheet) 치트 탭으로 바꾼다(떼어 냈으면 그 창을 앞으로).
  */
-export function ToolsColumn() {
+export function ToolsColumn({ onCollapse }: { onCollapse?: () => void }) {
   const [route] = useRoute();
   const [savedTab, setTabState] = useState<ToolTab>(loadToolTab);
   const tab = route.kind === "play" && route.module && route.module !== "map" ? route.module : savedTab;
@@ -56,19 +90,28 @@ export function ToolsColumn() {
 
   return (
     <Tabs value={tab} onValueChange={(v) => { if (isToolTab(v)) setTab(v); }} className="h-full min-h-0 gap-0">
-      <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
+      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
         <TabsList>
-          <TabsTrigger value="assist"><Gauge />{terms.assist}</TabsTrigger>
-          <TabsTrigger value="cheat"><WandSparkles />{terms.cheat}</TabsTrigger>
-          <TabsTrigger value="read"><BookOpen />{terms.read}</TabsTrigger>
+          {(["assist", "cheat", "read"] as const).map((t) => {
+            const Icon = TOOL_ICON[t];
+            return <TabsTrigger key={t} value={t}><Icon />{TOOL_LABEL[t]}</TabsTrigger>;
+          })}
         </TabsList>
         <PopoutButton module={MODULE_OF[tab]} className="ml-auto" />
+        {onCollapse && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="도구 칸 접기" onClick={onCollapse}><PanelRightClose /></Button>
+            </TooltipTrigger>
+            <TooltipContent>도구 칸 접기</TooltipContent>
+          </Tooltip>
+        )}
       </div>
       <TabsContent value="cheat" className="min-h-0 overflow-y-auto">
         {cheatOut ? <PoppedOutNotice module="cheat" /> : <CheatContent session={cheatSession} active={tab === "cheat"} className="p-3" />}
       </TabsContent>
       <TabsContent value="assist" className="min-h-0 overflow-y-auto">
-        {assistOut ? <PoppedOutNotice module="assist" /> : <AssistTab session={assistSession} active={tab === "assist"} className="max-w-xl p-3" />}
+        {assistOut ? <PoppedOutNotice module="assist" /> : <AssistTab session={assistSession} active={tab === "assist"} className="mx-auto max-w-xl p-3" />}
       </TabsContent>
       <TabsContent value="read" forceMount className="min-h-0 data-[state=inactive]:hidden">
         {readerOut ? <PoppedOutNotice module="reader" /> : <LiveFreeze active={tab === "read"}>{reader}</LiveFreeze>}

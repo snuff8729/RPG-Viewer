@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronRight, Star } from "lucide-react";
 import type { Confidence, StoryStep } from "@/core/story/nextStep";
 import { CONFIDENCE_LABEL, KIND_LABEL, pathText, stepTitle } from "@/core/story/format";
@@ -53,7 +54,7 @@ function StepBody({ s, compact }: { s: StoryStep; compact: boolean }) {
 const MAIN = "main";
 
 /** `다음 스토리` 카드(플레이 화면·이 맵): 본편(또는 고른 서브 미션)을 앞으로 보내는 가장 그럴듯한 행동과 다른 후보, 진행 기준. */
-export function NextStoryCard({ compact = false }: { compact?: boolean }) {
+export function NextStoryCard({ compact = false, action }: { compact?: boolean; /** 카드 안 끝에 둘 것(예: 어떻게 하나요) */ action?: ReactNode }) {
   const { story, mode, sides, follow, setFollow } = useNextStory();
   const { connection, live } = useLive();
   if (connection !== "connected" || !live) return null;
@@ -84,7 +85,7 @@ export function NextStoryCard({ compact = false }: { compact?: boolean }) {
         ) : (
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">다음 스토리를 찾지 못했어요</p>
-            <p className="text-xs text-muted-foreground">게임 설정에서 스토리 진행 기준(진행 변수)을 골라 보세요.</p>
+            <p className="text-xs text-muted-foreground">게임 맞춤 설정에서 스토리 진행 기준(진행 변수)을 골라 보세요.</p>
           </div>
         )}
         {alts.length > 0 && (
@@ -103,6 +104,7 @@ export function NextStoryCard({ compact = false }: { compact?: boolean }) {
             </CollapsibleContent>
           </Collapsible>
         )}
+        {action}
       </CardContent>
       <CardFooter className="flex flex-wrap items-center gap-x-2 border-t py-2 text-xs text-muted-foreground">
         {side ? <span>{story ? `미션 기준: ${story.label} = ${story.value}` : "미션 기준을 읽지 못했어요"}</span> : (

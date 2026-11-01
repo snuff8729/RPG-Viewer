@@ -1,5 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Crosshair, Maximize, Minus, Plus, SlidersHorizontal } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Crosshair, Maximize, Minus, Plus } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { mapEncounters, regionCells } from "@/core/live/enemies";
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
@@ -9,14 +9,9 @@ import type { StoryMark } from "@/core/story/format";
 import { drawOpsForTile, shadowOps, tileAt, type DrawOp } from "@/core/map/tiles";
 import type { EventImage } from "@/core/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import { mapMarkers, spriteEffect, staticKey, type CurrentEvent } from "./mapEvents";
 import { clampScroll, clampZoom, fitZoom, followScroll, isDrag, pinchZoom, scrollChange, shouldRefit, wheelFactor } from "./mapZoom";
-import { MapLegend } from "./MapLegend";
 import { useMapLegend } from "./mapLegendState";
 import { gameKeyOf } from "./readPosition";
 import { eventStyle } from "./sectionStyle";
@@ -398,7 +393,7 @@ function useThemeTick(): number {
 
 /** 실제 맵 그림(타일셋·이벤트 그림) 위에 번호·내 위치·길을 겹쳐 그린다. 표시를 누르면 onPick(eventId). */
 export function MapCanvas({
-  tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false, avoidEnemies, onAvoidEnemiesChange, story = null,
+  tiles, events, listed, numbers, player, route, selected, focus, onPick, compact = false, showWalls = true, story = null,
 }: {
   tiles: LoadedTiles;
   /** 지금 활성 페이지가 있는 이벤트(그림·길막음용, 지금 위치) */
@@ -413,18 +408,16 @@ export function MapCanvas({
   focus: { x: number; y: number; n: number } | null;
   onPick: (eventId: number) => void;
   /**
-   * 작게(플레이 화면): 부모 높이를 채우고, 도구는 아이콘만, 범례·표시 설정은 Popover로.
+   * 작게(플레이 화면): 부모 높이를 채운다.
    * 맞춤이 너무 작으면 읽을 수 있는 크기로 내 위치를 가운데 두고, 내가 화면 밖으로 나가면 따라간다.
    */
   compact?: boolean;
-  /** 적 피해서 길 찾기(없으면 스위치를 안 보인다) */
-  avoidEnemies?: boolean;
-  onAvoidEnemiesChange?: (v: boolean) => void;
+  /** 벽 그늘 표시(구역 칩 줄의 ⋯ 메뉴에서 바꾼다) */
+  showWalls?: boolean;
   /** 다음 스토리 표시(없으면 안 그린다) */
   story?: StoryOverlay | null;
 }) {
   const { assets, data } = useGame();
-  const switchId = useId();
   const { map } = tiles;
   const scrollRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -441,9 +434,8 @@ export function MapCanvas({
   /** 이벤트 처리기·효과에서 읽는 최신 zoom */
   const zoomRef = useRef(zoom);
   useLayoutEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  const [showWalls, setShowWalls] = useState(true);
   // 범례에서 끈 항목(게임별로 기억, 이 맵·플레이 화면 목록과 함께 쓴다)
-  const [legendHidden, , setLegendVisible] = useMapLegend(data ? gameKeyOf(data) : "");
+  const [legendHidden] = useMapLegend(data ? gameKeyOf(data) : "");
   const markers = useMemo(() => mapMarkers(listed, legendHidden), [listed, legendHidden]);
   const showRegions = !legendHidden.has("regions");
   const showPlayer = !legendHidden.has("player");
@@ -797,67 +789,30 @@ export function MapCanvas({
 
   const loading = !charsReady || zoom == null;
   const w = map.width * (zoom ?? 0), h = map.height * (zoom ?? 0);
-  const toggles = (
-    <>
-      <div className="flex items-center gap-2">
-        <Switch id={`${switchId}-walls`} checked={showWalls} onCheckedChange={setShowWalls} />
-        <Label htmlFor={`${switchId}-walls`}>벽 표시</Label>
-      </div>
-      {onAvoidEnemiesChange && (
-        <div className="flex items-center gap-2">
-          <Switch id={`${switchId}-avoid`} checked={avoidEnemies ?? true} onCheckedChange={onAvoidEnemiesChange} />
-          <Label htmlFor={`${switchId}-avoid`}>적 피해서 길 찾기</Label>
-        </div>
-      )}
-    </>
-  );
   return (
-    <Card className={compact ? "h-full gap-2 py-2" : "gap-2 py-3"}>
-      <CardContent className={compact ? "flex min-h-0 flex-1 flex-col gap-2 px-2" : "space-y-2 px-3"}>
-        {compact ? (
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
-            <Button variant="outline" size="icon-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
-            <Button variant="outline" size="icon-sm" aria-label="맞춤" onClick={fit}><Maximize /></Button>
-            <Button variant="outline" size="icon-sm" aria-label="내 위치로" onClick={toPlayer}><Crosshair /></Button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="ml-auto"><SlidersHorizontal />범례</Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-80 space-y-2">
-                <PopoverHeader><PopoverTitle>범례</PopoverTitle></PopoverHeader>
-                <MapLegend hidden={legendHidden} onChange={setLegendVisible} regions={!!regionPath} />
-                {toggles}
-              </PopoverContent>
-            </Popover>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="icon-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
-            <Button variant="outline" size="icon-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
-            <Button variant="outline" size="sm" onClick={fit}><Maximize />맞춤</Button>
-            <Button variant="outline" size="sm" onClick={toPlayer}><Crosshair />내 위치로</Button>
-            <div className="ml-auto" />
-            {toggles}
-          </div>
-        )}
-        <div
-          ref={scrollRef}
-          className={`relative cursor-grab touch-none overflow-auto rounded-md border bg-muted select-none [scrollbar-gutter:stable] ${compact ? "min-h-0 flex-1" : "h-[min(60vh,32rem)]"}`}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerEnd}
-          onPointerCancel={onPointerEnd}
-          onDoubleClick={(e) => { const l = local(e.clientX, e.clientY); zoomAt(2, l.x, l.y); }}
-        >
-          {loading && <Skeleton className="absolute inset-0 rounded-none" />}
-          <div ref={stackRef} className="relative" style={{ width: w, height: h }}>
-            <canvas ref={baseRef} className="absolute inset-0 size-full" />
-            <canvas ref={overRef} className="absolute inset-0 size-full" role="img" aria-label="맵 그림" />
-          </div>
+    <div className="relative h-full min-h-0 overflow-hidden rounded-md border bg-muted">
+      <div
+        ref={scrollRef}
+        className="relative size-full cursor-grab touch-none overflow-auto select-none [scrollbar-gutter:stable]"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        onDoubleClick={(e) => { const l = local(e.clientX, e.clientY); zoomAt(2, l.x, l.y); }}
+      >
+        {loading && <Skeleton className="absolute inset-0 rounded-none" />}
+        <div ref={stackRef} className="relative" style={{ width: w, height: h }}>
+          <canvas ref={baseRef} className="absolute inset-0 size-full" />
+          <canvas ref={overRef} className="absolute inset-0 size-full" role="img" aria-label="맵 그림" />
         </div>
-        {!compact && <MapLegend hidden={legendHidden} onChange={setLegendVisible} regions={!!regionPath} />}
-      </CardContent>
-    </Card>
+      </div>
+      {/* 확대·축소·맞춤·내 위치로: 그림 오른쪽 아래 작은 묶음 */}
+      <div role="group" aria-label="맵 보기" className="absolute right-4 bottom-4 flex flex-col gap-1">
+        <Button variant="outline" size="icon-sm" className="bg-background shadow-sm" aria-label="확대" onClick={() => zoomBy(1.25)}><Plus /></Button>
+        <Button variant="outline" size="icon-sm" className="bg-background shadow-sm" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}><Minus /></Button>
+        <Button variant="outline" size="icon-sm" className="bg-background shadow-sm" aria-label="맞춤" onClick={fit}><Maximize /></Button>
+        <Button variant="outline" size="icon-sm" className="bg-background shadow-sm" aria-label="내 위치로" onClick={toPlayer}><Crosshair /></Button>
+      </div>
+    </div>
   );
 }

@@ -3,19 +3,19 @@ import { MapCanvas } from "./MapCanvas";
 import { MapGrid } from "./MapGrid";
 import type { HereMap } from "./useHereMap";
 
-/** 지금 맵 그림(이 맵·플레이 화면 공용): 읽는 중이면 Skeleton, 타일을 못 읽으면 칸 그림. */
-export function HereMapArea({ here, focus, onPick, compact = false }: {
+/** 지금 맵 그림(맵 모듈): 칸을 채운다. 읽는 중이면 Skeleton, 타일을 못 읽으면 칸 그림. */
+export function HereMapArea({ here, focus, onPick, showWalls }: {
   here: HereMap;
   focus: { x: number; y: number; n: number } | null;
   onPick: (eventId: number) => void;
-  compact?: boolean;
+  showWalls: boolean;
 }) {
   const { live, checklist, tilesState, tiles, current, listed, numbers, route, selected } = here;
   if (!live || !checklist) return null;
   const player = { x: live.x, y: live.y };
   return (
     <>
-      {tilesState.status === "loading" && <Skeleton className={compact ? "h-full w-full" : "h-[min(60vh,32rem)] w-full"} />}
+      {tilesState.status === "loading" && <Skeleton className="h-full w-full" />}
       {tiles && (
         <MapCanvas
           tiles={tiles}
@@ -27,14 +27,13 @@ export function HereMapArea({ here, focus, onPick, compact = false }: {
           selected={selected}
           focus={focus}
           onPick={onPick}
-          compact={compact}
+          compact
+          showWalls={showWalls}
           story={here.story}
-          avoidEnemies={here.avoidEnemies}
-          onAvoidEnemiesChange={here.setAvoidEnemies}
         />
       )}
       {tilesState.status === "failed" && (
-        <div className={compact ? "h-full overflow-auto" : undefined}>
+        <div className="h-full overflow-auto">
           <MapGrid width={checklist.width} height={checklist.height} events={listed} player={player} numbers={numbers} onPick={onPick} />
         </div>
       )}

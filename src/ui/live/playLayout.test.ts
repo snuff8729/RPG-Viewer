@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  loadMapBelowTab, loadToolTab, safeStore, saveMapBelowTab, saveToolTab,
+  loadToolTab, safeStore, saveToolTab,
   type KeyValueStore,
 } from "./playLayout";
 
@@ -23,12 +23,5 @@ describe("remembered tabs", () => {
     expect(loadToolTab(s)).toBe("assist");
     expect(loadToolTab(safeStore(broken))).toBe("assist");
     expect(() => saveToolTab("read", safeStore(broken))).not.toThrow();
-  });
-  it("map below tab defaults to todo and remembers", () => {
-    const s = memory();
-    expect(loadMapBelowTab(s)).toBe("todo");
-    saveMapBelowTab("story", s);
-    expect(loadMapBelowTab(s)).toBe("story");
-    expect(loadMapBelowTab(safeStore(broken))).toBe("todo");
   });
 });

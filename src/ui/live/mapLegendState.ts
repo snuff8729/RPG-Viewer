@@ -3,12 +3,12 @@ import type { ChecklistEvent, Section } from "@/core/live/mapChecklist";
 import { UNKNOWN_SPAWN_TITLE } from "@/core/live/spawned";
 
 /**
- * 맵 범례 항목: 구역 8개, 내 위치, 다음 스토리 표시, 알 수 없는 생성 이벤트, 적 나오는 구역.
+ * 맵 범례 항목: 구역 8개, 이야기·자동 진행(목록만, storyEvents), 내 위치, 다음 스토리 표시, 알 수 없는 생성 이벤트, 적 나오는 구역.
  * 범례에서 끄면 맵 표시와 이 맵·플레이 화면 목록의 같은 줄이 숨는다.
  */
-export type LegendKey = Section | "player" | "story" | "spawn" | "regions";
+export type LegendKey = Section | "storyEvents" | "player" | "story" | "spawn" | "regions";
 export const LEGEND_KEYS: readonly LegendKey[] = [
-  "now", "item", "repeat", "exit", "enemy", "talk", "done", "locked", "player", "story", "spawn", "regions",
+  "now", "item", "repeat", "exit", "enemy", "talk", "done", "locked", "storyEvents", "player", "story", "spawn", "regions",
 ];
 /** 처음에 꺼져 있는 것(잠김은 예전 `잠긴 것도 표시` 스위치처럼 기본 꺼짐) */
 const DEFAULT_HIDDEN: readonly LegendKey[] = ["locked"];
@@ -21,11 +21,14 @@ export function legendKeyOf(e: Pick<ChecklistEvent, "section" | "story" | "title
   return e.section;
 }
 
-/** 범례에서 끈 항목의 이벤트를 뺀다(이야기·자동 진행은 그대로). 같으면 같은 배열. */
+/** 범례에서 끈 항목의 이벤트를 뺀다(이야기·자동 진행은 storyEvents를 끄면 뺀다). 같으면 같은 배열. */
 export function visibleByLegend<T extends Pick<ChecklistEvent, "section" | "story" | "title">>(events: readonly T[], hidden: ReadonlySet<LegendKey>): T[] {
   const list = Array.isArray(events) ? events : [];
   if (hidden.size === 0) return list as T[];
-  const out = list.filter((e) => { const k = legendKeyOf(e); return k === null || !hidden.has(k); });
+  const out = list.filter((e) => {
+    const k = legendKeyOf(e);
+    return k === null ? !(e?.story && hidden.has("storyEvents")) : !hidden.has(k);
+  });
   return out.length === list.length ? (list as T[]) : out;
 }
 

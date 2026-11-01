@@ -174,7 +174,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           {onLocate && (
             <Button variant="outline" size="sm" onClick={onLocate}><MapPin />위치 보기</Button>
           )}
-          {target && <Button variant="outline" size="sm" onClick={() => openPage(target)}>탐색기에서 보기</Button>}
+          {target && <Button variant="outline" size="sm" onClick={() => openPage(target)}>찾아보기에서 보기</Button>}
         </CardFooter>
       )}
     </Card>

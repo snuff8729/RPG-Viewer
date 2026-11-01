@@ -1,42 +1,52 @@
-import { useDefaultLayout } from "react-resizable-panels";
+import { useState } from "react";
+import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { useCompact } from "@/hooks/use-compact";
-import { useLive } from "@/app/LiveProvider";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { AssistFavoritesBar } from "./AssistFavoritesBar";
 import { MapColumn } from "./PlayMapColumn";
 import { safeStore } from "./playLayout";
 import { PopoutButton, PoppedOutNotice, useModulePoppedOut } from "./PopoutControls";
-import { ToolsColumn } from "./PlayTools";
+import { CollapsedTools, ToolsColumn } from "./PlayTools";
 import { MobilePlayView } from "./MobilePlayView";
+import { QuickBar } from "./QuickBar";
 
 const layoutStore = safeStore();
+/** 접은 도구 칸 너비(px): 펼치기·탭 아이콘만 세로로 */
+const TOOLS_COLLAPSED_PX = 48;
+
+/** PC(900px 이상): 왼쪽 맵 칸 + 오른쪽 도구 칸. 크기·접힘은 기억해요. 도구 칸은 340px보다 좁아지지 않고 접을 수 있어요. */
 function PlayPanels() {
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "rpgv.play2.side", storage: layoutStore });
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "rpgv.play3.side", storage: layoutStore });
+  const tools = usePanelRef();
+  const [collapsed, setCollapsed] = useState(false);
+  const toggle = () => {
+    const p = tools.current;
+    if (!p) return;
+    if (p.isCollapsed()) p.expand();
+    else p.collapse();
+  };
   return (
     <ResizablePanelGroup orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="map" defaultSize="50%" minSize="25%">
-        <MapColumn actions={<PopoutButton module="map" />} layoutId="rpgv.play2.map.side" />
+      <ResizablePanel id="map" defaultSize="55%" minSize="25%">
+        <MapColumn actions={<PopoutButton module="map" />} layoutId="rpgv.play3.map.below" />
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel id="tools" defaultSize="50%" minSize={340}>
-        <ToolsColumn />
+      <ResizablePanel
+        id="tools" defaultSize="45%" minSize={340} collapsible collapsedSize={TOOLS_COLLAPSED_PX} panelRef={tools}
+        onResize={(size) => setCollapsed(size.inPixels <= TOOLS_COLLAPSED_PX + 1)}
+      >
+        {collapsed ? <CollapsedTools onExpand={toggle} /> : <ToolsColumn onCollapse={toggle} />}
       </ResizablePanel>
     </ResizablePanelGroup>
   );
 }
-/** 단위 2에서는 기존 모듈 내용을 공통 머리줄 아래에 둬요. */
+
+/** 플레이: 머리줄 아래 위쪽 막대(평소·전투), 그 아래 PC 두 칸 또는 휴대폰 탭 배치(900px 미만). */
 export function PlayView() {
   const compact = useCompact();
-  const { connection } = useLive();
   const mapOut = useModulePoppedOut("map");
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {connection === "connected" && (
-        <AssistFavoritesBar
-          size="sm"
-          className="shrink-0 flex-nowrap overflow-x-auto border-b px-3 py-2 [&>*]:shrink-0"
-        />
-      )}
+      <QuickBar />
       {compact ? (
         <MobilePlayView />
       ) : (
