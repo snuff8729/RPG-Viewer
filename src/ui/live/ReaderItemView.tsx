@@ -16,6 +16,7 @@ import { PictureViewport } from "../addons/PictureViewport";
 import { PluginLine } from "./PluginLine";
 import { NEVER_HIDDEN, ReaderHideContext, useLineHidden } from "./readerHide";
 import { sameShot, type ScreenShot } from "@/core/addons/screenPictures";
+import { sameMotion } from "@/core/addons/pictureMotion";
 import { ScreenPictures } from "../addons/ScreenPictures";
 import { CutinPictures } from "../addons/CutinPictures";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
@@ -77,7 +78,7 @@ function Screen({ shot }: { shot: ScreenShot }) {
 /** 컷인(대사 사이에 잠깐 띄웠다 지운 그림, `그림 보기`를 껐으면 숨긴다). 전투 안에서는 전투 기록을 접어도 보인다. */
 function Cutin({ item }: { item: Extract<ReaderItem, { kind: "cutin" }> }) {
   const [shown] = useScreenPicturesShown();
-  return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} stateKey={item.key} /></div> : null;
+  return shown ? <div className="mb-3"><CutinPictures frames={item.frames} best={item.best} stateKey={item.key} motion={item.motion} /></div> : null;
 }
 
 /** 플러그인 명령 줄(보일지는 숨김 규칙이 정한다 — 명령별 메뉴 대신 읽기 줄 메뉴) */
@@ -343,7 +344,7 @@ function sameItem(a: ReaderItem, b: ReaderItem): boolean {
     case "screen": return sameShot(a.screen, (b as typeof a).screen);
     case "cutin": {
       const p = b as typeof a;
-      return a.best === p.best && a.frames.length === p.frames.length && a.frames.every((f, i) => sameShot(f, p.frames[i]));
+      return a.best === p.best && a.frames.length === p.frames.length && a.frames.every((f, i) => sameShot(f, p.frames[i])) && sameMotion(a.motion, p.motion);
     }
   }
 }

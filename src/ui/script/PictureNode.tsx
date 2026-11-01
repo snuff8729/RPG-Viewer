@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EMPTY_PICTURE_TIP, emptyPictureLabel, textPictureLabel } from "@/core/text/textPicture";
 import { AssetPlaceholder } from "./AssetPlaceholder";
 import { useAsset } from "./useAssetUrl";
+import { PictureMotionPreview } from "./PictureMotionPreview";
 
 type Pic = Extract<ScriptNode, { kind: "picture" }>;
 
@@ -24,6 +25,7 @@ export function PictureNode({ node }: { node: Pic }) {
     );
   }
   return (
+    <div>
     <div className="flex items-center gap-3">
       {url ? (
         <Dialog>
@@ -43,6 +45,9 @@ export function PictureNode({ node }: { node: Pic }) {
         <div className="h-[68px] w-[120px] shrink-0 rounded-md bg-muted" />
       )}
       <span className="text-sm">🖼 그림 #{node.pictureId} 표시: {node.name}</span>
+    </div>
+    {/* 여기서 시작하는 그림 바꾸기·이동을 움직여 보인다 */}
+    <PictureMotionPreview cmd={node.cmd} />
     </div>
   );
 }

@@ -9,6 +9,8 @@ import {
 } from "../addons/screenPictures";
 import { applyPictureOp, composedScene, pictureOp, stackPictures, type PictureVars, type StackPicture } from "./pictureStack";
 import { cutinRuns, withOldErases, type CutinStep } from "./cutins";
+import { cutinMotion, messageMotion } from "./motion";
+import type { PictureMotion } from "../addons/pictureMotion";
 import { isNoticeHidden, noticeRecordKind, noticeSourceLabel, type NoticeKind } from "../addons/notices";
 import type { GameData, Location } from "../types";
 import { branchLabel, foldTimelineFrom, isContinuation, type FoldCache, type FoldOptions } from "./history";
@@ -57,7 +59,9 @@ export type ReaderItem =
    * 컷인: 대사(전투 안에서는 전투 로그 줄) 사이에 잠깐 띄웠다 지운 그림(core/live/cutins). frames = 그림 명령마다의 장면
    * (모두 같은 kind — 이벤트 그림이 있으면 화면 그대로), best = 가장 완전한(겹이 가장 많은·가장 넓은) 장면 번호.
    */
-  | { kind: "cutin"; key: string; seq: number; frames: ScreenShot[]; best: number }
+  | { kind: "cutin"; key: string; seq: number; frames: ScreenShot[]; best: number;
+    /** 기록 시각대로의 그림 움직임(core/live/motion). 움직일 것이 없으면 없다. */
+    motion?: PictureMotion }
   /**
    * 숨김 규칙(core/live/hideRules)으로 숨긴 줄이 이어진 자리(읽기 화면이 넣는다, `숨긴 문구 N줄`). key = h + 첫 줄 key,
    * seq = 숨긴 줄들의 마지막 seq, items = 숨긴 줄들.
@@ -241,10 +245,12 @@ interface ReaderState {
   seg: { start: ReadonlyMap<number, StackPicture>; steps: CutinStep[]; screens: PlacedScreen[] } | null;
   /** 마지막으로 넣은 화면 항목(그 뒤로 다른 기록의 그림을 보면 null) */
   lastScreen: Extract<ReaderItem, { kind: "screen" }> | null;
+  /** 방금 대사 앞에서 끝낸 구간(그 대사의 그림 움직임용): 대사 seq, 구간 시작 묶음, 그림 명령들 */
+  motionSeg: { seq: number; start: ReadonlyMap<number, StackPicture>; steps: CutinStep[] } | null;
 }
 
 const newReaderState = (): ReaderState => ({
-  top: [], stack: new Map(), composedFor: null, pending: null, plugins: [], shown: null, shownCoarse: null, seg: null, lastScreen: null,
+  top: [], stack: new Map(), composedFor: null, pending: null, plugins: [], shown: null, shownCoarse: null, seg: null, lastScreen: null, motionSeg: null,
 });
 
 /**
@@ -374,10 +380,12 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
   const finishSegment = (out: ReaderItem[], boundary: LogRecord | null, open = false) => {
     const s = st.seg;
     st.seg = null;
+    st.motionSeg = null;
     if (!s || s.steps.length === 0) return;
     // 아직 이어지는 끝(기록의 마지막·진행 중인 전투)은 다음 대사를 모르니 예전 기록의 지우기를 짐작하지 않는다
     const { steps, end } = open ? { steps: s.steps, end: st.stack } : withOldErases(s.steps, st.stack, boundary, data);
     if (end !== st.stack) { st.stack = end; st.composedFor = null; }
+    if (boundary?.type === "message") st.motionSeg = { seq: boundary.seq, start: s.start, steps };
     const lastT = s.steps[s.steps.length - 1].rec.t;
     const endT = boundary && typeof boundary.t === "number" && boundary.t > 0 ? boundary.t : (typeof lastT === "number" ? lastT : 0);
     for (const run of cutinRuns({ start: s.start, steps, end, endT }, pctx)) {
@@ -390,7 +398,10 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
         if (i >= 0) x.out.splice(i, 1);
       }
       if (related.length > 0) { st.shown = null; st.shownCoarse = null; st.lastScreen = null; st.composedFor = null; }
-      out.push({ kind: "cutin", key: `k${run.first}`, seq: run.last, frames: run.frames, best: run.best });
+      const cutin: Extract<ReaderItem, { kind: "cutin" }> = { kind: "cutin", key: `k${run.first}`, seq: run.last, frames: run.frames, best: run.best };
+      const motion = cutinMotion(s.start, steps, run.first, run.last, run.frames, data);
+      if (motion) cutin.motion = motion;
+      out.push(cutin);
     }
   };
   const battles = opts?.battles !== false;
@@ -429,7 +440,14 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
           if (r.kind === "choice" || r.kind === "chapter" || r.kind === "scroll" || r.kind === "battle") flushPending(out);
           if (r.kind === "message") {
             const shot = messageShot(r.seq);
-            if (shot) r.screen = shot;
+            if (shot) {
+              // 앞 대사부터 이 그림이 되기까지 움직인 것(그림 바꾸기·이동)
+              const m = st.motionSeg;
+              const motion = m && m.seq === r.seq ? messageMotion(m.start, m.steps, shot, data) : null;
+              if (motion) shot.motion = motion;
+              r.screen = shot;
+            }
+            st.motionSeg = null;
           } else if (r.kind === "battlelog") {
             const shot = shotAt(r.seq, false);
             if (shot) r.screen = shot;

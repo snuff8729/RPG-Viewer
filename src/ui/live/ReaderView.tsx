@@ -3,6 +3,7 @@ import { useLive, useLiveData } from "@/app/LiveProvider";
 import { useAddons } from "@/app/AddonsProvider";
 import { usePictureContext } from "../addons/pictureContext";
 import { useScreenPicturesShown } from "../addons/screenDisplay";
+import { usePictureMotionOn } from "../addons/motionDisplay";
 import { branchLabel, representative } from "@/core/live/history";
 import { BranchPathCache, MenuFilterCache, PathFactsCache, ScenesCache } from "@/core/live/readerPath";
 import { lastSeqOf, ReaderItemsBuilder, type ReaderItem } from "@/core/live/reader";
@@ -792,6 +793,7 @@ export function ReaderView({ mobile = false, toolbarStart }: { mobile?: boolean;
   }, []);
   // 보기 설정의 `그림 보기`: 그림 따라 그리기를 켰거나 그림 표시 기록이 있을 때
   const [screenShown, setScreenShown] = useScreenPicturesShown();
+  const [motionOn, setMotionOn] = usePictureMotionOn();
   const picturesOn = useAddons().isOn("screenPictures");
   const hasPictureRecords = useMemo(() => records.some(r => r.type === "picture" && r.op === undefined && !!r.name), [records]);
   const [tocOpen, setTocOpen] = useState(false);
@@ -834,7 +836,11 @@ export function ReaderView({ mobile = false, toolbarStart }: { mobile?: boolean;
             <SettingRow id="reader-voice-auto" label="음성 자동 재생" checked={voiceAuto} onChange={onVoiceAuto} />
             <VoiceVolumeRow />
             {(picturesOn || hasPictureRecords) && (
-              <SettingRow id="reader-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
+              <>
+                <SettingRow id="reader-screen-pictures" label="그림 보기" checked={screenShown} onChange={setScreenShown} />
+                {/* 대사 사이에 그림이 바뀌거나 움직였으면 GIF처럼 움직여 보인다 */}
+                <SettingRow id="reader-picture-motion" label="그림 움직임" checked={motionOn} onChange={setMotionOn} disabled={!screenShown} />
+              </>
             )}
           </ViewSettingsButton>
         </div>

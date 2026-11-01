@@ -2,46 +2,20 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { ImageOff, RotateCw } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import {
-  DEFAULT_SCREEN, pictureDraw, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type StandGroup,
+  DEFAULT_SCREEN, standGroupLabel, standGroups, type ScreenPicture, type ScreenShot, type StandGroup,
 } from "@/core/addons/screenPictures";
 import { BUNDLED_ADAPTERS } from "@/app/adapterBundle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { missingAssetText } from "../script/assetText";
 import { HidePicturesMenu } from "./HidePicturesMenu";
+import { drawPictures } from "./drawPictures";
+import { MotionCanvas } from "./MotionCanvas";
+import { usePictureMotionOn } from "./motionDisplay";
+import { motionNames } from "@/core/addons/pictureMotion";
 import { PictureViewport } from "./PictureViewport";
 import { usePicturesNearViewport } from "./pictureViewportContext";
 import { standView, usePictureImages, type View } from "./pictureImages";
-
-/** 그림 블렌드 모드 → 캔버스 합성(0 보통, 1 더하기, 2 곱하기, 3 스크린) */
-const COMPOSITE: GlobalCompositeOperation[] = ["source-over", "lighter", "multiply", "screen"];
-
-function tonedCopy(img: ImageBitmap, tone: [number, number, number, number]): CanvasImageSource {
-  try {
-    const c = document.createElement("canvas");
-    c.width = img.width; c.height = img.height;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return img;
-    ctx.drawImage(img, 0, 0);
-    const d = ctx.getImageData(0, 0, c.width, c.height);
-    const px = d.data;
-    const [r, g, b] = tone;
-    const gray = Math.max(0, Math.min(255, tone[3])) / 255;
-    for (let i = 0; i < px.length; i += 4) {
-      let R = px[i], G = px[i + 1], B = px[i + 2];
-      if (gray > 0) {
-        const l = 0.299 * R + 0.587 * G + 0.114 * B;
-        R += (l - R) * gray; G += (l - G) * gray; B += (l - B) * gray;
-      }
-      px[i] = R + r; px[i + 1] = G + g; px[i + 2] = B + b; // Uint8ClampedArray가 0~255로 자른다
-    }
-    ctx.putImageData(d, 0, 0);
-    return c;
-  } catch {
-    return img;
-  }
-}
-
 
 /** 캔버스에 그림들을 번호 순으로 그린다(위치·기준점·크기·투명도·블렌드·색조·회전). view: 그릴 화면 부분. */
 function ScreenCanvas({ pictures, view, images, className }: {
@@ -56,30 +30,7 @@ function ScreenCanvas({ pictures, view, images, className }: {
     canvas.width = view.width; canvas.height = view.height;
     const ctx = canvas.getContext("2d");
     if (!canvas || !ctx) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const p of pictures) {
-      const img = images.get(p.name);
-      if (!img || p.opacity <= 0) continue;
-      try {
-        ctx.save();
-        ctx.globalAlpha = p.opacity / 255;
-        ctx.globalCompositeOperation = COMPOSITE[p.blendMode] ?? "source-over";
-        ctx.translate(p.x - view.left, p.y - view.top);
-        if (p.angle) ctx.rotate((p.angle * Math.PI) / 180);
-        ctx.scale(p.scaleX / 100, p.scaleY / 100);
-        // 화면 사각형(standView의 standViewOf)과 같은 크기 기준: 기록의 크기(없으면 그림 파일 크기)에 crop 부분 또는 그림 전체
-        const d = pictureDraw(p, { w: img.width, h: img.height });
-        if (!d) continue;
-        const src = p.tone ? tonedCopy(img, p.tone) : img;
-        try { ctx.drawImage(src, d.sx, d.sy, d.sw, d.sh, d.dx, d.dy, d.dw, d.dh); }
-        finally { if (src instanceof HTMLCanvasElement) src.width = src.height = 0; }
-      } catch { /* 그 그림만 건너뛴다 */ } finally {
-        ctx.restore();
-      }
-    }
+    drawPictures(ctx, pictures, view, images);
     return () => { canvas.width = canvas.height = 0; };
   }, [active, pictures, images, view.left, view.top, view.width, view.height]);
   return <canvas ref={ref} width={0} height={0} className={className} />;
@@ -142,7 +93,10 @@ function ScreenPicturesBody({ shot }: { shot: ScreenShot }) {
   // 1.18.2: 그때 게임의 실제 화면 크기(모르면 게임 설정에서 짐작한 크기)
   const size = shot.screen ?? data?.screenSize ?? DEFAULT_SCREEN;
   const { pictures } = shot;
-  const names = [...new Set(pictures.map((p) => p.name))];
+  // 그림 움직임(보기 설정 `그림 움직임`): 움직임에 나오는 그림도 미리 읽는다
+  const [motionOn] = usePictureMotionOn();
+  const motion = motionOn ? shot.motion : undefined;
+  const names = [...new Set([...pictures.map((p) => p.name), ...motionNames(motion)])];
   const { images, status, retry } = usePictureImages(names);
   const missing = names.filter((n) => status(n) === "missing");
   const failed = names.some((n) => status(n) === "failed");
@@ -150,7 +104,14 @@ function ScreenPicturesBody({ shot }: { shot: ScreenShot }) {
   const groups = stand ? standGroups(pictures) : [];
   // 배우별·컷인·떨어진 스탠딩이 있으면 묶음마다 따로 잘라 나란히(좁으면 줄바꿈)
   const separate = groups.length > 1 || groups.some((g) => typeof g.actorId === "number" || g.kind === "cutin");
-  const body = separate ? (
+  const full = { left: 0, top: 0, width: size.width, height: size.height };
+  const body = motion ? (
+    <MotionCanvas
+      motion={motion} images={images} stand={stand} label={stand ? "스탠딩" : "이벤트 그림"}
+      ready={names.every((n) => status(n) !== "loading")}
+      view={stand ? standView(motion.frames.flatMap((f) => f.pictures), size, images) : full}
+    />
+  ) : separate ? (
     <div className="flex flex-wrap items-end gap-2">
       {groups.map((g) => {
         const { label, title } = groupText(g);
@@ -166,7 +127,7 @@ function ScreenPicturesBody({ shot }: { shot: ScreenShot }) {
   ) : (
     <ShotButton
       pictures={pictures} images={images} stand={stand} title={stand ? "스탠딩" : "이벤트 그림"} names={names}
-      view={stand ? standView(pictures, size, images) : { left: 0, top: 0, width: size.width, height: size.height }}
+      view={stand ? standView(pictures, size, images) : full}
     />
   );
   return (

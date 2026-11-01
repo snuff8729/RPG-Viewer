@@ -2,6 +2,7 @@ import { parsePluginsJs } from "../live/installer";
 import type { LogRecord } from "../live/types";
 import { withoutMenuRecords, type MenuCommonEvents } from "../live/menuScenes";
 import type { SystemData } from "../types";
+import { sameMotion, type PictureMotion } from "./pictureMotion";
 
 /**
  * 화면 그림 따라 그리기(플러그인 1.6.0+): 대사(message)·선택지(choices) 기록의 `pics`(바뀐 그림 전체) / `picsSame`(앞과 같음)을
@@ -761,6 +762,8 @@ export interface ScreenShot {
   kind: "cg" | "stand"; pictures: ScreenPicture[]; cg?: ScreenPicture[];
   /** 그때 게임의 실제 화면 크기(ScreenScene.screen). 없으면 게임 설정에서 짐작한 크기. */
   screen?: ScreenSize;
+  /** 앞 대사부터 이 그림이 되기까지의 그림 움직임(core/addons/pictureMotion). 움직인 것이 없으면 없다. */
+  motion?: PictureMotion;
 }
 
 /**
@@ -917,7 +920,7 @@ export function coarseShotKey(shot: ScreenShot | null | undefined): string {
 /** 두 보일 그림이 같은가 */
 export function sameShot(a: ScreenShot | null | undefined, b: ScreenShot | null | undefined): boolean {
   if (!a || !b) return !a && !b;
-  return a.kind === b.kind && samePictures(a.pictures, b.pictures);
+  return a.kind === b.kind && samePictures(a.pictures, b.pictures) && sameMotion(a.motion, b.motion);
 }
 
 /** 설정 화면용: 최근 본 그림 번호와 이름들(최근 것부터, 번호마다 이름 최대 3개) */
