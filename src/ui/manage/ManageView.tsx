@@ -4,10 +4,10 @@ import { isRemoteView } from "@/app/share";
 import { useTheme, type Theme } from "@/app/ThemeProvider";
 import { useCompact } from "@/hooks/use-compact";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SectionHeader } from "@/ui/SectionHeader";
-import { casual, terms } from "@/ui/terms";
+import { terms } from "@/ui/terms";
 import { BackupSection } from "@/ui/live/BackupSection";
 import { ShareSection } from "@/ui/live/ShareSection";
 import { GameSettingsSection } from "@/ui/addons/GameSettingsSection";
@@ -47,29 +47,8 @@ function AppearanceSection() {
   );
 }
 function DiagnosisSection() {
-  const errors = useLoadErrors();
-  const need = useManageAttention().sections.diagnose;
-  return (
-    <DiagnoseView
-      need={need}
-      top={
-        errors.length > 0 && (
-          <Alert variant="destructive">
-            <AlertTitle>불러오기 오류 {errors.length}개가 있어요</AlertTitle>
-            <AlertDescription>
-              <ul className="space-y-1 break-all">
-                {errors.map((e, i) => (
-                  <li key={i}>
-                    {e.file}: {casual(e.message)}
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )
-      }
-    />
-  );
+  // 할 일 수 = 관리 진단 배지 수(useManageAttention과 같은 불러오기 오류·진단 결과를 써요)
+  return <DiagnoseView loadErrors={useLoadErrors()} />;
 }
 export function ManageView({ section }: { section?: ManageSection }) {
   const compact = useCompact();

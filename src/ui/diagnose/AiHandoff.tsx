@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { GamePathDialog } from "@/ui/live/GamePathDialog";
@@ -78,9 +79,25 @@ export function AiHandoff() {
 
   return (
     <>
-      <Button variant="outline" disabled={reason !== null} onClick={() => openDialog("export")}><Bot />AI에게 맡기기</Button>
-      <Button variant="outline" disabled={reason !== null} onClick={() => openDialog("unmask")}><Languages />AI 답변 풀어보기</Button>
-      {reason !== null && <p className="w-full text-xs text-muted-foreground">AI에게 맡기기: {reason}</p>}
+      <ItemGroup className="gap-2">
+        <Item variant="outline" size="sm">
+          <ItemContent>
+            <ItemDescription className="line-clamp-none">게임 글을 가린 사본을 만들어 AI에게 고쳐 달라고 할 수 있어요.</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button variant="outline" size="sm" disabled={reason !== null} onClick={() => openDialog("export")}><Bot />AI에게 맡기기</Button>
+          </ItemActions>
+        </Item>
+        <Item variant="outline" size="sm">
+          <ItemContent>
+            <ItemDescription className="line-clamp-none">AI 답변 속 가린 글을 이 게임의 원래 글로 바꿔 보여 줘요.</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button variant="outline" size="sm" disabled={reason !== null} onClick={() => openDialog("unmask")}><Languages />AI 답변 풀어보기</Button>
+          </ItemActions>
+        </Item>
+      </ItemGroup>
+      {reason !== null && <p className="text-xs text-muted-foreground">AI 기능: {reason}</p>}
       <GamePathDialog
         open={askPath !== null}
         onOpenChange={(o) => { if (!o) setAskPath(null); }}
