@@ -116,6 +116,26 @@ export function bannerText(state: ConnectionState, remote: boolean): string {
   return remote ? "기록 플러그인을 업데이트해 주세요. PC에서 할 수 있어요." : "기록 플러그인을 업데이트해 주세요.";
 }
 
+/** 연결 상태 창의 큰 단추: 설치·업데이트, 설치돼 있고 게임이 꺼져 있으면 게임 실행. 휴대폰 보기는 없음(PC에서 해요). */
+export function panelAction(state: ConnectionState, ctx: Pick<GuideContext, "remote" | "canLaunch">): GuideAction | null {
+  if (ctx.remote) return null;
+  if (state === "install" || state === "update") return state;
+  if (state === "off" && ctx.canLaunch) return "launch";
+  return null;
+}
+
+/** 마지막 기록 시각을 짧게: 방금 · N분 전 · N시간 전 · M월 D일 */
+export function lastSeenText(t: number | null, now: number): string {
+  if (t === null || !Number.isFinite(t)) return "기록 없음";
+  const min = Math.floor(Math.max(0, now - t) / 60000);
+  if (min < 1) return "마지막 기록 방금";
+  if (min < 60) return `마지막 기록 ${min}분 전`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `마지막 기록 ${h}시간 전`;
+  const d = new Date(t);
+  return `마지막 기록 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
 /** 설치·업데이트 결과 알림 글 */
 export function installResultText(kind: "install" | "update", ok: boolean, message?: string): string {
   if (!ok) return message ?? (kind === "update" ? "업데이트하지 못했어요." : "설치하지 못했어요.");

@@ -20,7 +20,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-function statusLabel(s: InstallStatus | null): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function statusLabel(s: InstallStatus | null): string {
   if (!s) return "확인 중";
   switch (s.state) {
     case "unsupported":

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ThemeProvider } from "@/app/ThemeProvider";
 import { GameProvider, useGame } from "@/app/GameProvider";
-import { useRoute } from "@/app/route";
+import { formatRoute, useRoute } from "@/app/route";
+import { ReadPage } from "@/ui/live/ReadModule";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { StartScreen } from "@/ui/StartScreen";
 import { SearchDialog } from "@/ui/SearchDialog";
@@ -50,6 +51,12 @@ function Shell() {
   const remote = isRemoteView();
   const remoteGame = useRemoteGame(remote);
   useShareFollowsGame(!remote && status === "ready");
+  const compact = useCompact();
+  // 휴대폰 배치에는 플레이 안 읽기 탭이 없어요: #/play/read(PC 도구 칸 주소)로 오면 읽기 화면으로
+  const playRead = compact && !moduleWin && route.kind === "play" && route.module === "read";
+  useEffect(() => {
+    if (playRead) window.location.replace(formatRoute({ kind: "read" }));
+  }, [playRead]);
   useEffect(() => {
     if (status !== "ready") return;
     const onKey = (e: KeyboardEvent) => {
@@ -81,6 +88,7 @@ function Shell() {
       <PluginBanner route={route} />
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         {route.kind === "play" && <PlayView />}
+        {route.kind === "read" && <ReadPage mode={route.mode ?? "story"} mobile={compact} />}
         {(route.kind === "browse" || route.kind === "page") && (
           <BrowseView route={route} state={explorer} onStateChange={setExplorer} />
         )}

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronUp } from "lucide-react";
 import { useRoute } from "@/app/route";
-import { LiveFreeze, useLive } from "@/app/LiveProvider";
+import { useLive } from "@/app/LiveProvider";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -12,7 +12,6 @@ import { useCheatSession } from "./cheat/useCheatSession";
 import { isPlayTab, loadPlayTab, savePlayTab, type PlayTab } from "./mobilePlay";
 import { NotConnectedEmpty } from "./NotConnectedEmpty";
 import { MapChips, MapList, MapPicture, PlayMapProvider } from "./PlayMap";
-import { ReadModule } from "./ReadModule";
 import { useAssistSession } from "./useAssistSession";
 import { usePlayMap } from "./usePlayMapState";
 
@@ -50,12 +49,13 @@ function MobileMapTab() {
   );
 }
 
-/** 휴대폰(900px 미만): 공통 머리줄·위쪽 막대와 아래 탭 사이에 지금 탭 내용. 읽기는 숨겨도 위치를 유지해요. */
+/** 휴대폰(900px 미만): 공통 머리줄·위쪽 막대와 아래 탭 사이에 지금 탭 내용. 읽기는 아래 탭의 따로 화면(#/read)이에요. */
 export function MobilePlayView() {
   const { connection } = useLive();
   const [route] = useRoute();
   const [savedTab, setTabState] = useState<PlayTab>(loadPlayTab);
-  const tab = route.kind === "play" ? route.module ?? savedTab : savedTab;
+  const asked = route.kind === "play" ? route.module : undefined;
+  const tab: PlayTab = isPlayTab(asked) ? asked : savedTab;
   const setTab = (t: PlayTab) => { setTabState(t); savePlayTab(t); window.location.hash = `#/play/${t}`; };
   const cheatSession = useCheatSession();
   const assistSession = useAssistSession();
@@ -63,9 +63,7 @@ export function MobilePlayView() {
   // 다른 곳에서 치트를 열어 달라고 하면 치트 탭으로
   useEffect(() => onOpenCheatRequest(() => { setTabState("cheat"); savePlayTab("cheat"); window.location.hash = "#/play/cheat"; }), []);
   // 주소로 들어온 탭도 기억해요(다음에 열 때 그 탭)
-  useEffect(() => { if (isPlayTab(tab)) savePlayTab(tab); }, [tab]);
-
-  const reader = useMemo(() => <ReadModule mobile />, []);
+  useEffect(() => { savePlayTab(tab); }, [tab]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -80,10 +78,6 @@ export function MobilePlayView() {
           <PlayMapProvider>
             {connection === "connected" ? <MobileMapTab /> : <NotConnectedEmpty />}
           </PlayMapProvider>
-        </TabsContent>
-        {/* 읽기는 늘 살려 두고 숨기기만 한다. 숨긴 동안은 기록·게임 상태를 멈춰 두어 다시 그리지 않는다(긴 기록에서 휴대폰이 버벅이지 않게) */}
-        <TabsContent value="read" forceMount className="min-h-0 px-2 pt-2 data-[state=inactive]:hidden">
-          <LiveFreeze active={tab === "read"}>{reader}</LiveFreeze>
         </TabsContent>
       </Tabs>
     </div>
