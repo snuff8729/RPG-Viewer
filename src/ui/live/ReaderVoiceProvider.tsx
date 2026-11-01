@@ -5,6 +5,7 @@ import { VoicePlayer } from "@/core/assets/voicePlayer";
 import { VoiceFallbackCache, VoiceRecordsCache } from "@/core/live/voice";
 import { ReaderVoiceContext, type VoiceMessage } from "./readerVoiceContext";
 import { VoiceAutoPosition } from "./voiceAuto";
+import { getVoiceVolume, subscribeVoiceVolume, voiceGain } from "./voiceVolume";
 
 /** 선택 흐름의 수동 재생도 같은 플레이어를 쓴다. 게임·모드·갈래가 바뀌면 정리한다. */
 export function ReaderVoiceProvider({ children, auto }: { children: ReactNode; auto: boolean }) {
@@ -16,6 +17,13 @@ export function ReaderVoiceProvider({ children, auto }: { children: ReactNode; a
   const player = useMemo(() => assets ? new VoicePlayer(assets) : null, [assets]);
   const [position] = useState(() => new VoiceAutoPosition());
   useEffect(() => () => player?.stop(), [player]);
+  // 전체 음성 소리: 바꾸면(다른 창에서 바꿔도) 재생 중인 음성에도 바로 적용
+  useLayoutEffect(() => {
+    if (!player) return;
+    const apply = () => player.setGain(voiceGain(getVoiceVolume()));
+    apply();
+    return subscribeVoiceVolume(apply);
+  }, [player]);
   useEffect(() => {
     const unlock = () => player?.unlock();
     window.addEventListener("pointerdown", unlock, true);
