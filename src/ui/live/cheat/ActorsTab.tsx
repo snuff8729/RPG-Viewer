@@ -145,7 +145,7 @@ export function ActorsTab({ data, live, disabled, apply }: CheatTabProps) {
             ))}
           </TableBody>
         </Table>
-        {!la && <p className="text-xs text-muted-foreground">게임이 연결되면 장비·성장을 포함한 지금 값이 보여요</p>}
+        {!la && <p className="text-xs text-muted-foreground">게임과 연결되지 않았어요. 연결되면 장비·성장을 포함한 지금 값이 보여요</p>}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" disabled={disabled} onClick={() => apply([{ op: "recover", actorId }])}><HeartPulse />전부 회복</Button>

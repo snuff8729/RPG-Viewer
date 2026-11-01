@@ -62,7 +62,7 @@ export function GamePathForm({ initialPath, initialError, openedTitle, confirmLa
       {!inline && <DialogHeader>
         <DialogTitle>게임 폴더 위치</DialogTitle>
         <DialogDescription>
-          탐색기에서 게임 폴더를 Shift+오른쪽 클릭 → "경로로 복사" 후 붙여 넣어 주세요.
+          파일 탐색기에서 게임 폴더를 Shift+오른쪽 클릭 → "경로로 복사" 후 붙여 넣어 주세요.
         </DialogDescription>
       </DialogHeader>}
       <form

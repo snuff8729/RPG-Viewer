@@ -16,6 +16,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { terms } from "@/ui/terms";
 import { FaceImage } from "../script/FaceImage";
 import { battleText, pickedFallbackText, reasonText, stateChangeText, transferText } from "./historyText";
 import { classifyPluginRecord, pluginKey } from "@/core/live/pluginText";
@@ -127,7 +129,12 @@ function RecordLine({ r, ctx, uncertain, changed }: { r: LogRecord; ctx: Timelin
       return (
         <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
           <div className="h-px flex-1 bg-border" />
-          <span>{branchLabel(ctx.model, r.branch)} 시작 · {reasonText(r.reason)}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-2">{branchLabel(ctx.model, r.branch)} 시작 · {reasonText(r.reason)}</span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">{terms.branchHint}{r.reason === "unknownSave" ? `. ${terms.unknownSaveHint}` : ""}</TooltipContent>
+          </Tooltip>
           <div className="h-px flex-1 bg-border" />
         </div>
       );

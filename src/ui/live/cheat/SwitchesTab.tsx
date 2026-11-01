@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { terms } from "@/ui/terms";
 import { Pencil, Search, Star } from "lucide-react";
 import { systemEntries, type SearchEntry } from "@/core/live/cheat";
 import { favoriteEntries, findFavorite, NICKNAME_MAX, searchWithNicknames, type FavoriteKind } from "@/core/live/favorites";
@@ -82,7 +83,7 @@ function VariableRow({ entry, live, disabled, apply, finder, note, badge, editab
   const [text, setText] = useState("");
   const current = live ? liveVariable(live, entry.id) : null;
   const n = parseIntInput(text);
-  const desc = note ?? `지금 ${current === null ? "?" : current}`;
+  const desc = note ?? `지금 ${current === null ? terms.notLiveValue : current}`;
   const nick = nicknameOf(finder, "variable", entry.id);
   return (
     <Item variant="outline" size="xs">
@@ -236,7 +237,7 @@ function NarrowSearch({ names, ...rp }: RowProps & { names: Names }) {
             {shown.map((c) => {
               const e = entries[c.id - 1] ?? { id: c.id, name: "" };
               const now = live ? liveVariable(live, c.id) : null;
-              return <VariableRow key={c.id} entry={e} note={`기억 ${c.prev} → 지금 ${now === null ? "?" : now}`} {...rp} />;
+              return <VariableRow key={c.id} entry={e} note={`기억 ${c.prev} → 지금 ${now === null ? terms.notLiveValue : now}`} {...rp} />;
             })}
           </ItemGroup>
           {narrow.candidates.length > LIST_LIMIT && <Hint>앞의 {LIST_LIMIT}개만 보여요. 더 좁혀 주세요</Hint>}

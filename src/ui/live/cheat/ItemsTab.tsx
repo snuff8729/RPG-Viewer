@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { terms } from "@/ui/terms";
 import { Coins, Search } from "lucide-react";
 import { fillAllOps, ITEM_TYPE_LABEL, liveCount, searchItems, type ItemHit, type ItemType } from "@/core/live/cheat";
 import {
@@ -63,7 +64,7 @@ function GoldRow({ data, live, disabled, apply }: CheatTabProps) {
   const unit = data.system.currencyUnit || "G";
   return (
     <div className="flex flex-col gap-2">
-      <Label htmlFor="cheat-gold">돈 <span className="font-normal text-muted-foreground">지금 {live ? `${live.gold} ${unit}` : "?"}</span></Label>
+      <Label htmlFor="cheat-gold">돈 <span className="font-normal text-muted-foreground">지금 {live ? `${live.gold} ${unit}` : terms.notLiveValue}</span></Label>
       <div className="flex flex-wrap gap-2">
         <InputGroup className="min-w-40 flex-1">
           <InputGroupAddon><Coins /></InputGroupAddon>

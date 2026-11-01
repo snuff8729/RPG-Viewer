@@ -692,10 +692,10 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
         <Alert className="mx-auto max-w-2xl shrink-0">
           <Info />
           <AlertDescription>
-            이 게임은 그림 여러 장을 겹쳐서 캐릭터를 그려요. 게임 설정에서 '화면 그림 따라 그리기'를 켜면 게임 화면 그대로 기록돼요.
+            이 게임은 그림 여러 장을 겹쳐서 캐릭터를 그려요. 게임 맞춤 설정에서 '화면 그림 따라 그리기'를 켜면 게임 화면 그대로 기록돼요.
           </AlertDescription>
           <AlertAction className="flex gap-1">
-            <Button size="xs" variant="outline" onClick={openGameSettings}>게임 설정</Button>
+            <Button size="xs" variant="outline" onClick={openGameSettings}>게임 맞춤 설정</Button>
             <Button size="icon-xs" variant="ghost" aria-label="안내 닫기" onClick={closeHint}><X /></Button>
           </AlertAction>
         </Alert>

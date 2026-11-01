@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SectionHeader } from "@/ui/SectionHeader";
-import { terms } from "@/ui/terms";
+import { casual, terms } from "@/ui/terms";
 import { BackupSection } from "@/ui/live/BackupSection";
 import { ShareSection } from "@/ui/live/ShareSection";
 import { GameSettingsSection } from "@/ui/addons/GameSettingsSection";
@@ -55,7 +55,7 @@ function DiagnosisSection() {
             <ul className="space-y-1 break-all">
               {errors.map((e, i) => (
                 <li key={i}>
-                  {e.file}: {e.message}
+                  {e.file}: {casual(e.message)}
                 </li>
               ))}
             </ul>

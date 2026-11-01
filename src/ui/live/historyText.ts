@@ -81,5 +81,5 @@ export function transferText(r: RecordOf<"transfer">, data: GameData): string {
 }
 
 export function reasonText(reason: "newGame" | "load" | "unknownSave"): string {
-  return reason === "newGame" ? "새 게임" : reason === "load" ? "세이브에서 갈라짐" : "출처 모를 세이브";
+  return reason === "newGame" ? "새 게임" : reason === "load" ? "세이브에서 갈라짐" : "기록에 없는 세이브";
 }

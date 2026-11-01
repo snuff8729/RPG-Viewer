@@ -26,4 +26,19 @@ export const terms = {
   notConnected: "게임과 연결되지 않았어요",
   pcOnly: "PC에서 해 주세요",
   todo: (n: number) => `해 볼 것 ${n}`,
+  /** 어려운 말 풀이(Tooltip 한 줄) */
+  branchHint: "회차는 새 게임을 시작한 차례, 갈래는 그 안에서 세이브를 불러와 다르게 이어 간 줄기예요",
+  unknownSaveHint: "뷰어가 기록하지 않은 세이브(기록 플러그인을 넣기 전 세이브 등)를 불러와 시작했어요",
+  evidenceHint: "진단이 이렇게 판단한 까닭(찾은 파일·설정)이에요",
+  notLiveValue: "연결되면 보여요",
 } as const;
+
+/** 불러오기 오류처럼 core에서 온 "-습니다" 글을 화면 말투("-요")로 바꿔요 */
+export function casual(message: string): string {
+  return message
+    .replace(/없습니다/g, "없어요")
+    .replace(/않습니다/g, "않아요")
+    .replace(/입니다/g, "이에요")
+    .replace(/합니다/g, "해요")
+    .replace(/됩니다/g, "돼요");
+}

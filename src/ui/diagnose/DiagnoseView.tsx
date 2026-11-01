@@ -35,7 +35,7 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button variant="link" size="sm" className="h-auto px-0 text-muted-foreground">
-                근거 {f.evidence.length}개 <ChevronDown />
+                이렇게 본 이유 {f.evidence.length}개 <ChevronDown />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>

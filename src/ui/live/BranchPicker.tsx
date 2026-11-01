@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { terms } from "@/ui/terms";
 import { useMemo, useState } from "react";
 import { ChevronRight, ChevronsUpDown, EllipsisVertical } from "lucide-react";
 import { useLive, useLiveData } from "@/app/LiveProvider";
@@ -166,7 +167,7 @@ export function BranchPicker({ selected, onSelect, triggerClassName = "w-72 max-
               )}
               {list.runs.map(run => (
                 <div key={run.run} className="space-y-1">
-                  <p className="px-2 text-xs text-muted-foreground">{run.run}회차</p>
+                  <p className="px-2 text-xs text-muted-foreground" title={terms.branchHint}>{run.run}회차</p>
                   {run.rows.map(r => renderRow(r))}
                 </div>
               ))}

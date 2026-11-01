@@ -162,7 +162,7 @@ function HowToSheet({ ev, onOpenChange }: { ev: ChecklistEvent | null; onOpenCha
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>어떻게 하나요</SheetTitle>
-          <SheetDescription>남은 내용과 조건을 만드는 법을 살펴봐요.</SheetDescription>
+          <SheetDescription>아직 안 본 내용과 조건을 채우는 법을 살펴봐요.</SheetDescription>
         </SheetHeader>
         {ev && (
           <div className="px-4 pb-4">

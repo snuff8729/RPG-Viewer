@@ -14,6 +14,7 @@ import { buildExplorerTree, filterExplorerTree, firstPage, type EventItem, type 
 import { mapKey, type ExplorerState } from "./useExplorerState";
 import { useConditionsLive } from "./live/useConditionsLive";
 import { openPage } from "./navigation";
+import { casual } from "./terms";
 import { cn } from "@/lib/utils";
 import type { Location } from "@/core/types";
 
@@ -74,7 +75,7 @@ function MapTitle({ m, current, isTemplate, newCount }: { m: MapNode; current: b
               <TriangleAlert className="size-4 text-destructive" />
             </span>
           </TooltipTrigger>
-          <TooltipContent className="whitespace-pre-line">{m.errors.join("\n")}</TooltipContent>
+          <TooltipContent className="whitespace-pre-line">{casual(m.errors.join("\n"))}</TooltipContent>
         </Tooltip>
       )}
     </>
