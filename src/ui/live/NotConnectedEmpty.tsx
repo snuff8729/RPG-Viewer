@@ -50,7 +50,7 @@ export function NotConnectedEmpty({ className }: { className?: string }) {
         </EmptyContent>
       )}
       <Button variant="link" asChild>
-        <a href="#/browse/events">게임 없이 이야기 찾아보기 →</a>
+        <a href="#/read">게임 없이 이야기 읽기 →</a>
       </Button>
       {ctl.dialog}
     </Empty>
