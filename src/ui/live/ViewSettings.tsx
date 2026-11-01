@@ -10,14 +10,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toggleVoiceMute, useVoiceVolume } from "./voiceVolume";
 
 /** 보기 설정 한 줄: 이름 왼쪽, 스위치 오른쪽(children은 스위치 앞에) */
-export function SettingRow({ id, label, checked, onChange, disabled, children }: {
-  id: string; label: string; checked: boolean; onChange: (on: boolean) => void; disabled?: boolean; children?: ReactNode;
+export function SettingRow({ id, label, description, checked, onChange, disabled, children }: {
+  id: string; label: string; description?: string; checked: boolean; onChange: (on: boolean) => void; disabled?: boolean; children?: ReactNode;
 }) {
   return (
     <div className="flex min-h-9 items-center gap-3">
-      <Label htmlFor={id} className="min-w-0 flex-1">{label}</Label>
+      {description ? (
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <Label htmlFor={id}>{label}</Label>
+          <p id={`${id}-description`} className="text-xs text-muted-foreground">{description}</p>
+        </div>
+      ) : (
+        <Label htmlFor={id} className="min-w-0 flex-1">{label}</Label>
+      )}
       {children}
-      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
+      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} aria-describedby={description ? `${id}-description` : undefined} />
     </div>
   );
 }
