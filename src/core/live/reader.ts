@@ -385,7 +385,8 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
     // 아직 이어지는 끝(기록의 마지막·진행 중인 전투)은 다음 대사를 모르니 예전 기록의 지우기를 짐작하지 않는다
     const { steps, end } = open ? { steps: s.steps, end: st.stack } : withOldErases(s.steps, st.stack, boundary, data);
     if (end !== st.stack) { st.stack = end; st.composedFor = null; }
-    if (boundary?.type === "message") st.motionSeg = { seq: boundary.seq, start: s.start, steps };
+    // 대사·전투 로그 줄의 그림 움직임용(전투 중 기술 컷인이 다음 줄까지 남는 것도)
+    if (boundary?.type === "message" || boundary?.type === "battlelog") st.motionSeg = { seq: boundary.seq, start: s.start, steps };
     const lastT = s.steps[s.steps.length - 1].rec.t;
     const endT = boundary && typeof boundary.t === "number" && boundary.t > 0 ? boundary.t : (typeof lastT === "number" ? lastT : 0);
     for (const run of cutinRuns({ start: s.start, steps, end, endT }, pctx)) {
@@ -438,19 +439,16 @@ function readerConverter(cfg: ReaderConfig, st: ReaderState) {
           if (r.kind === "battle" && !battles) continue;
           // 대사 없이 바뀐 그림 묶음은 선택·장면 구분·스크롤 글·전투 앞에 따로 보인다
           if (r.kind === "choice" || r.kind === "chapter" || r.kind === "scroll" || r.kind === "battle") flushPending(out);
-          if (r.kind === "message") {
-            const shot = messageShot(r.seq);
+          if (r.kind === "message" || r.kind === "battlelog") {
+            const shot = r.kind === "message" ? messageShot(r.seq) : shotAt(r.seq, false);
             if (shot) {
-              // 앞 대사부터 이 그림이 되기까지 움직인 것(그림 바꾸기·이동)
+              // 앞 줄부터 이 그림이 되기까지 움직인 것(그림 바꾸기·이동)
               const m = st.motionSeg;
               const motion = m && m.seq === r.seq ? messageMotion(m.start, m.steps, shot, data) : null;
               if (motion) shot.motion = motion;
               r.screen = shot;
             }
             st.motionSeg = null;
-          } else if (r.kind === "battlelog") {
-            const shot = shotAt(r.seq, false);
-            if (shot) r.screen = shot;
           }
           out.push(r);
         } else if (it.kind === "repeat") {

@@ -1,5 +1,5 @@
 import {
-  finishMotion, FRAME_MS, simulateMotion, type MotionOp, type MotionPicture, type PictureMotion,
+  finishMotion, FRAME_MS, simulateMotion, trimLead, type MotionOp, type MotionPicture, type PictureMotion,
 } from "../addons/pictureMotion";
 import type { ScreenPicture, ScreenShot } from "../addons/screenPictures";
 import type { GameData } from "../types";
@@ -14,6 +14,11 @@ import type { StackPicture } from "./pictureStack";
 
 /** 기록 사이가 이보다 길면(ms) 이만큼으로 줄인다(게임이 멈춰 있던 때 등) */
 export const MOTION_MAX_GAP_MS = 2000;
+/**
+ * 첫 모습 다음 기록까지가 이보다 길면(ms) 이만큼으로 줄인다: 앞 줄 뒤에 다시 그린 그림이 플레이어가 고르는 동안(전투 명령 입력 등)
+ * 그대로 있다가 컷인이 시작되는 때, 움직임 앞에 오래 멈춰 있지 않게.
+ */
+export const MOTION_LEAD_GAP_MS = 600;
 
 const tOf = (r: { t?: unknown }): number => (typeof r?.t === "number" && Number.isFinite(r.t) ? r.t : 0);
 
@@ -100,7 +105,7 @@ export function messageMotion(
     const last = frames[frames.length - 1];
     if (last.t >= sim.end) frames[frames.length - 1] = { t: last.t, pictures: shot.pictures.slice() };
     else frames.push({ t: sim.end, pictures: shot.pictures.slice() });
-    return finishMotion({ frames, end: sim.end });
+    return trimLead(finishMotion({ frames, end: sim.end }), MOTION_LEAD_GAP_MS);
   } catch {
     return null;
   }
@@ -122,7 +127,7 @@ export function cutinMotion(
     const before = i0 > 0 ? steps[i0 - 1].stack : start;
     const sim = simulateMotion(before.values(), stepOps(before, steps.slice(i0, i1 + 1), data));
     const out = sim.frames.map(f => ({ t: f.t, pictures: f.pictures.filter(p => ids.has(p.id)) }));
-    return finishMotion({ frames: out, end: sim.end });
+    return trimLead(finishMotion({ frames: out, end: sim.end }), MOTION_LEAD_GAP_MS);
   } catch {
     return null;
   }
