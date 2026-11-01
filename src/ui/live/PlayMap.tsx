@@ -125,7 +125,7 @@ export function MapChips({ actions, className }: { actions?: ReactNode; classNam
     <div className={cn("flex min-w-0 shrink-0 items-center gap-1", className)}>
       <ToggleGroup
         type="multiple" variant="outline" size="sm" spacing={1}
-        className="min-w-0 flex-1 justify-start overflow-x-auto py-0.5 [&>*]:shrink-0"
+        className="min-w-0 flex-1 justify-start overflow-x-auto py-0.5 [scrollbar-width:thin] [&>*]:shrink-0"
         aria-label="구역 (누르면 맵과 목록에서 숨기거나 보여요)"
         value={shown.filter((k) => !hidden.has(k))}
         onValueChange={onChange}

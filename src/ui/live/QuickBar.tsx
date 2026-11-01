@@ -57,7 +57,7 @@ function LoseButton() {
   );
 }
 
-const ROW = "flex h-11 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 whitespace-nowrap [&>*]:shrink-0";
+const ROW = "flex min-h-11 shrink-0 items-center gap-2 overflow-x-auto border-b px-3 py-1.5 whitespace-nowrap [scrollbar-width:thin] [&>*]:shrink-0";
 
 /** 전투 막대: 전투 중이면 위쪽 막대 전체가 이것으로 바뀌어요(고정과 상관없이). 오른쪽 끝에 배속. */
 function BattleBar() {
