@@ -8,6 +8,9 @@ const cmdOf = (n: ScriptNode): number | undefined => {
 };
 const isNode = (n: unknown): n is ScriptNode => !!n && typeof n === "object";
 const clean = (l: ScriptNode[]) => l.filter(isNode);
+/** 메시지·스크롤 노드가 차지하는 본문 줄 명령 수(화자로 옮긴 ADVTalkSystem 이름 줄 포함). */
+const bodyCmds = (n: ScriptNode): number =>
+  n.kind === "message" ? arr(n.lines).length + (n.nameLine ? 1 : 0) : n.kind === "scroll" ? arr(n.lines).length : 0;
 
 /** 노드의 하위 블록들(문서 순서). */
 function childBlocks(n: ScriptNode): ScriptNode[][] {
@@ -32,7 +35,7 @@ export function inlineQuestionStart(list: ScriptNode[], i: number): number {
   const prev = i > 0 ? list[i - 1] : undefined;
   if (!isNode(n) || n.kind !== "choices" || !isNode(prev) || prev.kind !== "message") return i;
   const pc = cmdOf(prev);
-  return pc !== undefined && pc + 1 + arr(prev.lines).length === n.cmd ? i - 1 : i;
+  return pc !== undefined && pc + 1 + bodyCmds(prev) === n.cmd ? i - 1 : i;
 }
 
 // ── 원본 명령 목록의 블록 구조 (interpret의 parseBlock과 같은 규칙) ──────────────
@@ -193,7 +196,7 @@ function remainingByList(nodes: ScriptNode[], p: number, list: EventCommand[]): 
         } else {
           from = cmdOf(n);
           if (from !== undefined) {
-            to = n.kind === "message" || n.kind === "scroll" ? from + arr(n.lines).length : from;
+            to = from + bodyCmds(n);
           }
         }
         if (from !== undefined && to !== undefined && from <= p) start = p <= to ? j : j + 1;

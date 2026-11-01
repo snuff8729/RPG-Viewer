@@ -5,6 +5,7 @@ import { formatText } from "../text/escape";
 import { describeBranchCondition } from "../conditions/describe";
 import { describeStateChange } from "./stateChange";
 import { dTextCaptionBefore } from "../text/textPicture";
+import { splitAdvNameLine } from "../text/advTalk";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -65,6 +66,19 @@ export function interpret(list: EventCommand[], data: GameData, ctx?: CallCtx | 
       if (m) {
         if (!speaker) speaker = formatText(m[1], data);
         firstLine = raw.slice(m[0].length);
+      }
+    }
+    // ADVTalkSystem 이름 창: 두 줄 이상이면 첫 줄이 화자(스위치 상태는 보지 않는 근사 — core/text/advTalk).
+    // MZ 화자 이름·이름 상자 코드가 있으면 그쪽이 먼저다.
+    if (data.advTalkNameLine && !speaker && firstLine === undefined) {
+      const raws: string[] = [];
+      for (let i = pos; i < cmds.length && cmds[i].code === 401; i++) raws.push(str(params(cmds[i])[0]));
+      const split = splitAdvNameLine(raws);
+      if (split) {
+        pos++; // 이름 줄은 본문에서 뺀다
+        node.nameLine = true;
+        const name = formatText(split.name, data);
+        if (name) speaker = name;
       }
     }
     if (!speaker && faceName) {

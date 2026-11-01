@@ -1,5 +1,6 @@
 import type { BranchPrefs, BranchSummary } from "@/core/live/branchTidy";
 import { formatText } from "@/core/text/escape";
+import { messageParts } from "@/core/text/advTalk";
 import type { GameData } from "@/core/types";
 import { pickedFallbackText } from "./historyText";
 
@@ -32,8 +33,9 @@ export function branchName(s: BranchSummary | undefined, prefs: BranchPrefs, dat
 export function lastLineText(s: BranchSummary, data: GameData | null | undefined): string | null {
   if (!s.lastLine) return null;
   const fmt = (raw: string) => (data ? formatText(raw, data) : raw).replace(/\s+/g, " ").trim();
-  const text = fmt(s.lastLine.text);
-  const speaker = s.lastLine.speaker ? fmt(s.lastLine.speaker) : "";
+  const parts = messageParts(s.lastLine.speaker, s.lastLine.text, data);
+  const text = fmt(parts.text);
+  const speaker = parts.speaker ? fmt(parts.speaker) : "";
   return speaker ? `${speaker}: ${text}` : text;
 }
 

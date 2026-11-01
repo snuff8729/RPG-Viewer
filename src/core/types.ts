@@ -93,6 +93,8 @@ export interface GameData {
   afterMenuCommonEvent?: number;
   /** plugins.js BY_PictureClassify의 그림 하위 폴더 규칙(파일 이름에 token이 들면 folder/ 안). 없으면 없음. */
   pictureFolders?: { token: string; folder: string }[];
+  /** plugins.js ADVTalkSystem이 켜짐: 두 줄 이상인 메시지의 첫 줄이 이름 창의 화자(core/text/advTalk). 없으면 false. */
+  advTalkNameLine?: boolean;
 }
 
 // ---- 해석 결과 ----
@@ -113,7 +115,8 @@ export interface Condition { text: string; refs: Ref[]; test?: ConditionTest }
 export interface FaceRef { name: string; index: number }
 /** `cmd`: 노드를 만든 101/105/102/231 명령의 원본 `list` 인덱스. */
 export type ScriptNode =
-  | { kind: "message"; cmd: number; face?: FaceRef; speaker?: string; lines: string[] }
+  /** nameLine: 첫 401 줄을 화자로 옮겨 lines에서 뺐다(ADVTalkSystem 이름 창) — 원본 명령 수 = 1 + lines.length + 1 */
+  | { kind: "message"; cmd: number; face?: FaceRef; speaker?: string; lines: string[]; nameLine?: true }
   | { kind: "scroll"; cmd: number; lines: string[] }
   | { kind: "choices"; cmd: number; branches: { label: string; body: ScriptNode[] }[]; cancelBranch?: ScriptNode[] }
   | { kind: "conditional"; condition: Condition; then: ScriptNode[]; else?: ScriptNode[] }

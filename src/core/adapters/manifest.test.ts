@@ -85,7 +85,7 @@ describe("adapter manifest", () => {
 describe("bundled adapters", () => {
   it("bundles every adapters/ folder with valid manifests", () => {
     const ids = BUNDLED_ADAPTERS.map(a => a.manifest.id);
-    expect(ids).toEqual(["by-work-element", "character-picture-manager", "ddaggeo-mode", "toast-achievement-notices"]);
+    expect(ids).toEqual(["adv-talk-system", "by-work-element", "character-picture-manager", "ddaggeo-mode", "toast-achievement-notices", "win-get-info"]);
     const cpm = BUNDLED_ADAPTERS.find(a => a.manifest.id === "character-picture-manager")!;
     expect(cpm.script).toContain("registerExtension");
     expect(cpm.viewer?.standGroupLabel?.({ key: "a1", actorId: 1, actorName: "아마네", pictures: [] })).toBe("아마네 스탠딩");
@@ -106,6 +106,18 @@ describe("bundled adapters", () => {
     expect(matchingAdapters(list, { plugins: ["BYWorkElement", "BY_Cosplay", "BY_Scenes", "AXY_Toast", "Torigoya_Achievement"] }).map(m => m.id))
       .toEqual(["by-work-element", "toast-achievement-notices"]);
     expect(matchingAdapters(list, { plugins: ["Torigoya_Achievement"] }).map(m => m.id)).toEqual(["toast-achievement-notices"]);
+    // ADV talk standing pictures + WinGetInfo acquisition popups
+    expect(matchingAdapters(list, { plugins: ["ADVTalkSystem", "WinGetInfo", "AXY_Toast"] }).map(m => m.id))
+      .toEqual(["adv-talk-system", "toast-achievement-notices", "win-get-info"]);
+  });
+
+  it("adv-talk-system / win-get-info: their defaults only", () => {
+    const adv = BUNDLED_ADAPTERS.find(a => a.manifest.id === "adv-talk-system")!;
+    expect(adv.script).toBeNull();
+    expect(adv.manifest.defaults).toEqual({ addons: { screenPictures: true }, pictureRoles: [{ from: 91, to: 92, role: "stand" }] });
+    const wgi = BUNDLED_ADAPTERS.find(a => a.manifest.id === "win-get-info")!;
+    expect(wgi.script).toBeNull();
+    expect(wgi.manifest.defaults).toEqual({ addons: { notices: true } });
   });
 
   it("toast-achievement-notices: turns the notices add-on on, nothing else", () => {

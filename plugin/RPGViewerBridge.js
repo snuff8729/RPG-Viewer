@@ -54,6 +54,7 @@
  * 한 번이라도 이겨 본 전투만 건너뜀, 이긴 적 목록은 rpg-viewer/defeated.json).
  * 1.25.0: 전투 뒤 처음 보는 장면은 허용된 패배 → 허용된 도망 → 승리 순으로 고릅니다.
  * 패배·도망으로 건너뛰면 파티를 건드리지 않고 보상도 받지 않습니다.
+ * 1.30.0: WinGetInfo가 띄우는 획득 알림(아이템·돈·변수 증가)도 알림 문구 기록에 획득으로 남깁니다.
  * 1.29.1: 건너뛰지 않은 전투는 끝 기록에 그 까닭(notSkipped)을 남깁니다.
  * 1.29.0: 현재 조건에서 볼 대화를 이미 본 전투는 건너뛰며, 이겨 본 적의 전투 변경 명령도 허용합니다.
  * 게임이 실행 중에 만든 이벤트(EventReSpawn 등)는 현재 상태에 원본 이벤트 번호를 함께 남깁니다.
@@ -72,7 +73,7 @@
   var G = Function("return this")();
 
   var bridge = {
-    VERSION: "1.29.1",
+    VERSION: "1.30.0",
     _flushNow: function () {},
     _snapshotNow: function () {},
     _tick: function () {},
@@ -268,6 +269,7 @@
   var noticeLast = { key: null, t: -Infinity, times: [] };
   var noticeWin = null;       // cached Window_Base-like object for convertEscapeCharacters
   // 1.19.0: an entry may build the text from the call (text: before the call, after: from its result / the screen)
+  // 1.30.0: an entry's kind marks all its notices (else the kind of the context call running now)
   var NOTICE_BUILTIN = [
     { path: "TickerManager.show", source: "ticker" },
     { path: "LiveCommentContainer.prototype.show", source: "livecomment" },
@@ -275,7 +277,9 @@
     { path: "Game_System.prototype.pushInfoEvent", source: "info" },
     { path: "jQuery.toaster", source: "toast", after: toasterText },                       // AXY_Toast (HTML toast)
     { path: "Torigoya.Achievement.Manager.notify", source: "achievement", text: achievementText },  // Torigoya_Achievement (MV)
-    { path: "Torigoya.Achievement2.manager.unlock", source: "achievement", before: achievement2Before, after: achievement2After }
+    { path: "Torigoya.Achievement2.manager.unlock", source: "achievement", before: achievement2Before, after: achievement2After },
+    // 1.30.0: WinGetInfo acquisition popup (item / money / variable gain), always a gain
+    { path: "Game_Screen.prototype._showGetInfo", source: "getinfo", kind: "gain", before: getInfoBefore, after: getInfoAfter }
   ];
   // 1.19.0: notices shown while these run are marked with what caused them (kind: "gain" / "quest")
   var NOTICE_CONTEXTS = [
@@ -3135,7 +3139,7 @@
     }
   }
 
-  function recordNotice(arg, source) {
+  function recordNotice(arg, source, kind) {
     if (!captureNotices || run === null) return;
     var raw = noticeArgText(arg);
     if (raw === null || !/\S/.test(raw)) return;
@@ -3151,7 +3155,8 @@
     if (n.times.length >= NOTICE_RATE_MAX) return;
     n.times.push(t);
     var fields = { source: source, text: text, raw: raw };
-    if (noticeKind !== null && source !== "achievement") fields.kind = noticeKind;
+    if (kind) fields.kind = kind;
+    else if (noticeKind !== null && source !== "achievement") fields.kind = noticeKind;
     emit("notice", fields);
   }
 
@@ -3173,12 +3178,12 @@
       if (captureNotices) {
         try {
           if (entry.before) pre = entry.before(this, arguments);
-          if (!entry.after) recordNotice(entry.text ? entry.text(this, arguments) : arguments[0], source);
+          if (!entry.after) recordNotice(entry.text ? entry.text(this, arguments) : arguments[0], source, entry.kind);
         } catch (e) { reportError(e); }
       }
       var r = orig.apply(this, arguments);
       if (captureNotices && entry.after) {
-        try { recordNotice(entry.after(this, arguments, r, pre), source); } catch (e2) { reportError(e2); }
+        try { recordNotice(entry.after(this, arguments, r, pre), source, entry.kind); } catch (e2) { reportError(e2); }
       }
       return r;
     };
@@ -3243,6 +3248,27 @@
     if (was !== false || typeof self.isUnlocked !== "function" || !self.isUnlocked(args[0])) return null;
     var d = typeof self.data === "function" ? self.data(args[0]) : null;
     return achievementLine(d && d.achievement ? d.achievement : d);
+  }
+
+  // WinGetInfo: Game_Screen._showGetInfo(item, amount, isAll) pushes a window onto this._infoWindow unless its
+  // disable switch is on. Recorded only when a window was added: "\I[icon]name x3", "500G", "variable +2".
+  function getInfoBefore(self) {
+    return self && self._infoWindow && typeof self._infoWindow.length === "number" ? self._infoWindow.length : 0;
+  }
+  function getInfoAfter(self, args, r, before) {
+    var wins = self && self._infoWindow;
+    if (!wins || typeof wins.length !== "number" || wins.length <= before) return null;
+    var item = args[0], amount = args[1];
+    if (!item || typeof item !== "object" || typeof amount !== "number" || !isFinite(amount)) return null;
+    if (item.type === "money") {
+      var tm = G.TextManager;
+      return String(amount) + (tm && typeof tm.currencyUnit === "string" ? tm.currencyUnit : "");
+    }
+    var name = typeof item.name === "string" ? item.name : "";
+    if (!/\S/.test(name)) return null;
+    if (item.type === "variable") return name + " " + (amount >= 0 ? "+" : "") + amount;
+    var icon = typeof item.iconIndex === "number" && item.iconIndex > 0 ? "\\I[" + item.iconIndex + "]" : "";
+    return icon + name + " x" + amount;
   }
 
   // Wraps every known notice API and every extra path that is a function right now (plugins may define

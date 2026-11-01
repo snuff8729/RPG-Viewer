@@ -1,5 +1,6 @@
 import { locationKey, pageLocation } from "../index/locations";
 import { formatText } from "../text/escape";
+import { messageParts } from "../text/advTalk";
 import { switchName } from "../text/names";
 import type { GameData, Location } from "../types";
 import { mismatchOf, pageList } from "./mismatch";
@@ -31,7 +32,8 @@ export function aftermathStep(st: AftermathState, r: LogRecord, data: GameData):
   const out = st.out;
   if (r.type === "message" && !st.messageDone) {
     st.messageDone = true;
-    out.push(`${formatText(String(r.speaker ?? ""), data) || "(내레이션)"}: "${formatText(firstLine(r.text), data)}"`);
+    const m = messageParts(r.speaker, r.text, data);
+    out.push(`${formatText(m.speaker, data) || "(내레이션)"}: "${formatText(firstLine(m.text), data)}"`);
   } else if (r.type === "state" && Array.isArray(r.changes)) {
     for (const ch of r.changes) {
       if (out.length >= AFTERMATH_MAX) break;
