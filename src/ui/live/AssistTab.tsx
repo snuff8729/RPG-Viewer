@@ -20,6 +20,8 @@ import { withObjectParticle, type AssistFavoriteSlot } from "./assistItems";
 import { AssistPinToggle } from "./AssistPinToggle";
 import { BackupNowButton, RestoreLatestButton, useBackupControls } from "./BackupControls";
 import { NotConnectedEmpty } from "./NotConnectedEmpty";
+import { ConnectionActionButton, useConnectionAction } from "./ConnectionAction";
+import { useConnectionStatus } from "./useConnectionStatus";
 import { useAssistGuards, useAssistSession, type AssistSession } from "./useAssistSession";
 
 export interface AssistTabProps {
@@ -34,9 +36,30 @@ const pin: AssistFavoriteSlot = (id) => <AssistPinToggle id={id} />;
 const note = "text-xs text-muted-foreground";
 
 /** 플러그인이 낮아 못 쓰는 것들을 한 번에 알려요(줄마다 반복하지 않아요). */
+/** 업데이트 알림의 버튼: 디스크의 플러그인이 예전 것이면 [업데이트], 이미 새 것이면 다시 실행하라고만 알려요. */
+function UpdateAction() {
+  const ctl = useConnectionAction();
+  if (ctl.status.remote) return <p>{terms.pcOnly}</p>;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {ctl.status.state === "update" ? <ConnectionActionButton action="update" ctl={ctl} size="sm" /> : <p>새 플러그인이 설치돼 있어요. 게임을 다시 실행하면 적용돼요.</p>}
+      <Button variant="link" size="sm" className="h-auto p-0" asChild><a href="#/manage/connection">자세히</a></Button>
+      {ctl.dialog}
+    </div>
+  );
+}
+
+/** 보조 화면에 업데이트 알림이 보이는지(단축키 불일치 같은 다른 업데이트 안내는 겹쳐 보이지 않게) */
+function useUpdateNoticeShown(): boolean {
+  const g = useAssistGuards();
+  const { state } = useConnectionStatus();
+  return state === "update" || !g.supported || !g.hpSupported || !g.saveSupported || !g.enemyHpSupported || !g.encounterSupported || !g.walkSpeedSupported;
+}
+
 function UpdateNotice() {
   const { live } = useLive();
   const g = useAssistGuards();
+  const status = useConnectionStatus();
   if (!g.supported) {
     return (
       <Alert>
@@ -44,7 +67,7 @@ function UpdateNotice() {
         <AlertTitle>기록 플러그인을 업데이트해 주세요</AlertTitle>
         <AlertDescription>
           <p>보조는 기록 플러그인 {ASSIST_MIN_VERSION} 이상에서 쓸 수 있어요{live?.pluginVersion ? ` (지금 ${live.pluginVersion})` : ""}.</p>
-          <Button variant="link" size="sm" className="h-auto p-0" asChild><a href="#/manage/connection">관리 › {terms.connection}로</a></Button>
+          <UpdateAction />
         </AlertDescription>
       </Alert>
     );
@@ -56,7 +79,18 @@ function UpdateNotice() {
     ...(!g.encounterSupported ? [["랜덤 전투 끄기·전투 건너뛰기", ENCOUNTER_MIN_VERSION] as [string, string]] : []),
     ...(!g.walkSpeedSupported ? [["이동 속도", WALK_SPEED_MIN_VERSION] as [string, string]] : []),
   ];
-  if (missing.length === 0) return null;
+  if (missing.length === 0) {
+    if (status.state !== "update") return null;
+    return (
+      <Alert>
+        <CircleAlert />
+        <AlertTitle>기록 플러그인을 업데이트해 주세요</AlertTitle>
+        <AlertDescription>
+          <UpdateAction />
+        </AlertDescription>
+      </Alert>
+    );
+  }
   const version = missing[missing.length - 1][1];
   return (
     <Alert>
@@ -64,7 +98,7 @@ function UpdateNotice() {
       <AlertTitle>기록 플러그인을 {version}으로 업데이트하면 더 쓸 수 있어요</AlertTitle>
       <AlertDescription>
         <p>{missing.map(([name]) => name).join(" · ")}</p>
-        <Button variant="link" size="sm" className="h-auto p-0" asChild><a href="#/manage/connection">관리 › {terms.connection}로</a></Button>
+        <UpdateAction />
       </AlertDescription>
     </Alert>
   );
@@ -89,7 +123,10 @@ function AssistCards({ session, active }: { session: AssistSession; active: bool
   const backup = useBackupControls();
   /** 게임이 기억하는 이겨 본 적 종류 수(플러그인 1.24.0) */
   const knownEnemies: unknown = live?.assist?.knownEnemies;
-  const { statusText, hpSent, saveSent, showMismatch } = session;
+  const { statusText, hpSent, saveSent } = session;
+  // 위에 업데이트 알림이 있으면 단축키 칸의 업데이트 안내는 겹쳐 보이지 않아요
+  const updateShown = useUpdateNoticeShown();
+  const showMismatch = session.showMismatch && !updateShown;
   /** 게임이 알려 준 지금의 퀵 세이브 칸 */
   const liveSlot: unknown = live?.assist?.quickSlot;
   /** 게임 창에서 실제로 걸린 지기 단축키 */

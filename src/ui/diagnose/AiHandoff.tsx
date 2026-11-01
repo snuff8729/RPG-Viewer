@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Bot, Check, Copy, Languages } from "lucide-react";
+import { useState } from "react";
+import { Bot, Copy, Languages } from "lucide-react";
+import { toast } from "sonner";
 import { useGame } from "@/app/GameProvider";
 import { agentInstruction, exportMasked, unmaskWithGame, type MaskExportResult, type UnmaskResult } from "@/app/maskApi";
 import { isRemoteFolder, ServerFolder } from "@/app/serverFolder";
@@ -15,12 +16,6 @@ import { useGamePath, useLauncherAvailable } from "@/ui/live/useGamePath";
 
 /** 읽기 전용 한 줄 + 복사 버튼 */
 function CopyField({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const id = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(id);
-  }, [copied]);
   return (
     <InputGroup>
       <InputGroupInput readOnly value={value} aria-label={label} onFocus={(e) => e.target.select()} />
@@ -28,9 +23,13 @@ function CopyField({ value, label }: { value: string; label: string }) {
         <InputGroupButton
           size="icon-xs"
           aria-label={`${label} 복사`}
-          onClick={() => { void navigator.clipboard.writeText(value).then(() => setCopied(true)).catch(() => {}); }}
+          onClick={() => {
+            void navigator.clipboard.writeText(value)
+              .then(() => toast.success("복사했어요"))
+              .catch(() => toast.error("복사하지 못했어요. 브라우저가 클립보드를 막았을 수 있어요."));
+          }}
         >
-          {copied ? <Check /> : <Copy />}
+          <Copy />
         </InputGroupButton>
       </InputGroupAddon>
     </InputGroup>

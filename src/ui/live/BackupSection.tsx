@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import {
@@ -71,7 +72,6 @@ export function BackupSection() {
   const [list, setList] = useState<BackupList | null>(null);
   const backups = list?.backups ?? null;
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -109,7 +109,6 @@ export function BackupSection() {
     if (!path) return;
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       await fn(path);
     } finally {
@@ -121,12 +120,12 @@ export function BackupSection() {
     run(async (p) => {
       const r = await makeBackup(p, "manual", "직접 백업", name.trim() || undefined);
       if (!r.ok) {
-        setError(r.error);
+        toast.error(`백업하지 못했어요: ${r.error}`);
         return;
       }
       notifyBackupsChanged();
       setName("");
-      setNotice("백업했어요");
+      toast.success(r.skipped ? "바뀐 게 없어서 지난 백업을 그대로 둬요" : "백업했어요");
       await reload();
     });
 
@@ -140,9 +139,9 @@ export function BackupSection() {
   const onRestore = (c: Extract<Confirm, { kind: "restore" }>) =>
     run(async (p) => {
       const r = await restoreAndRestart(p, c.backup.id, c.running || c.launch);
-      if (!r.ok) setError(r.error ?? "복원하지 못했어요");
-      else if (r.error) setError(`복원했지만 게임을 다시 실행하지 못했어요: ${r.error}`);
-      else setNotice(r.relaunched ? "복원하고 게임을 실행했어요" : "복원했어요");
+      if (!r.ok) toast.error(r.error ? `복원하지 못했어요: ${r.error}` : "복원하지 못했어요");
+      else if (r.error) toast.error(`복원했지만 게임을 다시 실행하지 못했어요: ${r.error}`);
+      else toast.success(r.relaunched ? "복원하고 게임을 실행했어요" : "복원했어요");
       notifyBackupsChanged();
       await reload();
     });
@@ -150,7 +149,8 @@ export function BackupSection() {
   const onDelete = (backup: BackupMeta) =>
     run(async (p) => {
       const r = await removeBackup(p, backup.id);
-      if (!r.ok) setError(r.error);
+      if (!r.ok) toast.error(`지우지 못했어요: ${r.error}`);
+      else toast.success("지웠어요");
       await reload();
     });
 
@@ -198,11 +198,6 @@ export function BackupSection() {
           {error !== null && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {notice !== null && (
-            <Alert>
-              <AlertDescription>{notice}</AlertDescription>
             </Alert>
           )}
           {list?.saveDir !== undefined && <p className="text-xs text-muted-foreground">세이브 폴더: {list.saveDir}</p>}

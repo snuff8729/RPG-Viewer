@@ -26,6 +26,19 @@ import { isRemoteView } from "@/app/share";
 import { useRemoteGame } from "@/app/useRemoteGame";
 import { RemoteScreen } from "@/ui/RemoteScreen";
 import { DiagnosisProvider } from "@/app/DiagnosisProvider";
+import { Toaster } from "@/components/ui/sonner";
+import { useCompact } from "@/hooks/use-compact";
+import { PluginBanner } from "@/ui/live/PluginBanner";
+
+/** 잠깐 보이는 결과 알림(화면 배치를 밀지 않아요). 휴대폰 배치에서는 아래 탭 막대 위로 띄워요. */
+function AppToaster() {
+  const compact = useCompact();
+  return compact ? (
+    <Toaster position="bottom-center" offset={{ bottom: 72 }} mobileOffset={{ bottom: 72 }} />
+  ) : (
+    <Toaster position="bottom-right" />
+  );
+}
 
 function Shell() {
   const { status, data, index } = useGame();
@@ -65,6 +78,7 @@ function Shell() {
   return (
     <div className="flex h-svh min-w-0 flex-col overflow-hidden">
       <AppHeader route={route} onSearch={() => setSearchOpen(true)} />
+      <PluginBanner route={route} />
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         {route.kind === "play" && <PlayView />}
         {(route.kind === "browse" || route.kind === "page") && (
@@ -93,6 +107,7 @@ export default function App() {
                 <ReaderFileProvider>
                   <DiagnosisProvider>
                     <Shell />
+                    <AppToaster />
                   </DiagnosisProvider>
                 </ReaderFileProvider>
               </FavoritesProvider>

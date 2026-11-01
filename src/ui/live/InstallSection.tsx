@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLive, useLiveStatus } from "@/app/LiveProvider";
-import type { InstallResult, InstallStatus } from "@/core/live/installer";
+import { toast } from "sonner";
+import type { InstallStatus } from "@/core/live/installer";
+import { installResultText } from "./connectionGuide";
 import { fsAccessSupport, type FsAccessWindow } from "../fsAccess";
 import { formatBytes } from "./formatBytes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,31 +32,36 @@ function statusLabel(s: InstallStatus | null): string {
   }
 }
 
-type Outcome = { action: "install" | "uninstall"; result: InstallResult };
-
 export function InstallSection() {
   const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion } = useLive();
   const { logStats } = useLiveStatus();
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   useEffect(() => {
     void refreshInstall();
   }, [refreshInstall]);
 
-  const run = async (action: Outcome["action"]) => {
+  const installed = install?.state === "installed";
+  const outdated = install?.state === "installed" && install.outdated;
+
+  const run = async (action: "install" | "uninstall") => {
     setBusy(true);
     try {
-      const result = action === "install" ? await doInstall() : await doUninstall();
-      setOutcome({ action, result });
+      if (action === "install") {
+        const kind = outdated ? "update" : "install";
+        const r = await doInstall();
+        if (r.ok) toast.success(installResultText(kind, true));
+        else toast.error(installResultText(kind, false, r.message));
+      } else {
+        const r = await doUninstall();
+        if (r.ok) toast.success("제거했어요. 게임을 다시 시작하면 적용돼요.");
+        else toast.error(r.message);
+      }
     } finally {
       setBusy(false);
     }
   };
-
-  const installed = install?.state === "installed";
-  const outdated = install?.state === "installed" && install.outdated;
 
   return (
     <div className="space-y-4">
@@ -81,17 +88,6 @@ export function InstallSection() {
           {install?.state === "unsupported" && (
             <Alert variant="destructive">
               <AlertDescription>{install.reason}</AlertDescription>
-            </Alert>
-          )}
-          {outcome && (
-            <Alert variant={outcome.result.ok ? "default" : "destructive"}>
-              <AlertDescription>
-                {outcome.result.ok
-                  ? outcome.action === "install"
-                    ? "설치했어요. 게임을 다시 시작하면 기록을 시작해요."
-                    : "제거했어요. 게임을 다시 시작하면 적용돼요."
-                  : outcome.result.message}
-              </AlertDescription>
             </Alert>
           )}
         </div>

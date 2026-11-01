@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { ArchiveRestore, Save } from "lucide-react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
@@ -9,7 +10,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AssistControlSize } from "./AssistControls";
 import { assistFavoriteLabel, assistFavoriteShortLabel } from "./assistItems";
 import { gameKeyOf } from "./readPosition";
@@ -20,9 +20,6 @@ const formatTime = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : timeFormat.format(d);
 };
-
-/** 결과 글을 보이는 시간 */
-const NOTE_MS = 4000;
 
 /**
  * 백업·복원 버튼 하나씩을 쓸 수 있는지: 관리의 세이브 백업과 같은 조건(PC의 뷰어 서버, 게임 연결 지원).
@@ -39,17 +36,6 @@ export function useBackupControls(): { path: string | null } | null {
   return { path };
 }
 
-/** 잠깐 보이는 결과 글 */
-function useNote(): [string | null, (s: string | null) => void] {
-  const [note, setNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (note === null) return;
-    const id = setTimeout(() => setNote(null), NOTE_MS);
-    return () => clearTimeout(id);
-  }, [note]);
-  return [note, setNote];
-}
-
 interface Props {
   size?: AssistControlSize;
   /** 칸 오른쪽 끝에 둘 것(예: 즐겨찾기 ☆). 있으면 버튼이 칸을 채운다(보조 탭 칸 나눔과 같은 모양). */
@@ -60,17 +46,12 @@ interface Props {
 
 const NO_PATH = "관리의 연결·실행에서 게임 폴더 위치를 먼저 정해 주세요";
 
-/** 버튼 + 결과 글(툴팁) + 오른쪽 끝에 둘 것 */
-function BackupControlShell({ button, tip, favorite }: { button: ReactNode; tip: string | null; favorite?: ReactNode }) {
+/** 버튼 + 오른쪽 끝에 둘 것(결과 글은 토스트로 알려요) */
+function BackupControlShell({ button, favorite }: { button: ReactNode; favorite?: ReactNode }) {
   const fill = favorite != null;
   return (
     <span className={fill ? "flex min-w-0 items-center gap-1" : "inline-flex items-center gap-1"}>
-      {tip === null ? button : (
-        <Tooltip open>
-          <TooltipTrigger asChild><span className={fill ? "flex min-w-0 flex-1" : "inline-flex"}>{button}</span></TooltipTrigger>
-          <TooltipContent>{tip}</TooltipContent>
-        </Tooltip>
-      )}
+      {button}
       {fill && <span className="ml-auto shrink-0">{favorite}</span>}
     </span>
   );
@@ -80,7 +61,6 @@ function BackupControlShell({ button, tip, favorite }: { button: ReactNode; tip:
 export function BackupNowButton({ size = "sm", favorite, short }: Props) {
   const ctl = useBackupControls();
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useNote();
   if (!ctl) return null;
   const { path } = ctl;
   const onClick = async () => {
@@ -88,9 +68,9 @@ export function BackupNowButton({ size = "sm", favorite, short }: Props) {
     setBusy(true);
     try {
       const r = await makeBackup(path, "manual", "직접 백업");
-      if (!r.ok) { setNote(`백업하지 못했어요: ${r.error}`); return; }
+      if (!r.ok) { toast.error(`백업하지 못했어요: ${r.error}`); return; }
       notifyBackupsChanged();
-      setNote(r.skipped ? "바뀐 게 없어서 지난 백업을 그대로 둬요" : "백업했어요");
+      toast.success(r.skipped ? "바뀐 게 없어서 지난 백업을 그대로 둬요" : "백업했어요");
     } finally {
       setBusy(false);
     }
@@ -103,7 +83,7 @@ export function BackupNowButton({ size = "sm", favorite, short }: Props) {
       <Save />{busy ? "백업 중…" : short ? assistFavoriteShortLabel("backup") : assistFavoriteLabel("backup")}
     </Button>
   );
-  return <BackupControlShell button={button} tip={note} favorite={favorite} />;
+  return <BackupControlShell button={button}favorite={favorite} />;
 }
 
 /**
@@ -113,7 +93,6 @@ export function BackupNowButton({ size = "sm", favorite, short }: Props) {
 export function RestoreLatestButton({ size = "sm", favorite, short }: Props) {
   const ctl = useBackupControls();
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useNote();
   const [target, setTarget] = useState<BackupMeta | null>(null);
   if (!ctl) return null;
   const { path } = ctl;
@@ -122,9 +101,9 @@ export function RestoreLatestButton({ size = "sm", favorite, short }: Props) {
     setBusy(true);
     try {
       const list = await fetchBackups(path);
-      if (!list.ok) { setNote(`백업 목록을 읽지 못했어요: ${list.error}`); return; }
+      if (!list.ok) { toast.error(`백업 목록을 읽지 못했어요: ${list.error}`); return; }
       const b = latestRestorable(list.backups);
-      if (!b) { setNote("되돌릴 백업이 없어요"); return; }
+      if (!b) { toast.error("되돌릴 백업이 없어요"); return; }
       setTarget(b);
     } finally {
       setBusy(false);
@@ -135,9 +114,9 @@ export function RestoreLatestButton({ size = "sm", favorite, short }: Props) {
     setBusy(true);
     try {
       const r = await restoreAndRestart(path, b.id, true);
-      if (!r.ok) setNote(`복원하지 못했어요: ${r.error ?? "알 수 없는 오류"}`);
-      else if (r.error) setNote(`복원했지만 게임을 다시 실행하지 못했어요: ${r.error}`);
-      else setNote(r.relaunched ? "복원하고 게임을 실행했어요" : "복원했어요");
+      if (!r.ok) toast.error(`복원하지 못했어요: ${r.error ?? "알 수 없는 오류"}`);
+      else if (r.error) toast.error(`복원했지만 게임을 다시 실행하지 못했어요: ${r.error}`);
+      else toast.success(r.relaunched ? "복원하고 게임을 실행했어요" : "복원했어요");
       notifyBackupsChanged();
     } finally {
       setBusy(false);
@@ -153,7 +132,7 @@ export function RestoreLatestButton({ size = "sm", favorite, short }: Props) {
   );
   return (
     <>
-      <BackupControlShell button={button} tip={note} favorite={favorite} />
+      <BackupControlShell button={button}favorite={favorite} />
       <AlertDialog open={target !== null} onOpenChange={(o) => { if (!o) setTarget(null); }}>
         <AlertDialogContent size="sm">
           {target && (

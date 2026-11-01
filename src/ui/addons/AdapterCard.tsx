@@ -1,5 +1,6 @@
 import { SettingsDescription } from "./SettingsDescription";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useAddons } from "@/app/AddonsProvider";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
@@ -59,24 +60,27 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
   const { isAdapterOn, setAdapterOn, isAdapterOptionOn, setAdapterOption } = useAddons();
   const { connection, live } = useLive();
   const { status, run, canInstall, remote } = useAdapterInstall(adapter);
-  const [result, setResult] = useState<AdapterInstallResult | null>(null);
   const [busy, setBusy] = useState(false);
   const { id, label, description } = adapter.manifest;
   const on = isAdapterOn(id);
   const hasScript = adapter.script !== null;
   const htmlId = `adapter-${id}`;
 
+  /** 설치·제거 결과는 화면을 밀지 않게 토스트로 알려요 */
+  const notify = (installed: boolean, r: AdapterInstallResult) => {
+    if (!r.ok) { toast.error(r.message); return; }
+    const description = r.unknownTokens !== undefined ? unknownTokensNote(r.unknownTokens) : undefined;
+    toast.success(installed ? "게임 쪽 확장을 설치했어요. 게임을 다시 시작하면 적용돼요." : "게임 쪽 확장을 뺐어요. 게임을 다시 시작하면 적용돼요.", { description });
+  };
   const toggle = (v: boolean) => {
     setAdapterOn(id, v);
-    setResult(null);
     if (!hasScript || !canInstall) return;
     setBusy(true);
-    void run(v).then(setResult).finally(() => setBusy(false));
+    void run(v).then((r) => notify(v, r)).finally(() => setBusy(false));
   };
   const reinstall = () => {
     setBusy(true);
-    setResult(null);
-    void run(true).then(setResult).finally(() => setBusy(false));
+    void run(true).then((r) => notify(true, r)).finally(() => setBusy(false));
   };
 
   const applied = Array.isArray(live?.assist?.extensions) && live.assist.extensions.includes(id);
@@ -124,18 +128,6 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
               <span className="text-muted-foreground">게임 쪽 확장이 설치되지 않았어요.</span>
               <Button size="sm" variant="outline" disabled={busy} onClick={reinstall}>설치</Button>
             </div>
-          )}
-          {result && (
-            <Alert variant={result.ok ? "default" : "destructive"}>
-              <AlertDescription>
-                {result.ok ? "게임 쪽 확장을 설치했어요. 게임을 다시 시작하면 적용돼요." : result.message}
-              </AlertDescription>
-            </Alert>
-          )}
-          {result?.ok && result.unknownTokens !== undefined && (
-            <Alert>
-              <AlertDescription>{unknownTokensNote(result.unknownTokens)}</AlertDescription>
-            </Alert>
           )}
           {hasScript && connection === "connected" && live && !versionAtLeast(live.pluginVersion, MIN_BRIDGE) && (
             <Alert>

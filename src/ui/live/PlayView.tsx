@@ -8,6 +8,8 @@ import { PopoutButton, PoppedOutNotice, useModulePoppedOut } from "./PopoutContr
 import { CollapsedTools, ToolsColumn } from "./PlayTools";
 import { MobilePlayView } from "./MobilePlayView";
 import { QuickBar } from "./QuickBar";
+import { useLive } from "@/app/LiveProvider";
+import { NotConnectedEmpty } from "./NotConnectedEmpty";
 
 const layoutStore = safeStore();
 /** 접은 도구 칸 너비(px): 펼치기·탭 아이콘만 세로로 */
@@ -44,6 +46,15 @@ function PlayPanels() {
 export function PlayView() {
   const compact = useCompact();
   const mapOut = useModulePoppedOut("map");
+  const { connection } = useLive();
+  // 연결 전에는 칸·탭마다 안내하지 않고 플레이 화면 전체에 지금 할 단계 하나만 보여요.
+  if (connection !== "connected") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <NotConnectedEmpty />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <QuickBar />

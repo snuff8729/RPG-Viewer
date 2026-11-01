@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { FolderCog, Play } from "lucide-react";
+import { toast } from "sonner";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { launchGame } from "@/app/launcher";
@@ -9,9 +10,6 @@ import { GamePathDialog } from "./GamePathDialog";
 import { useGamePath, useLauncherAvailable } from "./useGamePath";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-
-/** 실행 뒤 `실행했어요`를 보여 주는 시간 */
-const LAUNCHED_MS = 3000;
 
 export interface GameLauncher {
   /** 실행할 수 있는 곳인지(뷰어 서버·게임 연결 지원). false면 아무것도 그리지 않는다. */
@@ -23,8 +21,6 @@ export interface GameLauncher {
   /** 위치를 직접 정한 게임이면 위치 바꾸기를 보인다 */
   canChangePath: boolean;
   changePath(): void;
-  /** `실행했어요`·실패 글(없으면 null) */
-  status: ReactNode;
   /** 위치 창. 화면에 늘 그려 둔다(메뉴 안이 아니라 바깥에). */
   dialog: ReactNode;
 }
@@ -41,20 +37,12 @@ export function useGameLauncher(): GameLauncher {
   const available = useLauncherAvailable();
   const gameKey = data ? gameKeyOf(data) : null;
   const { path: savedPath, save: setSavedPath, fromServer } = useGamePath(gameKey);
-  const [launchError, setLaunchError] = useState<string | null>(null);
-
   const [dialog, setDialog] = useState<{ open: boolean; path: string; error: string | null }>({ open: false, path: "", error: null });
   const [busy, setBusy] = useState(false);
-  const [launchedAt, setLaunchedAt] = useState<number | null>(null);
-  useEffect(() => {
-    if (launchedAt === null) return;
-    const id = setTimeout(() => setLaunchedAt(null), LAUNCHED_MS);
-    return () => clearTimeout(id);
-  }, [launchedAt]);
 
   const running = connection === "connected";
   if (!data || !gameKey || !supported || !available) {
-    return { visible: false, running, busy, launch: () => {}, canChangePath: false, changePath: () => {}, status: null, dialog: null };
+    return { visible: false, running, busy, launch: () => {}, canChangePath: false, changePath: () => {}, dialog: null };
   }
 
   const openDialog = (path: string, error: string | null) => setDialog({ open: true, path, error });
@@ -70,7 +58,7 @@ export function useGameLauncher(): GameLauncher {
       }
       const r = await launchGame(path);
       if (!r.ok) return r.error ?? "실행하지 못했어요";
-      setLaunchedAt(Date.now());
+      toast.success("게임을 실행했어요");
       return null;
     } finally {
       setBusy(false);
@@ -78,19 +66,15 @@ export function useGameLauncher(): GameLauncher {
   };
 
   const onMainClick = async () => {
-    setLaunchError(null);
     if (savedPath === null) { openDialog("", null); return; }
     const err = await launch(savedPath);
-    // 뷰어 서버로 연 게임은 경로를 이미 알므로 묻지 않고 오류만 보여 준다.
+    // 뷰어 서버로 연 게임은 경로를 이미 알므로 묻지 않고 오류만 알려 준다.
     if (err !== null) {
-      if (fromServer) setLaunchError(err);
+      if (fromServer) toast.error(err);
       else openDialog(savedPath, err);
     }
   };
 
-  const status = launchedAt !== null
-    ? <span className="text-sm text-muted-foreground">실행했어요</span>
-    : launchError !== null ? <span className="text-sm text-destructive">{launchError}</span> : null;
   const dialogEl = (
     <GamePathDialog
       open={dialog.open}
@@ -109,7 +93,7 @@ export function useGameLauncher(): GameLauncher {
   return {
     visible: true, running, busy, launch: () => void onMainClick(),
     canChangePath: savedPath !== null && !fromServer, changePath: () => { if (savedPath !== null) openDialog(savedPath, null); },
-    status, dialog: dialogEl,
+    dialog: dialogEl,
   };
 }
 
@@ -121,7 +105,6 @@ export function LaunchButton() {
   if (!g.visible) return null;
   return (
     <>
-      {g.status}
       <Button variant="outline" size="sm" disabled={g.running || g.busy} onClick={g.launch}>
         <Play />{g.running ? "실행 중" : "게임 실행"}
       </Button>
