@@ -1,3 +1,4 @@
+import { SettingsDescription } from "./SettingsDescription";
 import { useCallback, useEffect, useState } from "react";
 import { useAddons } from "@/app/AddonsProvider";
 import { useGame } from "@/app/GameProvider";
@@ -12,7 +13,7 @@ import { versionAtLeast } from "@/core/live/assist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
@@ -86,7 +87,7 @@ export function AdapterCard({ adapter }: { adapter: BundledAdapter }) {
           <Label htmlFor={htmlId}>{label}</Label>
           <Badge>이 게임 전용</Badge>
         </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <SettingsDescription summary="이 게임 전용 기록과 표시 방법을 켜요." detail={description} />
         <CardAction>
           <Switch id={htmlId} checked={on} disabled={busy} onCheckedChange={toggle} />
         </CardAction>

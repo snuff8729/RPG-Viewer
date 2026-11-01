@@ -27,5 +27,6 @@ describe("map legend toggles", () => {
     expect(mapMarkers(listed, parseLegendHidden(null)).map(x => x.eventId)).toEqual([1, 2, 4]);
     expect(visibleByLegend(listed, hidden).map(x => x.eventId)).toEqual([1, 3, 5]);
     expect(visibleByLegend(listed, new Set())).toBe(listed);
+    expect(visibleByLegend(listed, new Set(["storyEvents"] as const)).map(x => x.eventId)).toEqual([1, 2, 3, 4]);
   });
 });

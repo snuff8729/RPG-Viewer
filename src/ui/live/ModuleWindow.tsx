@@ -3,8 +3,8 @@ import { useGame } from "@/app/GameProvider";
 import { POPOUT_LABEL, type ModuleWindowParams, type PopoutModule } from "@/app/popout";
 import { StartScreen } from "@/ui/StartScreen";
 import { AssistTab } from "./AssistTab";
-import { CheatContent } from "./cheat/CheatSheet";
-import { ConnectionBadge } from "./ConnectionBadge";
+import { CheatContent } from "./cheat/CheatContent";
+import { ConnectionStatusButton } from "./ConnectionStatusButton";
 import { MapColumn } from "./PlayMapColumn";
 import { ReaderFill } from "./PlayTools";
 import { PlayTopBarMapName } from "./PlayTopBarMapName";
@@ -35,7 +35,7 @@ export function ModuleWindow({ module, game }: ModuleWindowParams) {
   return (
     <div className="flex h-svh min-h-0 flex-col">
       <header className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1">
-        <ConnectionBadge />
+        <ConnectionStatusButton />
         <span className="text-sm font-semibold">{POPOUT_LABEL[module]}</span>
         {module === "map" && <PlayTopBarMapName />}
       </header>

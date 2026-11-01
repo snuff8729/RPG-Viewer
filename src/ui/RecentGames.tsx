@@ -66,7 +66,7 @@ export function RecentGames({ items, serverAvailable, busy, onOpen }: {
   if (pinned.length === 0 && recent.length === 0) return null;
   return (
     <div className="flex flex-col gap-4">
-      {section("고정", pinned)}
+      {section("고정한 게임", pinned)}
       {section("최근 게임", recent)}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { terms } from "@/ui/terms";
 import { Pencil, Search, Star } from "lucide-react";
 import { systemEntries, type SearchEntry } from "@/core/live/cheat";
 import { favoriteEntries, findFavorite, NICKNAME_MAX, searchWithNicknames, type FavoriteKind } from "@/core/live/favorites";
@@ -82,7 +83,7 @@ function VariableRow({ entry, live, disabled, apply, finder, note, badge, editab
   const [text, setText] = useState("");
   const current = live ? liveVariable(live, entry.id) : null;
   const n = parseIntInput(text);
-  const desc = note ?? `지금 ${current === null ? "?" : current}`;
+  const desc = note ?? `지금 ${current === null ? terms.notLiveValue : current}`;
   const nick = nicknameOf(finder, "variable", entry.id);
   return (
     <Item variant="outline" size="xs">
@@ -236,7 +237,7 @@ function NarrowSearch({ names, ...rp }: RowProps & { names: Names }) {
             {shown.map((c) => {
               const e = entries[c.id - 1] ?? { id: c.id, name: "" };
               const now = live ? liveVariable(live, c.id) : null;
-              return <VariableRow key={c.id} entry={e} note={`기억 ${c.prev} → 지금 ${now === null ? "?" : now}`} {...rp} />;
+              return <VariableRow key={c.id} entry={e} note={`기억 ${c.prev} → 지금 ${now === null ? terms.notLiveValue : now}`} {...rp} />;
             })}
           </ItemGroup>
           {narrow.candidates.length > LIST_LIMIT && <Hint>앞의 {LIST_LIMIT}개만 보여요. 더 좁혀 주세요</Hint>}
@@ -299,7 +300,11 @@ const MODES: { value: FinderMode; label: string; switches?: boolean }[] = [
  * `스위치·변수` 탭(고급): 즐겨찾기·이름·번호(변수는 값·좁혀 찾기·최근 바뀜도)로 찾아 켜고 끄거나 값을 바꾼다.
  * 즐겨찾기가 있으면 즐겨찾기를 먼저 보여 준다.
  */
-export function SwitchesTab({ data, live, disabled, apply, finder }: CheatTabProps & { finder: VariableFinder }) {
+export function SwitchesTab({ data, live, disabled, apply, finder, fixedKind = false }: CheatTabProps & {
+  finder: VariableFinder;
+  /** 바깥 탭(변수 · 스위치)이 종류를 정하면 true: 안쪽 변수·스위치 고르기를 숨겨요 */
+  fixedKind?: boolean;
+}) {
   const { kind, setKind, mode } = finder;
   const [query, setQuery] = useState("");
   const names = kind === "switch" ? data.system.switches : data.system.variables;
@@ -312,10 +317,12 @@ export function SwitchesTab({ data, live, disabled, apply, finder }: CheatTabPro
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
+        {!fixedKind && (
         <ToggleGroup type="single" variant="outline" size="sm" value={kind} onValueChange={(v) => { if (v === "switch" || v === "variable") setKind(v); }}>
           <ToggleGroupItem value="variable">변수</ToggleGroupItem>
           <ToggleGroupItem value="switch">스위치</ToggleGroupItem>
         </ToggleGroup>
+        )}
         <Tabs value={mode} onValueChange={(v) => finder.setMode(v as FinderMode)}>
           <TabsList className="w-full">
             {modes.map((m) => (

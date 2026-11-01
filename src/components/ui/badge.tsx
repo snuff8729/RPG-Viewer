@@ -8,6 +8,9 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
+        success: "bg-success text-success-foreground",
+        warning: "bg-warning text-warning-foreground",
+        info: "bg-info text-info-foreground",
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",

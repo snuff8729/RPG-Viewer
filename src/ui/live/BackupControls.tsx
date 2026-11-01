@@ -25,7 +25,7 @@ const formatTime = (iso: string) => {
 const NOTE_MS = 4000;
 
 /**
- * 백업·복원 버튼 하나씩을 쓸 수 있는지: 백업 창(BackupButton)과 같은 조건(PC의 뷰어 서버, 게임 연결 지원).
+ * 백업·복원 버튼 하나씩을 쓸 수 있는지: 관리의 세이브 백업과 같은 조건(PC의 뷰어 서버, 게임 연결 지원).
  * 휴대폰 보기에서는 쓰지 않는다(null). 게임 폴더 위치를 모르면 path = null(버튼은 꺼지고 백업 창에서 정하라고 안내).
  */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -58,7 +58,7 @@ interface Props {
   short?: boolean;
 }
 
-const NO_PATH = "백업 창에서 게임 폴더 위치를 먼저 정해 주세요";
+const NO_PATH = "관리의 연결·실행에서 게임 폴더 위치를 먼저 정해 주세요";
 
 /** 버튼 + 결과 글(툴팁) + 오른쪽 끝에 둘 것 */
 function BackupControlShell({ button, tip, favorite }: { button: ReactNode; tip: string | null; favorite?: ReactNode }) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BookOpenText, FolderOpen, Map as MapIcon, Zap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -85,9 +86,15 @@ export function StartScreen() {
       <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle>RPG Viewer</CardTitle>
-          <CardDescription>RPG Maker MV/MZ 게임 폴더를 열어 대사와 장면을 한눈에 보세요.</CardDescription>
+          <CardDescription>RPG Maker MV/MZ 게임 옆에 띄워 두고 같이 쓰는 도우미예요.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          {/* 이 앱으로 할 수 있는 것 세 줄 */}
+          <ul className="flex flex-col gap-1.5 text-sm">
+            <li className="flex items-center gap-2"><MapIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />게임하면서 맵·해 볼 것 보기</li>
+            <li className="flex items-center gap-2"><Zap className="size-4 shrink-0 text-muted-foreground" aria-hidden />보조·치트로 편하게</li>
+            <li className="flex items-center gap-2"><BookOpenText className="size-4 shrink-0 text-muted-foreground" aria-hidden />놓친 대사 다시 읽기</li>
+          </ul>
           {status === "loading" ? (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-9 w-full" />
@@ -101,8 +108,12 @@ export function StartScreen() {
                 </Alert>
               )}
               <Button onClick={() => void pick()} disabled={picking}>
+                <FolderOpen />
                 {picking ? "폴더 선택 창에서 고르는 중…" : "게임 폴더 열기"}
               </Button>
+              <p className="text-xs text-muted-foreground">
+                Game.exe가 들어 있는 폴더(안에 www 또는 js 폴더가 있는 곳)를 골라 주세요.
+              </p>
               <RecentGames
                 items={recent}
                 serverAvailable={server.available}

@@ -24,7 +24,7 @@ export function useApplyDiagnosis(): (actions: readonly DiagnoseAction[]) => Pro
       }
     }
     if (installs.length === 0) return null;
-    if (!folder || !data || !isWritableFolder(folder)) return "게임 쪽 확장은 폴더 열기로 연 게임에서만 설치할 수 있어요. 게임 설정에서 다시 확인해 주세요.";
+    if (!folder || !data || !isWritableFolder(folder)) return "게임 쪽 확장은 폴더 열기로 연 게임에서만 설치할 수 있어요. 관리 › 게임 맞춤 설정에서 다시 확인해 주세요.";
     let granted = false;
     try { granted = await folder.requestWrite(); } catch { granted = false; }
     if (!granted) return "게임 쪽 확장을 설치하려면 쓰기 권한이 필요해요.";

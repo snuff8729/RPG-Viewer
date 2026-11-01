@@ -10,12 +10,12 @@ const mem = (): TabStore & { m: Map<string, string> } => {
 const broken: TabStore = { getItem: () => { throw new Error("x"); }, setItem: () => { throw new Error("x"); } };
 
 describe("mobile play tab", () => {
-  it("defaults to assist", () => {
-    expect(loadPlayTab(mem())).toBe("assist");
-    expect(loadPlayTab(null)).toBe("assist");
+  it("defaults to map", () => {
+    expect(loadPlayTab(mem())).toBe("map");
+    expect(loadPlayTab(null)).toBe("map");
   });
-  it("tab order is assist, cheat, map, read", () => {
-    expect(PLAY_TABS).toEqual(["assist", "cheat", "map", "read"]);
+  it("tab order is map, assist, cheat, read", () => {
+    expect(PLAY_TABS).toEqual(["map", "assist", "cheat", "read"]);
   });
   it("round-trips under rpgv.play.mobileTab2", () => {
     const s = mem();
@@ -25,21 +25,21 @@ describe("mobile play tab", () => {
     savePlayTab("cheat", s);
     expect(loadPlayTab(s)).toBe("cheat");
   });
-  it("migrates the old tab once: map/story -> map, read -> assist", () => {
+  it("migrates the old tab once: map/story -> map, read -> map", () => {
     const old = (v: string) => { const s = mem(); s.setItem("rpgv.play.mobileTab", v); return s; };
     expect(loadPlayTab(old("map"))).toBe("map");
     expect(loadPlayTab(old("story"))).toBe("map");
-    expect(loadPlayTab(old("read"))).toBe("assist");
+    expect(loadPlayTab(old("read"))).toBe("map");
     const s = old("story");
     savePlayTab("read", s);
     expect(loadPlayTab(s)).toBe("read");
-    expect(migrateOldTab(null)).toBe("assist");
+    expect(migrateOldTab(null)).toBe("map");
   });
   it("ignores junk and broken storage", () => {
     const s = mem();
     s.setItem("rpgv.play.mobileTab2", "weird");
-    expect(loadPlayTab(s)).toBe("assist");
-    expect(loadPlayTab(broken)).toBe("assist");
+    expect(loadPlayTab(s)).toBe("map");
+    expect(loadPlayTab(broken)).toBe("map");
     expect(() => savePlayTab("map", broken)).not.toThrow();
     expect(isPlayTab("cheat")).toBe(true);
     expect(isPlayTab("story")).toBe(false);

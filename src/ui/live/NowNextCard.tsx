@@ -125,7 +125,7 @@ export function NowNextCard() {
               <Button variant="ghost" size="sm" onClick={() => setMore(true)}>더 보기 ({hidden}줄)</Button>
             )}
             {stopText && <p className="text-xs text-muted-foreground">{stopText}</p>}
-            <Button variant="outline" size="sm" onClick={onView}>탐색기에서 보기</Button>
+            <Button variant="outline" size="sm" onClick={onView}>찾아보기에서 보기</Button>
           </>
         )}
       </CardContent>}

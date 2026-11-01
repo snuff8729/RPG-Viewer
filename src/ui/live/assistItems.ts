@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import type { AssistCommandKind } from "@/core/live/assist";
+import {
+  ASSIST_MIN_VERSION, ENEMY_HP_COMMAND_MIN_VERSION, HP_COMMAND_MIN_VERSION, SAVE_COMMAND_MIN_VERSION, type AssistCommandKind,
+} from "@/core/live/assist";
 import { battleOnly, type AssistFavoriteId } from "@/core/live/favoritesFile";
 
 /**
  * 게임 보조 조작 하나하나의 고정 id(즐겨찾기 ☆가 이 id로 가리킨다)와 이름.
- * 백업·복원은 게임 보조가 아니라 BackupButton 쪽이라 여기 없다.
+ * 백업·복원은 게임 보조가 아니라 관리의 세이브 백업 쪽이라 여기 없다.
  */
 export const ASSIST_ITEMS = [
   { id: "speed", label: "배속", short: "배속" },
@@ -59,16 +61,44 @@ export function assistFavoriteShortLabel(id: AssistItemId | BackupItemId): strin
   return BACKUP_ITEMS.find((i) => i.id === id)?.short ?? assistItemShortLabel(id as AssistItemId);
 }
 
+/** 전투 막대(전투 중일 때 위쪽 막대 전체)의 버튼, 왼쪽부터 */
+export const BATTLE_BAR_ITEMS = ["win", "escape", "lose", "enemyHpLow", "enemyHpFull", "hpFull"] as const satisfies readonly AssistCommandItemId[];
+
+/** 전투 막대에 쓰는 이름(내 체력은 적 체력과 헷갈리지 않게) */
+export function battleBarLabel(id: (typeof BATTLE_BAR_ITEMS)[number]): string {
+  return id === "hpFull" ? "내 체력 100%" : assistItemLabel(id);
+}
+
 /**
- * 맨 위 줄에 지금 보일 즐겨찾기(순서 유지): 전투 기능은 전투 중에만. battleFirst면 전투 중에 전투 기능을 맨 앞으로(휴대폰).
+ * 평소 위쪽 막대에 보일 고정 항목(순서 유지). 전투 기능은 전투 막대가 맡으므로 평소 막대에는 없다.
  * hidden = 이 화면에서 그리지 않는 것(예: 휴대폰 보기의 백업·복원).
  */
-export function visibleAssistFavorites(
-  ids: readonly AssistFavoriteId[], inBattle: boolean, opts: { battleFirst?: boolean; hidden?: readonly AssistFavoriteId[] } = {},
-): AssistFavoriteId[] {
-  const shown = ids.filter((id) => (inBattle || !battleOnly(id)) && !opts.hidden?.includes(id));
-  if (!opts.battleFirst || !inBattle) return shown;
-  return [...shown.filter(battleOnly), ...shown.filter((id) => !battleOnly(id))];
+export function quickBarItems(ids: readonly AssistFavoriteId[], opts: { hidden?: readonly AssistFavoriteId[] } = {}): AssistFavoriteId[] {
+  return ids.filter((id) => !battleOnly(id) && !opts.hidden?.includes(id));
+}
+
+/** 고정 핀을 둘 수 있는가(전투 기능은 전투 중 늘 나오므로 고정하지 않는다) */
+export const pinnable = (id: AssistFavoriteId): boolean => !battleOnly(id);
+
+/** 명령 버튼을 쓸 수 있는지 판단에 쓰는 것(useAssistGuards의 일부) */
+export interface CommandGuards {
+  supported: boolean; inBattle: boolean; canEscape: boolean;
+  hpSupported: boolean; saveSupported: boolean; enemyHpSupported: boolean;
+}
+
+const needUpdate = (v: string) => `기록 플러그인을 ${v}으로 업데이트하면 쓸 수 있어요`;
+
+/** 명령 버튼을 지금 못 쓰는 이유(쓸 수 있으면 null). 버튼은 꺼지고 이 글을 Tooltip으로 보인다. */
+export function commandBlockReason(id: AssistCommandItemId, g: CommandGuards): string | null {
+  if (!g.supported) return needUpdate(ASSIST_MIN_VERSION);
+  switch (id) {
+    case "win": case "lose": return g.inBattle ? null : "전투 중에만 쓸 수 있어요";
+    case "escape": return !g.inBattle ? "전투 중에만 쓸 수 있어요" : g.canEscape ? null : "이 전투는 도망칠 수 없어요";
+    case "enemyHpFull": case "enemyHpLow":
+      return !g.enemyHpSupported ? needUpdate(ENEMY_HP_COMMAND_MIN_VERSION) : g.inBattle ? null : "전투 중에만 쓸 수 있어요";
+    case "hpFull": case "hpLow": return g.hpSupported ? null : needUpdate(HP_COMMAND_MIN_VERSION);
+    case "quickSave": case "quickLoad": case "saveMenu": case "loadMenu": return g.saveSupported ? null : needUpdate(SAVE_COMMAND_MIN_VERSION);
+  }
 }
 
 /** 키 이름 + 을/를(끝 글자를 한국어로 읽은 받침 기준: 0·1·3·6·7·8, L·M·N·R은 받침 있음). */
@@ -76,5 +106,5 @@ export function withObjectParticle(label: string): string {
   return `${label}${/[013678LMNR]$/.test(label) ? "을" : "를"}`;
 }
 
-/** 조작 옆에 둘 것(예: 즐겨찾기 ☆)을 id로 그려 준다 */
+/** 조작 옆에 둘 것(위쪽 막대에 고정 핀)을 id로 그려 준다 */
 export type AssistFavoriteSlot = (id: AssistItemId) => ReactNode;

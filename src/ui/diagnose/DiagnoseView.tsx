@@ -1,8 +1,9 @@
+import { isRemoteView } from "@/app/share";
 import { useState } from "react";
 import { ChevronDown, ClipboardCopy, RefreshCw, Wand2 } from "lucide-react";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
 import {
-  attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, STATUS_LABELS, type DiagnoseFinding, type DiagnoseStatus,
+  attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, type DiagnoseFinding, type DiagnoseStatus,
 } from "@/core/diagnose";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,8 +15,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AiHandoff } from "./AiHandoff";
 import { useApplyDiagnosis } from "./useApplyDiagnosis";
 
-const BADGE: Record<DiagnoseStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  ok: "secondary", "auto-fixed": "secondary", "needs-addon": "default", unsupported: "destructive", unknown: "outline",
+const LABEL: Record<DiagnoseStatus, string> = { ok: "괜찮아요", "auto-fixed": "자동 처리", "needs-addon": "확인 필요", unsupported: "문제", unknown: "확인 필요" };
+
+const BADGE: Record<DiagnoseStatus, "success" | "secondary" | "destructive" | "warning"> = {
+  ok: "success", "auto-fixed": "secondary", "needs-addon": "warning", unsupported: "destructive", unknown: "warning",
 };
 
 function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => void; busy: boolean }) {
@@ -24,7 +27,7 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
     <Item variant="outline" size="sm" className="items-start">
       <ItemContent>
         <ItemTitle className="flex flex-wrap items-center gap-2">
-          <Badge variant={BADGE[f.status]}>{STATUS_LABELS[f.status]}</Badge>
+          <Badge variant={BADGE[f.status]}>{LABEL[f.status]}</Badge>
           {f.title}
         </ItemTitle>
         <ItemDescription className="line-clamp-none">{f.detail}</ItemDescription>
@@ -32,7 +35,7 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button variant="link" size="sm" className="h-auto px-0 text-muted-foreground">
-                근거 {f.evidence.length}개 <ChevronDown />
+                이렇게 본 이유 {f.evidence.length}개 <ChevronDown />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -106,7 +109,7 @@ export function DiagnoseView() {
             <Wand2 />추천 설정 모두 적용{actions.length > 0 ? ` (${actions.length})` : ""}
           </Button>
           <Button variant="outline" onClick={copy}><ClipboardCopy />개발용 보고서 복사</Button>
-          <AiHandoff />
+          {isRemoteView() ? <p className="w-full text-sm text-muted-foreground">AI 기능은 PC에서 해 주세요.</p> : <div className="flex w-full flex-col gap-2"><p className="text-sm text-muted-foreground">AI에게 맡기기는 가린 사본을 만들고, AI 답변 풀어보기는 가린 글을 원래 글로 바꿔요.</p><div className="flex flex-wrap gap-2"><AiHandoff /></div></div>}
         </CardContent>
       </Card>
       {note && (

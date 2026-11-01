@@ -35,7 +35,7 @@ export const ASSIST_FAVORITE_IDS: readonly AssistFavoriteId[] = [
 
 /** 처음(파일에 보조 칸이 없을 때) 맨 위 줄에 오는 기능 */
 export const DEFAULT_ASSIST_FAVORITES: readonly AssistFavoriteId[] = [
-  "speed", "skipSeen", "autoFast", "win", "lose", "escape", "enemyHpFull", "enemyHpLow", "hpFull", "hpLow",
+  "speed", "skipSeen", "autoFast", "noRandomEncounter", "skipBattles",
 ];
 
 const ASSIST_ID_SET: ReadonlySet<unknown> = new Set(ASSIST_FAVORITE_IDS);

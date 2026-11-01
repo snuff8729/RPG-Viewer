@@ -1,7 +1,6 @@
 import type { ChecklistEvent } from "@/core/live/mapChecklist";
 import { Card, CardContent } from "@/components/ui/card";
 import { useGame } from "@/app/GameProvider";
-import { MapLegend } from "./MapLegend";
 import { mapMarkers } from "./mapEvents";
 import { useMapLegend } from "./mapLegendState";
 import { gameKeyOf } from "./readPosition";
@@ -23,7 +22,7 @@ export function MapGrid({ width, height, events: listed, player, numbers, onPick
   onPick: (eventId: number) => void;
 }) {
   const { data } = useGame();
-  const [hidden, , setVisible] = useMapLegend(data ? gameKeyOf(data) : "");
+  const [hidden] = useMapLegend(data ? gameKeyOf(data) : "");
   const events = mapMarkers(listed, hidden);
   if (!(width > 0 && height > 0)) return null;
   const r = Math.max(0.4, Math.max(width, height) / 100);
@@ -84,7 +83,6 @@ export function MapGrid({ width, height, events: listed, player, numbers, onPick
             <title>내 위치</title>
           </circle>}
         </svg>
-        <MapLegend hidden={hidden} onChange={setVisible} />
       </CardContent>
     </Card>
   );

@@ -131,7 +131,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
         <CardContent className="space-y-2 px-4">
           {ev.remainingLines.length > 0 && (
             <div className="space-y-1">
-              <p className="text-sm font-medium">남은 내용</p>
+              <p className="text-sm font-medium">아직 안 본 내용</p>
               <Lines lines={ev.remainingLines} total={ev.unseen} />
             </div>
           )}
@@ -174,7 +174,7 @@ export function ChecklistCard({ ev, number, highlighted, selected, route, onLoca
           {onLocate && (
             <Button variant="outline" size="sm" onClick={onLocate}><MapPin />위치 보기</Button>
           )}
-          {target && <Button variant="outline" size="sm" onClick={() => openPage(target)}>탐색기에서 보기</Button>}
+          {target && <Button variant="outline" size="sm" onClick={() => openPage(target)}>찾아보기에서 보기</Button>}
         </CardFooter>
       )}
     </Card>

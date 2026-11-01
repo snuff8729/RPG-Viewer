@@ -72,7 +72,7 @@ export function HidePicturesMenu({ shot }: { shot: ScreenShot }) {
           </>
         )}
         <DropdownMenuSeparator />
-        <p className="px-2 py-1.5 text-xs text-muted-foreground">게임 설정 › 숨긴 그림에서 되돌릴 수 있어요.</p>
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">관리 › 게임 맞춤 설정 › 숨긴 그림에서 되돌릴 수 있어요.</p>
       </DropdownMenuContent>
     </DropdownMenu>
   );

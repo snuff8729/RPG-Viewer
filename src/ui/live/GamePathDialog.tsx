@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { checkGame, type GameCheckResult } from "@/app/launcher";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -29,7 +29,7 @@ export function GamePathDialog(props: GamePathDialogProps) {
   );
 }
 
-function GamePathForm({ initialPath, initialError, openedTitle, confirmLabel, confirmIcon, onConfirm, onOpenChange }: GamePathDialogProps) {
+export function GamePathForm({ initialPath, initialError, openedTitle, confirmLabel, confirmIcon, onConfirm, onOpenChange, inline = false }: GamePathDialogProps & { inline?: boolean }) {
   const [input, setInput] = useState(initialPath);
   const [check, setCheck] = useState<GameCheckResult | null>(null);
   const [error, setError] = useState<string | null>(initialError);
@@ -56,14 +56,15 @@ function GamePathForm({ initialPath, initialError, openedTitle, confirmLabel, co
     }
   };
 
+  const Content = inline ? Fragment : DialogContent;
   return (
-    <DialogContent>
-      <DialogHeader>
+    <Content>
+      {!inline && <DialogHeader>
         <DialogTitle>게임 폴더 위치</DialogTitle>
         <DialogDescription>
-          탐색기에서 게임 폴더를 Shift+오른쪽 클릭 → "경로로 복사" 후 붙여 넣으세요.
+          파일 탐색기에서 게임 폴더를 Shift+오른쪽 클릭 → "경로로 복사" 후 붙여 넣어 주세요.
         </DialogDescription>
-      </DialogHeader>
+      </DialogHeader>}
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => { e.preventDefault(); void onCheck(); }}
@@ -101,11 +102,11 @@ function GamePathForm({ initialPath, initialError, openedTitle, confirmLabel, co
           </Alert>
         )}
       </form>
-      <DialogFooter>
+      <div className="flex justify-end">
         <Button disabled={busy || !check?.ok} onClick={() => void onSubmit()}>
           {confirmIcon}{confirmLabel}
         </Button>
-      </DialogFooter>
-    </DialogContent>
+      </div>
+    </Content>
   );
 }

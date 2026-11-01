@@ -1,3 +1,4 @@
+import { terms } from "@/ui/terms";
 /**
  * 플레이 화면의 기능 하나(맵·치트·보조·읽기)만 따로 띄운 창("새 창으로 떼기").
  * 주소: `<pathname>?module=<m>&game=<최근 게임 key>#/play`. 창 위치·크기는 모듈마다 이 브라우저의 localStorage에 기억한다.
@@ -8,7 +9,7 @@
 export const POPOUT_MODULES = ["map", "cheat", "assist", "reader"] as const;
 export type PopoutModule = (typeof POPOUT_MODULES)[number];
 
-export const POPOUT_LABEL: Record<PopoutModule, string> = { map: "맵", cheat: "치트", assist: "게임 보조", reader: "읽기" };
+export const POPOUT_LABEL: Record<PopoutModule, string> = { map: terms.map, cheat: terms.cheat, assist: terms.assist, reader: terms.read };
 
 export const isPopoutModule = (v: unknown): v is PopoutModule => (POPOUT_MODULES as readonly unknown[]).includes(v);
 
