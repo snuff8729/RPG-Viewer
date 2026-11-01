@@ -1,3 +1,4 @@
+import { isRemoteView } from "@/app/share";
 import { useState } from "react";
 import { ChevronDown, ClipboardCopy, RefreshCw, Wand2 } from "lucide-react";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
@@ -14,8 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AiHandoff } from "./AiHandoff";
 import { useApplyDiagnosis } from "./useApplyDiagnosis";
 
-const BADGE: Record<DiagnoseStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  ok: "secondary", "auto-fixed": "secondary", "needs-addon": "default", unsupported: "destructive", unknown: "outline",
+const BADGE: Record<DiagnoseStatus, "success" | "secondary" | "destructive" | "warning"> = {
+  ok: "success", "auto-fixed": "secondary", "needs-addon": "warning", unsupported: "destructive", unknown: "warning",
 };
 
 function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => void; busy: boolean }) {
@@ -106,7 +107,7 @@ export function DiagnoseView() {
             <Wand2 />추천 설정 모두 적용{actions.length > 0 ? ` (${actions.length})` : ""}
           </Button>
           <Button variant="outline" onClick={copy}><ClipboardCopy />개발용 보고서 복사</Button>
-          <AiHandoff />
+          {isRemoteView() ? <p className="w-full text-sm text-muted-foreground">AI 기능은 PC에서 해 주세요.</p> : <div className="flex w-full flex-col gap-2"><p className="text-sm text-muted-foreground">AI에게 맡기기는 가린 사본을 만들고, AI 답변 풀어보기는 가린 글을 원래 글로 바꿔요.</p><div className="flex flex-wrap gap-2"><AiHandoff /></div></div>}
         </CardContent>
       </Card>
       {note && (

@@ -1,3 +1,5 @@
+import { useRoute } from "@/app/route";
+import { ReadModule } from "./ReadModule";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Gauge, WandSparkles } from "lucide-react";
 import type { PopoutModule } from "@/app/popout";
@@ -9,7 +11,6 @@ import { useCheatSession } from "./cheat/useCheatSession";
 import { isToolTab, loadToolTab, saveToolTab, type ToolTab } from "./playLayout";
 import { focusPopout } from "./popouts";
 import { PopoutButton, PoppedOutNotice, useModulePoppedOut } from "./PopoutControls";
-import { ReaderView } from "./ReaderView";
 import { useAssistSession } from "./useAssistSession";
 
 const MODULE_OF: Record<ToolTab, PopoutModule> = { cheat: "cheat", assist: "assist", read: "reader" };
@@ -18,7 +19,7 @@ const MODULE_OF: Record<ToolTab, PopoutModule> = { cheat: "cheat", assist: "assi
 export function ReaderFill() {
   return (
     <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3 *:h-full! *:min-h-0">
-      <ReaderView />
+      <ReadModule />
     </div>
   );
 }
@@ -31,8 +32,10 @@ export function ReaderFill() {
  * 다른 곳에서 치트를 열어 달라고 하면(openCheatSheet) 치트 탭으로 바꾼다(떼어 냈으면 그 창을 앞으로).
  */
 export function ToolsColumn() {
-  const [tab, setTabState] = useState<ToolTab>(loadToolTab);
-  const setTab = (t: ToolTab) => { setTabState(t); saveToolTab(t); };
+  const [route] = useRoute();
+  const [savedTab, setTabState] = useState<ToolTab>(loadToolTab);
+  const tab = route.kind === "play" && route.module && route.module !== "map" ? route.module : savedTab;
+  const setTab = (t: ToolTab) => { setTabState(t); saveToolTab(t); window.location.hash = `#/play/${t}`; };
   const cheatSession = useCheatSession();
   const assistSession = useAssistSession();
   const cheatOut = useModulePoppedOut("cheat");
@@ -47,6 +50,7 @@ export function ToolsColumn() {
     if (cheatOutRef.current && focusPopout("cheat")) return;
     setTabState("cheat");
     saveToolTab("cheat");
+    window.location.hash = "#/play/cheat";
   }), []);
 
   return (

@@ -1,196 +1,70 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeProvider } from "@/app/ThemeProvider";
 import { GameProvider, useGame } from "@/app/GameProvider";
-import { formatRoute, useRoute } from "@/app/route";
-import { locationKey } from "@/core/index/locations";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
-import {
-  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
+import { useRoute } from "@/app/route";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { StartScreen } from "@/ui/StartScreen";
-import { AppSidebar } from "@/ui/AppSidebar";
-import { EventView } from "@/ui/EventView";
-import { ExplorerView } from "@/ui/ExplorerView";
-import { useExplorerState } from "@/ui/useExplorerState";
 import { SearchDialog } from "@/ui/SearchDialog";
-import { VIEW_NAMES, viewOf } from "@/ui/views";
-import { LiveProvider, useLive } from "@/app/LiveProvider";
+import { AppHeader } from "@/ui/AppHeader";
+import { BottomNavigation } from "@/ui/BottomNavigation";
+import { MoreView } from "@/ui/MoreView";
+import { BrowseView } from "@/ui/BrowseView";
+import { ManageView } from "@/ui/manage/ManageView";
+import { useExplorerState } from "@/ui/useExplorerState";
+import { LiveProvider } from "@/app/LiveProvider";
 import { AddonsProvider } from "@/app/AddonsProvider";
 import { FavoritesProvider } from "@/app/FavoritesProvider";
 import { ReaderFileProvider } from "@/app/ReaderFileProvider";
-import { GameSettingsSheet } from "@/ui/addons/GameSettingsSheet";
-import { popupGameKey } from "@/app/popup";
 import { parseModuleWindow } from "@/app/popout";
 import { ModuleWindow } from "@/ui/live/ModuleWindow";
 import { useAutoReopen } from "@/app/useAutoReopen";
 import { PlayView } from "@/ui/live/PlayView";
-import { loadPlaySidebar, savePlaySidebar } from "@/ui/live/playLayout";
-import { AssistPanel } from "@/ui/live/AssistPanel";
-import { CheatSheet } from "@/ui/live/cheat/CheatSheet";
-import { LaunchButton } from "@/ui/live/LaunchButton";
-import { PinGameButton } from "@/ui/PinGameButton";
-import { BackupButton } from "@/ui/live/BackupButton";
 import { BackupHotkeys } from "@/ui/live/BackupHotkeys";
-import { ShareButton } from "@/ui/live/ShareButton";
+import { AutoBackupWatcher } from "@/ui/live/AutoBackupWatcher";
 import { useShareFollowsGame } from "@/ui/live/useShareFollowsGame";
 import { isRemoteView } from "@/app/share";
 import { useRemoteGame } from "@/app/useRemoteGame";
 import { RemoteScreen } from "@/ui/RemoteScreen";
-import { HistoryView } from "@/ui/live/HistoryView";
-import { ReaderView } from "@/ui/live/ReaderView";
-import { MissingView } from "@/ui/live/MissingView";
-import { HereView } from "@/ui/live/HereView";
 import { DiagnosisProvider } from "@/app/DiagnosisProvider";
-import { DiagnoseView } from "@/ui/diagnose/DiagnoseView";
-import { DiagnoseBanner } from "@/ui/diagnose/DiagnoseBanner";
 
 function Shell() {
-  const { status, data, index, close } = useGame();
+  const { status, data, index } = useGame();
   const [route] = useRoute();
   const [searchOpen, setSearchOpen] = useState(false);
-  /** 게임 속 맵을 찾아보기에서 펼쳐 따라간다 */
-  const [follow, setFollow] = useState(true);
-  const [explorer, setExplorer] = useExplorerState(route, follow);
-  /** 못 본 것 화면에 미리 채울 검색어. n이 바뀌면 화면을 다시 마운트한다. */
-  const [missingSeed, setMissingSeed] = useState({ n: 0, query: "" });
-  const ready = status === "ready";
-  const { connection } = useLive();
-  /** 따로 띄운 플레이 창이면 다시 열 게임 key */
-  const [popupKey] = useState(() => popupGameKey(window.location.search));
-  /** 기능 하나만 따로 띄운 창(맵·치트·보조·읽기)이면 그 모듈과 게임 key */
+  const [explorer, setExplorer] = useExplorerState(route, true);
   const [moduleWin] = useState(() => parseModuleWindow(window.location.search));
-  useAutoReopen(popupKey ?? moduleWin?.game ?? null);
-  /** 휴대폰 보기(같은 와이파이의 휴대폰·태블릿, 게임 보조·치트·게임 설정만 바꿀 수 있다) */
+  useAutoReopen(moduleWin?.game ?? null);
   const remote = isRemoteView();
   const remoteGame = useRemoteGame(remote);
-  useShareFollowsGame(!remote && ready);
-  // 휴대폰 보기는 플레이 화면으로 연다(홈 화면에 추가한 주소에 #/play가 빠져 있어도)
+  useShareFollowsGame(!remote && status === "ready");
   useEffect(() => {
-    const h = window.location.hash;
-    if (remote && (h === "" || h === "#" || h === "#/")) window.location.replace(formatRoute({ kind: "play" }));
-  }, [remote]);
-  const isPlay = route.kind === "play";
-  /** 사이드바 펼침: 플레이 화면은 따로 기억한다(처음엔 접힘) */
-  const [navOpen, setNavOpen] = useState(true);
-  const [playNavOpen, setPlayNavOpen] = useState(loadPlaySidebar);
-  const onNavOpen = (v: boolean) => {
-    if (isPlay) { setPlayNavOpen(v); savePlaySidebar(v); } else setNavOpen(v);
-  };
-
-  // 게임을 열고 처음 연결되면 플레이 화면으로(다른 화면을 이미 골랐으면 그대로)
-  const playFor = useRef<unknown>(null);
-  useEffect(() => {
-    if (!ready || connection !== "connected" || playFor.current === data) return;
-    playFor.current = data;
-    const h = window.location.hash;
-    if (h === "" || h === "#" || h === "#/") window.location.replace(formatRoute({ kind: "play" }));
-  }, [ready, connection, data]);
-
-  useEffect(() => {
-    if (!ready) return;
+    if (status !== "ready") return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
-        e.preventDefault();
-        setSearchOpen((o) => !o);
+        e.preventDefault(); setSearchOpen(o => !o);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ready]);
-
+  }, [status]);
   if (remote) {
     const loadError = status === "error" ? "게임을 열지 못했어요. PC에서 게임이 열려 있는지 확인해 주세요." : null;
     const err = remoteGame.error ?? loadError;
     if (err !== null || status !== "ready" || !data || !index) return <RemoteScreen error={err} onRetry={remoteGame.retry} />;
   }
-  // 따로 띄운 모듈 창: 게임을 열기 전에도 원래 창에 알리도록 시작 화면 대신 모듈 창이 맡는다
-  if (moduleWin && !remote) return <ModuleWindow {...moduleWin} />;
+  if (moduleWin && !remote && (route.kind === "play")) return <><ModuleWindow {...moduleWin} /><SearchDialog open={searchOpen} onOpenChange={setSearchOpen} /></>;
   if (status !== "ready" || !data || !index) return <StartScreen />;
-
-  const entry = route.kind === "page"
-    ? index.pages.find((p) => locationKey(p.location) === locationKey(route.location))
-    : undefined;
-  const crumbs = entry ? entry.path.split(" › ") : [];
-  const openMissing = (query: string) => {
-    setMissingSeed((s) => ({ n: s.n + 1, query }));
-    window.location.hash = formatRoute({ kind: "missing" });
-  };
-
-  // 휴대폰 보기는 사이드바(좁으면 시트)를 그대로 써서 기록·못 본 것으로도 갈 수 있게 한다
-  if (popupKey !== null && isPlay) return <PlayView popup />;
-
-  return (
-    <SidebarProvider open={isPlay ? playNavOpen : navOpen} onOpenChange={onNavOpen}>
-      <AppSidebar
-        route={route}
-        follow={follow}
-        onFollowChange={setFollow}
-        onOpenMissing={openMissing}
-        onSearch={() => setSearchOpen(true)}
-        onClose={() => { setSearchOpen(false); close(); }}
-      />
-      <SidebarInset className="min-w-0">
-        {isPlay ? <PlayView /> : (<>
-        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-4 py-1.5">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
-          {/* 그래도 넘치면 오른쪽 버튼 아래로 번지지 않게 자른다. 목록을 오른쪽에 붙여 잘리는 쪽은 왼쪽(찾아보기)이 된다 */}
-          <Breadcrumb className="min-w-0 overflow-hidden">
-            <BreadcrumbList className="flex-nowrap justify-end">
-              {route.kind === "page" ? (
-                <>
-                  <BreadcrumbItem className="shrink-0">
-                    <BreadcrumbLink href={formatRoute({ kind: "home" })}>{VIEW_NAMES.explore}</BreadcrumbLink>
-                  </BreadcrumbItem>
-                  {/* 자리가 모자라면 가운데 항목이 먼저 줄고(최소 한두 글자는 남김), 마지막 항목은 그다음에 줄어든다 */}
-                  {crumbs.map((c, i) => {
-                    const last = i === crumbs.length - 1;
-                    return (
-                      <Fragment key={i}>
-                        <BreadcrumbSeparator className="shrink-0" />
-                        <BreadcrumbItem className={last ? "min-w-10" : "min-w-10 shrink-[1000]"} title={c}>
-                          <BreadcrumbPage className={`truncate ${last ? "" : "font-normal text-muted-foreground"}`}>{c}</BreadcrumbPage>
-                        </BreadcrumbItem>
-                      </Fragment>
-                    );
-                  })}
-                </>
-              ) : (
-                <BreadcrumbItem><BreadcrumbPage>{VIEW_NAMES[viewOf(route)]}</BreadcrumbPage></BreadcrumbItem>
-              )}
-            </BreadcrumbList>
-          </Breadcrumb>
-          {/* 휴대폰 보기는 읽기만: 고정·실행·백업·보조·치트·설정을 숨긴다 */}
-          {!remote && (
-            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-              <PinGameButton />
-              <LaunchButton />
-              <ShareButton />
-              <BackupButton />
-              <AssistPanel />
-              <CheatSheet />
-              <GameSettingsSheet />
-            </div>
-          )}
-        </header>
-        <main className="flex-1 p-4">
-          {/* 진단 안내는 설정을 바꾸러 가는 것이라 휴대폰 보기에서는 띄우지 않는다 */}
-          {route.kind !== "diagnose" && !remote && <DiagnoseBanner />}
-          {route.kind === "home" && <ExplorerView state={explorer} onStateChange={setExplorer} />}
-          {route.kind === "page" && <EventView route={route} />}
-          {route.kind === "read" && <ReaderView />}
-          {route.kind === "here" && <HereView />}
-          {route.kind === "history" && <HistoryView />}
-          {route.kind === "missing" && <MissingView key={missingSeed.n} initialQuery={missingSeed.query} />}
-          {route.kind === "diagnose" && <DiagnoseView />}
-        </main>
-        </>)}
-      </SidebarInset>
-      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
-    </SidebarProvider>
-  );
+  return <div className="flex h-svh min-w-0 flex-col overflow-hidden">
+    <AppHeader route={route} onSearch={() => setSearchOpen(true)} />
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+      {route.kind === "play" && <PlayView />}
+      {(route.kind === "browse" || route.kind === "page") && <BrowseView route={route} state={explorer} onStateChange={setExplorer} />}
+      {route.kind === "manage" && <ManageView section={route.section} />}
+      {route.kind === "more" && <MoreView onSearch={() => setSearchOpen(true)} />}
+    </main>
+    <BottomNavigation route={route} />
+    <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+  </div>;
 }
 
 export default function App() {
@@ -201,6 +75,7 @@ export default function App() {
           <LiveProvider>
             {/* 게임 창 단축키의 백업·복원(PC만, 화면에 그리지 않음) */}
             <BackupHotkeys />
+            <AutoBackupWatcher />
             <FavoritesProvider>
               <ReaderFileProvider>
                 <DiagnosisProvider>

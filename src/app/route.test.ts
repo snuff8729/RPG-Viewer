@@ -1,17 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, formatRoute } from "./route";
+import { parseRoute, formatRoute, MANAGE_SECTIONS } from "./route";
 
 describe("route", () => {
-  it("parses map page", () => expect(parseRoute("#/map/12/event/3/page/2")).toEqual({ kind: "page", location: { source: "map", mapId: 12, eventId: 3, page: 1 } }));
-  it("parses common", () => expect(parseRoute("#/common/5")).toEqual({ kind: "page", location: { source: "common", commonEventId: 5 } }));
-  it("round-trips troop", () => { const h = "#/troop/2/page/1"; expect(formatRoute(parseRoute(h))).toBe(h); });
-  it("round-trips history", () => { expect(parseRoute("#/history")).toEqual({ kind: "history" }); expect(formatRoute({ kind: "history" })).toBe("#/history"); });
-  it("round-trips missing", () => { expect(parseRoute("#/missing")).toEqual({ kind: "missing" }); expect(formatRoute({ kind: "missing" })).toBe("#/missing"); });
-  it("round-trips read", () => { expect(parseRoute("#/read")).toEqual({ kind: "read" }); expect(formatRoute({ kind: "read" })).toBe("#/read"); expect(parseRoute("#/read/")).toEqual({ kind: "read" }); expect(parseRoute("#/read/1")).toEqual({ kind: "home" }); });
-  it("round-trips here", () => { expect(parseRoute("#/here")).toEqual({ kind: "here" }); expect(formatRoute({ kind: "here" })).toBe("#/here"); expect(parseRoute("#/here/")).toEqual({ kind: "here" }); expect(parseRoute("#/here/1")).toEqual({ kind: "home" }); });
-  it("round-trips diagnose", () => { expect(parseRoute("#/diagnose")).toEqual({ kind: "diagnose" }); expect(formatRoute({ kind: "diagnose" })).toBe("#/diagnose"); expect(parseRoute("#/diagnose/1")).toEqual({ kind: "home" }); });
-  it("round-trips play", () => { expect(parseRoute("#/play")).toEqual({ kind: "play" }); expect(formatRoute({ kind: "play" })).toBe("#/play"); expect(parseRoute("#/play/")).toEqual({ kind: "play" }); });
-  it("trailing slash parses history/missing", () => { expect(parseRoute("#/history/")).toEqual({ kind: "history" }); expect(parseRoute("#/missing/")).toEqual({ kind: "missing" }); });
-  it("history with extra segments is home", () => expect(parseRoute("#/history/1")).toEqual({ kind: "home" }));
-  it("unknown is home", () => { expect(parseRoute("")).toEqual({ kind: "home" }); expect(parseRoute("#/map/x")).toEqual({ kind: "home" }); });
+  it.each(["#/play", "#/play/map", "#/play/assist", "#/play/cheat", "#/play/read", "#/play/read/story", "#/play/read/history", "#/browse/events", "#/browse/missing", "#/manage", "#/more", ...MANAGE_SECTIONS.map(s => `#/manage/${s}`)])("round-trips %s", hash => {
+    expect(formatRoute(parseRoute(hash))).toBe(hash);
+    expect(parseRoute(`${hash}/`)).toEqual(parseRoute(hash));
+  });
+  it.each([
+    ["#/here", "#/play/map"], ["#/read", "#/play/read/story"], ["#/history", "#/play/read/history"],
+    ["#/missing", "#/browse/missing"], ["#/diagnose", "#/manage/diagnose"],
+  ])("redirects legacy %s to %s", (old, canonical) => {
+    expect(formatRoute(parseRoute(old))).toBe(canonical);
+    expect(formatRoute(parseRoute(`${old}/`))).toBe(canonical);
+  });
+  it("preserves the all-records mode", () => expect(parseRoute("#/history")).toEqual({ kind: "play", module: "read", mode: "history" }));
+  it("keeps existing event URLs", () => {
+    expect(parseRoute("#/map/12/event/3/page/2")).toEqual({ kind: "page", location: { source: "map", mapId: 12, eventId: 3, page: 1 } });
+    expect(parseRoute("#/common/5")).toEqual({ kind: "page", location: { source: "common", commonEventId: 5 } });
+    for (const hash of ["#/map/12/event/3/page/2", "#/common/5", "#/troop/2/page/1"]) expect(formatRoute(parseRoute(hash))).toBe(hash);
+  });
+  it.each(["", "#", "#/", "#/nonsense", "#/history/1", "#/here/1", "#/manage/nope", "#/play/read/nope", "#/play/cheat/history", "#/map/1/event/2/page/0", "#/common/x"])("lands on play for %s", hash => expect(parseRoute(hash)).toEqual({ kind: "play" }));
 });

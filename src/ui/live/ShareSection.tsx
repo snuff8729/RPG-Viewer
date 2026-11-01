@@ -7,7 +7,6 @@ import {
 } from "@/app/share";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -59,7 +58,8 @@ function CopyUrl({ url }: { url: string }) {
  * `휴대폰으로 보기` 창(Dialog). 열고 닫기는 바깥에서(ShareButton 또는 ⋯ 메뉴). 뷰어 서버(npm run dev / preview)가 있을 때만 보인다.
  * 켜면 같은 와이파이의 휴대폰이 QR 주소로 플레이 화면을 본다(게임 보조·치트·게임 설정도 쓸 수 있다). 허용 기간(1·7·30일) 동안은 다시 찍지 않아도 된다.
  */
-export function ShareDialog({ open, onOpenChange: setOpen }: { open: boolean; onOpenChange(open: boolean): void }) {
+export function ShareSection() {
+  const open = true;
   const { data } = useGame();
   const available = useLauncherAvailable();
   const gameKey = data ? gameKeyOf(data) : null;
@@ -123,14 +123,8 @@ export function ShareDialog({ open, onOpenChange: setOpen }: { open: boolean; on
 
   return (
     <>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>휴대폰으로 보기</DialogTitle>
-            <DialogDescription>
-              PC와 휴대폰이 같은 와이파이에 있어야 해요. 처음 켤 때 Windows 방화벽 창이 뜨면 '개인 네트워크' 허용을 눌러 주세요.
-            </DialogDescription>
-          </DialogHeader>
+      <div className="space-y-4">
+<p className="text-sm text-muted-foreground">PC와 휴대폰을 같은 와이파이에 연결해 주세요. Windows 방화벽에서는 개인 네트워크를 허용해 주세요.</p>
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               <Switch id="share-on" checked={on} disabled={busy} onCheckedChange={onSwitch} />
@@ -145,9 +139,9 @@ export function ShareDialog({ open, onOpenChange: setOpen }: { open: boolean; on
                 {SHARE_DAYS.map((d) => <ToggleGroupItem key={d} value={String(d)}>{d}일</ToggleGroupItem>)}
               </ToggleGroup>
             </div>
-            {status?.expired && !on && (
+            {!on && status !== null && (
               <Alert>
-                <AlertDescription>허용 기간이 끝났어요. 다시 켜면 새 QR이 만들어져요.</AlertDescription>
+                <AlertDescription>{status.expired && status.expiresAt !== null ? "허용 기간이 끝났어요. 다시 켜면 새 QR이 만들어져요." : "아직 켜지 않았어요."}</AlertDescription>
               </Alert>
             )}
             {pathUnknown && (
@@ -193,8 +187,7 @@ export function ShareDialog({ open, onOpenChange: setOpen }: { open: boolean; on
               </Alert>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
+      </div>
       <GamePathDialog
         open={askPath}
         onOpenChange={setAskPath}
@@ -212,18 +205,3 @@ export function ShareDialog({ open, onOpenChange: setOpen }: { open: boolean; on
   );
 }
 
-/** 상단 `휴대폰으로 보기` 버튼 + 창. 뷰어 서버가 있을 때만 보인다. */
-export function ShareButton() {
-  const { data } = useGame();
-  const available = useLauncherAvailable();
-  const [open, setOpen] = useState(false);
-  if (!data || !available) return null;
-  return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Smartphone />휴대폰으로 보기
-      </Button>
-      <ShareDialog open={open} onOpenChange={setOpen} />
-    </>
-  );
-}

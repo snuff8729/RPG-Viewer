@@ -1,10 +1,7 @@
-import { useState } from "react";
-import { Gauge } from "lucide-react";
 import { useAssist, useLive } from "@/app/LiveProvider";
 import { hotkeySummary, keyLabel, liveHotkeys } from "@/core/live/assist";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { PopoverDescription, PopoverHeader, PopoverTitle } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   AutoFastControl, AutoSpeedControl, BattleControls, EncounterControl, EnemyHpControls, HotkeySettings, HpControls, QuickSlotInput, SaveControls,
@@ -152,18 +149,3 @@ function AssistBody({ session, active = true, header = true, favorite }: AssistC
   );
 }
 
-/** 상단 `게임 보조` Popover. 내용은 AssistContent, 남는 상태(명령 응답·단축키 불일치)는 여기서 가진다. */
-export function AssistPanel() {
-  const session = useAssistSession();
-  const [panelOpen, setPanelOpen] = useState(false);
-  return (
-    <Popover open={panelOpen} onOpenChange={setPanelOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm"><Gauge />게임 보조</Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 max-h-(--radix-popover-content-available-height) overflow-auto">
-        <AssistContent session={session} active={panelOpen} />
-      </PopoverContent>
-    </Popover>
-  );
-}

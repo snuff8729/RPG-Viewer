@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { parseRoute } from "@/app/route";
 import { VIEW_NAMES, viewOf } from "./views";
-
 describe("viewOf", () => {
-  it("maps routes to sidebar views", () => {
-    expect(viewOf(parseRoute("#/"))).toBe("explore");
-    expect(viewOf(parseRoute("#/map/1/event/2/page/1"))).toBe("explore");
-    expect(viewOf(parseRoute("#/common/3"))).toBe("explore");
-    expect(viewOf(parseRoute("#/play"))).toBe("play");
-    expect(viewOf(parseRoute("#/read"))).toBe("read");
-    expect(viewOf(parseRoute("#/here"))).toBe("here");
-    expect(viewOf(parseRoute("#/history"))).toBe("history");
-    expect(viewOf(parseRoute("#/missing"))).toBe("missing");
-    expect(viewOf(parseRoute("#/diagnose"))).toBe("diagnose");
-    expect(VIEW_NAMES.diagnose).toBe("게임 진단");
-    expect(VIEW_NAMES[viewOf(parseRoute("#/"))]).toBe("찾아보기");
+  it.each([
+    ["#/", "play"], ["#/here", "play"], ["#/read", "play"], ["#/history", "play"],
+    ["#/browse/events", "browse"], ["#/missing", "browse"], ["#/common/3", "browse"],
+    ["#/map/1/event/2/page/1", "browse"], ["#/troop/1/page/1", "browse"],
+    ["#/diagnose", "manage"], ["#/manage/appearance", "manage"], ["#/more", "more"],
+  ])("maps %s to %s", (hash, view) => expect(viewOf(parseRoute(hash))).toBe(view));
+  it("uses the three shared primary names", () => {
+    expect(VIEW_NAMES.play).toBe("플레이"); expect(VIEW_NAMES.browse).toBe("찾아보기"); expect(VIEW_NAMES.manage).toBe("관리");
   });
 });

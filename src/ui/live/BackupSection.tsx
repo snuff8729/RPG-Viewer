@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import {
-  fetchBackups, fetchRunning, fetchSaveState, initialWatch, isEmptyBackup, KIND_LABEL, loadAutoBackup, makeBackup, nextWatch,
-  notifyBackupsChanged, onBackupsChanged, POLL_MS, removeBackup, restoreAndRestart, saveAutoBackup,
-  type BackupList, type BackupMeta, type WatchState,
+  fetchBackups, fetchRunning, isEmptyBackup, KIND_LABEL, loadAutoBackup, makeBackup,
+  notifyBackupsChanged, onBackupsChanged, removeBackup, restoreAndRestart, saveAutoBackup,
+  type BackupList, type BackupMeta,
 } from "@/app/backups";
 import { gameKeyOf } from "./readPosition";
-import { GamePathDialog } from "./GamePathDialog";
 import { useGamePath, useLauncherAvailable } from "./useGamePath";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -20,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -36,55 +33,17 @@ function formatTime(iso: string): string {
 /**
  * 게임 실행 중 세이브 폴더를 지켜보다가 게임이 저장하면(서명이 바뀌고 다음 확인에도 그대로면) 자동 백업한다.
  */
-function useAutoBackupWatcher(path: string | null, enabled: boolean, running: boolean) {
-  const watch = useRef<WatchState>(initialWatch);
-  useEffect(() => {
-    if (!path || !enabled || !running) return;
-    watch.current = initialWatch;
-    let alive = true;
-    let busy = false;
-    const tick = async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        const s = await fetchSaveState(path);
-        if (!alive || !s.ok) return;
-        const step = nextWatch(watch.current, s.signature, Date.now());
-        watch.current = step.state;
-        if (step.backup) {
-          const b = await makeBackup(path, "auto", "게임 저장 후");
-          if (b.ok && !b.skipped) notifyBackupsChanged();
-        }
-      } finally {
-        busy = false;
-      }
-    };
-    const id = setInterval(() => void tick(), POLL_MS);
-    return () => { alive = false; clearInterval(id); };
-  }, [path, enabled, running]);
-}
 
 type Confirm =
   | { kind: "restore"; backup: BackupMeta; running: boolean; launch: boolean }
   | { kind: "delete"; backup: BackupMeta };
 
-export interface BackupButtonProps {
-  /** 바깥(⋯ 메뉴)에서 열고 닫을 때. 게임 폴더 위치를 모르면 위치부터 묻는다. 없으면 버튼이 직접 연다. */
-  open?: boolean;
-  onOpenChange?(open: boolean): void;
-  /** 버튼을 그릴지(기본 true). false여도 자동 백업 지켜보기는 계속하므로 화면에 늘 두어야 한다. */
-  trigger?: boolean;
-}
-
-/**
- * 상단 `백업` 버튼과 백업 창. 세이브 폴더 전체를 통째로 남기고 되돌린다.
- */
-export function BackupButton({ open: openProp, onOpenChange, trigger = true }: BackupButtonProps = {}) {
+export function BackupSection() {
   const { data } = useGame();
   const { supported, connection } = useLive();
   const available = useLauncherAvailable();
   const gameKey = data ? gameKeyOf(data) : null;
-  const { path, save: setPath } = useGamePath(gameKey);
+  const { path } = useGamePath(gameKey);
   const connected = connection === "connected";
 
   const [autoState, setAutoState] = useState(() => ({ key: gameKey, on: gameKey ? loadAutoBackup(gameKey) : true }));
@@ -93,18 +52,8 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
     auto = gameKey ? loadAutoBackup(gameKey) : true;
     setAutoState({ key: gameKey, on: auto });
   }
-  useAutoBackupWatcher(path, auto && available && supported, connected);
 
-  const [pathDialog, setPathDialog] = useState(false);
-  const [ownOpen, setOwnOpen] = useState(false);
-  /** 열어 달라는 요청(위치를 모르면 위치 창, 알면 백업 창) */
-  const open = openProp ?? ownOpen;
-  const setOpen = (o: boolean) => {
-    if (openProp === undefined) setOwnOpen(o);
-    onOpenChange?.(o);
-  };
-  /** 위치 창에서 저장을 눌렀다(곧 닫히는 위치 창이 요청을 끄지 않게) */
-  const pathConfirmed = useRef(false);
+
   const [list, setList] = useState<BackupList | null>(null);
   const backups = list?.backups ?? null;
   const [error, setError] = useState<string | null>(null);
@@ -113,12 +62,6 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   // 바깥에서 열면 지난 안내를 지운다
-  const [prevOpenProp, setPrevOpenProp] = useState(openProp);
-  if (prevOpenProp !== openProp) {
-    setPrevOpenProp(openProp);
-    if (openProp) { setError(null); setNotice(null); }
-  }
-
   const reload = useCallback(async () => {
     if (!path) return;
     const r = await fetchBackups(path);
@@ -127,7 +70,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
   }, [path]);
 
   useEffect(() => {
-    if (!open || !path) return;
+    if (!path || !available || !supported) return;
     let alive = true;
     void fetchBackups(path).then((r) => {
       if (!alive) return;
@@ -136,16 +79,11 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
     });
     const off = onBackupsChanged(() => void reload());
     return () => { alive = false; off(); };
-  }, [open, path, reload]);
+  }, [path, reload, available, supported]);
 
-  if (!data || !gameKey || !supported || !available) return null;
+  if (!data || !gameKey) return null;
+  if (!supported || !available) return <Alert><AlertDescription>뷰어 서버에서 게임 폴더를 열면 세이브 백업을 쓸 수 있어요.</AlertDescription></Alert>;
 
-  const onButton = () => {
-    setError(null);
-    setNotice(null);
-    if (path === null) setPathDialog(true);
-    else setOpen(true);
-  };
 
   const run = async (fn: (p: string) => Promise<void>) => {
     if (!path) return;
@@ -158,6 +96,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
   const onBackupNow = () => run(async (p) => {
     const r = await makeBackup(p, "manual", "직접 백업", name.trim() || undefined);
     if (!r.ok) { setError(r.error); return; }
+    notifyBackupsChanged();
     setName("");
     setNotice("백업했어요");
     await reload();
@@ -174,6 +113,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
     if (!r.ok) setError(r.error ?? "복원하지 못했어요");
     else if (r.error) setError(`복원했지만 게임을 다시 실행하지 못했어요: ${r.error}`);
     else setNotice(r.relaunched ? "복원하고 게임을 실행했어요" : "복원했어요");
+    notifyBackupsChanged();
     await reload();
   });
 
@@ -186,42 +126,16 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
   const onAutoChange = (on: boolean) => {
     saveAutoBackup(gameKey, on);
     setAutoState({ key: gameKey, on });
+    window.dispatchEvent(new Event("rpgv:auto-backup"));
   };
 
   return (
     <>
-      {trigger && (
-        <Button variant="outline" size="sm" onClick={onButton}>
-          <ArchiveRestore />백업
-        </Button>
-      )}
-      <GamePathDialog
-        open={pathDialog || (open && path === null)}
-        onOpenChange={(o) => {
-          setPathDialog(o);
-          if (o) return;
-          if (pathConfirmed.current) pathConfirmed.current = false;
-          else if (open && path === null) setOpen(false);
-        }}
-        initialPath=""
-        initialError={null}
-        openedTitle={data.system.gameTitle}
-        confirmLabel="저장"
-        onConfirm={async (p) => {
-          setPath(p);
-          pathConfirmed.current = true;
-          setOpen(true);
-          return null;
-        }}
-      />
-      <Sheet open={open && path !== null} onOpenChange={setOpen}>
-        <SheetContent className="w-full sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>세이브 백업</SheetTitle>
-            <SheetDescription>
-              세이브 폴더 전체(공용 데이터 포함)를 통째로 저장해요. 게임 밖에 따로 저장하는 데이터는 포함되지 않아요.
-            </SheetDescription>
-          </SheetHeader>
+
+
+      <div className="space-y-4">
+        {!path && <Button variant="outline" asChild><a href="#/manage/connection">연결·실행에서 게임 위치를 알려 주세요</a></Button>}
+<p className="text-sm text-muted-foreground">세이브 폴더 전체를 저장하고 복원해요.</p>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void onBackupNow(); }}>
               <Input
@@ -231,7 +145,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
                 maxLength={100}
                 onChange={(e) => setName(e.target.value)}
               />
-              <Button type="submit" disabled={busy}>지금 백업</Button>
+              <Button type="submit" disabled={busy || !path}>지금 백업</Button>
             </form>
             <div className="flex items-start justify-between gap-4">
               <div className="flex flex-col gap-1">
@@ -253,7 +167,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
               <Alert><AlertDescription>세이브 파일을 찾지 못했어요</AlertDescription></Alert>
             )}
             <Separator />
-            {backups === null ? (
+            {!path ? <p className="text-sm text-muted-foreground">게임 폴더 위치를 정하면 백업 목록을 볼 수 있어요.</p> : backups === null ? (
               <p className="text-sm text-muted-foreground">불러오는 중…</p>
             ) : backups.length === 0 ? (
               <p className="text-sm text-muted-foreground">아직 백업이 없어요</p>
@@ -293,8 +207,7 @@ export function BackupButton({ open: openProp, onOpenChange, trigger = true }: B
               </Table>
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+      </div>
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
         <AlertDialogContent size="sm">
           {confirm?.kind === "restore" && (

@@ -47,7 +47,7 @@ export function TodoList({ className, header = true, onChoose }: {
         <span className="text-sm font-semibold">지금 해 볼 것</span>
         <Badge variant="secondary">{rows.length}</Badge>
         <Button variant="link" size="sm" className="ml-auto h-auto p-0" asChild>
-          <a href={formatRoute({ kind: "here" })}>자세히</a>
+          <a href={formatRoute({ kind: "play", module: "map" })}>자세히</a>
         </Button>
       </div>}
       {rows.length === 0 ? (

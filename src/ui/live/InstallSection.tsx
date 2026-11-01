@@ -6,7 +6,7 @@ import { formatBytes } from "./formatBytes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 function statusLabel(s: InstallStatus | null): string {
   if (!s) return "확인 중";
@@ -19,7 +19,7 @@ function statusLabel(s: InstallStatus | null): string {
 
 type Outcome = { action: "install" | "uninstall"; result: InstallResult };
 
-export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+export function InstallSection() {
   const { supported, install, refreshInstall, doInstall, doUninstall, bundledVersion } = useLive();
   const { logStats } = useLiveStatus();
   const access = fsAccessSupport(window as unknown as FsAccessWindow);
@@ -27,8 +27,8 @@ export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   useEffect(() => {
-    if (open) void refreshInstall();
-  }, [open, refreshInstall]);
+    void refreshInstall();
+  }, [refreshInstall]);
 
   const run = async (action: Outcome["action"]) => {
     setBusy(true);
@@ -44,14 +44,8 @@ export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const outdated = install?.state === "installed" && install.outdated;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) setOutcome(null); onOpenChange(o); }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>기록 플러그인</DialogTitle>
-          <DialogDescription>
-            게임 폴더에 플러그인을 설치하면 플레이 기록과 현재 상태를 뷰어에서 볼 수 있어요.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="space-y-4">
+
         {!supported ? (
           <Alert>
             <AlertDescription>{access.message ?? "크롬이나 엣지에서 폴더 열기로 연 게임만 지원해요"}</AlertDescription>
@@ -91,15 +85,14 @@ export function InstallDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           </div>
         )}
         {supported && install && install.state !== "unsupported" && (
-          <DialogFooter>
+          <div className="flex flex-wrap gap-2">
             {installed && (
-              <Button variant="outline" disabled={busy} onClick={() => void run("uninstall")}>제거</Button>
+              <AlertDialog><AlertDialogTrigger asChild><Button variant="destructive" disabled={busy}>기록 플러그인 제거</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>기록 플러그인을 제거할까요?</AlertDialogTitle><AlertDialogDescription>게임을 다시 시작하면 새 기록을 남기지 않아요. 이전 기록은 남아 있어요.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>취소</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void run("uninstall")}>제거</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
             )}
             {!installed && <Button disabled={busy} onClick={() => void run("install")}>설치</Button>}
             {outdated && <Button disabled={busy} onClick={() => void run("install")}>업데이트</Button>}
-          </DialogFooter>
+          </div>
         )}
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }

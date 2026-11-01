@@ -1,20 +1,16 @@
-import { Settings2 } from "lucide-react";
 import { useAddons } from "@/app/AddonsProvider";
 import { useLive } from "@/app/LiveProvider";
 import { ADDONS, type AddonDef } from "@/core/addons/registry";
 import { versionAtLeast } from "@/core/live/assist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { PictureRolesSection } from "./PictureRolesSection";
 import { NoticeHooksSection } from "./NoticeHooksSection";
 import { AdapterCard } from "./AdapterCard";
 import { StoryProgressSection } from "./StoryProgressSection";
 import { HiddenImagesSection } from "./HiddenImagesSection";
-import { useGameSettingsOpen } from "./gameSettingsOpen";
 import { useGame } from "@/app/GameProvider";
 import { Badge } from "@/components/ui/badge";
 import type { GameData } from "@/core/types";
@@ -64,25 +60,12 @@ function availableHere(addon: AddonDef, data: GameData | null | undefined): bool
  * 상단 `게임 설정` Sheet: 이 게임에서만 켜는 부가 기능(애드온) 목록.
  * trigger=false면 버튼 없이 창만 둔다(⋯ 메뉴에서 openGameSettings()로 연다).
  */
-export function GameSettingsSheet({ trigger = true }: { trigger?: boolean } = {}) {
+export function GameSettingsSection() {
   const { isOn, setOn, savedInFolder, adapters } = useAddons();
   const { data } = useGame();
-  const [open, setOpen] = useGameSettingsOpen();
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      {trigger && (
-        <SheetTrigger asChild>
-          <Button variant="outline" size="sm"><Settings2 />게임 설정</Button>
-        </SheetTrigger>
-      )}
-      <SheetContent side="right" className="overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>게임 설정</SheetTitle>
-          <SheetDescription>
-            이 게임에만 적용되는 설정과 부가 기능이에요.{savedInFolder ? " 설정은 게임 폴더(rpg-viewer/addons.json)에 저장돼요." : " 설정은 이 브라우저에 저장돼요."}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex flex-col gap-4 px-4 pb-4">
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">{savedInFolder ? "설정은 게임 폴더에 저장돼요." : "설정은 이 브라우저에 저장돼요."}</p>
           <StoryProgressSection />
           <HiddenImagesSection />
           {adapters.map((a) => <AdapterCard key={a.manifest.id} adapter={a} />)}
@@ -113,8 +96,6 @@ export function GameSettingsSheet({ trigger = true }: { trigger?: boolean } = {}
               </Card>
             );
           })}
-        </div>
-      </SheetContent>
-    </Sheet>
+    </div>
   );
 }

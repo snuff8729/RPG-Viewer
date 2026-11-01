@@ -58,7 +58,7 @@ interface Props {
   short?: boolean;
 }
 
-const NO_PATH = "백업 창에서 게임 폴더 위치를 먼저 정해 주세요";
+const NO_PATH = "관리의 연결·실행에서 게임 폴더 위치를 먼저 정해 주세요";
 
 /** 버튼 + 결과 글(툴팁) + 오른쪽 끝에 둘 것 */
 function BackupControlShell({ button, tip, favorite }: { button: ReactNode; tip: string | null; favorite?: ReactNode }) {

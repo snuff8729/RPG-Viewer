@@ -1,3 +1,4 @@
+import { NotConnectedEmpty } from "./NotConnectedEmpty";
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -40,6 +41,7 @@ function MapColumnBody({ actions, layoutId }: { actions?: ReactNode; layoutId: s
     else p.collapse();
   };
 
+  if (!connected) return <NotConnectedEmpty />;
   return (
     <ResizablePanelGroup orientation="vertical" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="picture" minSize={120}>

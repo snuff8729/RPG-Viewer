@@ -5,14 +5,14 @@ import { extendsArray } from "@/core/live/lineage";
 export type PlayTab = "assist" | "cheat" | "map" | "read";
 
 /** 탭 순서(아래 탭 줄) */
-export const PLAY_TABS: readonly PlayTab[] = ["assist", "cheat", "map", "read"];
+export const PLAY_TABS: readonly PlayTab[] = ["map", "assist", "cheat", "read"];
 
 /** 지금 탭 기억(보조·치트가 탭이 된 뒤) */
 const KEY = "rpgv.play.mobileTab2";
 /** 예전 탭 기억(읽기·맵·스토리) — 새 기억이 없을 때 한 번 옮긴다 */
 const OLD_KEY = "rpgv.play.mobileTab";
 
-const DEFAULT_TAB: PlayTab = "assist";
+const DEFAULT_TAB: PlayTab = "map";
 
 export interface TabStore {
   getItem(key: string): string | null;

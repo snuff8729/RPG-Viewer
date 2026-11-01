@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { WandSparkles } from "lucide-react";
+import { useEffect } from "react";
 import { useAssist, useLive, useLiveData } from "@/app/LiveProvider";
 import { CHEAT_MIN_VERSION, CHEAT_STATUS_TEXT, type CheatStatus } from "@/core/live/cheat";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -7,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { ActorsTab } from "./ActorsTab";
@@ -71,7 +69,7 @@ function CheatBody({ session, active = true, tab, onTabChange, className, variab
   const data = useLiveData();
   const { live, connection } = useLive();
   const { cheatSupported, cheatResults, holdLiveActors } = useAssist();
-  const { history, apply, undo, finder, canBackup, backupNote, backingUp, backupNow } = session;
+  const { history, apply, undo, finder } = session;
 
   // 보이는 동안 게임이 캐릭터 정보를 보낸다
   // 여러 곳(탭·덮개)에 있어도 LiveProvider가 세어서 하나라도 보이면 켜 둔다
@@ -116,11 +114,8 @@ function CheatBody({ session, active = true, tab, onTabChange, className, variab
         <TabsContent value="switches" className="flex flex-col gap-4 pt-2">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-destructive">이야기 진행이 꼬일 수 있어요. 먼저 백업해 두세요.</p>
-            {canBackup && (
-              <Button variant="outline" size="sm" disabled={backingUp} onClick={() => void backupNow()}>지금 백업</Button>
-            )}
+            <Button variant="link" size="sm" asChild><a href="#/manage/backups">관리 › 세이브 백업에서 백업할 수 있어요</a></Button>
           </div>
-          {backupNote && <p className="text-xs text-muted-foreground">{backupNote}</p>}
           <SwitchesTab {...props} finder={finder} />
         </TabsContent>
       </Tabs>
@@ -157,32 +152,3 @@ function CheatBody({ session, active = true, tab, onTabChange, className, variab
   );
 }
 
-/** 상단 `치트` 버튼과 창(Sheet). 내용은 CheatContent, 남는 상태(기록·탭·변수 찾기)는 여기서 가져 닫았다 열어도 남는다. */
-export function CheatSheet() {
-  const data = useLiveData();
-  const [open, setOpen] = useState(false);
-  const session = useCheatSession();
-
-  useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener(OPEN_EVENT, onOpen);
-    return () => window.removeEventListener(OPEN_EVENT, onOpen);
-  }, []);
-
-  if (!data) return null;
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant="outline" size="sm"><WandSparkles />치트</Button>
-      </SheetTrigger>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
-        <SheetHeader>
-          <SheetTitle>치트</SheetTitle>
-          <SheetDescription>누르면 실행 중인 게임에 바로 적용돼요. 게임에서 저장해야 세이브에 남아요.</SheetDescription>
-        </SheetHeader>
-        <CheatContent session={session} active={open} />
-      </SheetContent>
-    </Sheet>
-  );
-}
