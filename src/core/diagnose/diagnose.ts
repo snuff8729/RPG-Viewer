@@ -177,6 +177,32 @@ function screenSource(data: GameData, entries: PluginEntry[]): string | null {
  * 게임을 진단한다. pluginsText: js/plugins.js 본문(없으면 null), files: img/ 그림 목록(없으면 그림 파일 확인을 건너뜀),
  * log: 플레이 기록(없으면 기록 확인을 건너뜀), extra: 플러그인 본문·어댑터·지금 설정. 예외를 던지지 않는다.
  */
+/** 기록 플러그인에 복사를 부탁하는 그림 목록 파일(rpg-viewer/missing-pictures.json)에 싣는 최대 개수 */
+export const PICTURE_WANTS_MAX = 3000;
+
+/**
+ * 기록 플러그인(1.31.0)에 복사를 부탁할 그림 이름: 이벤트가 띄우는 그림과 플레이 기록에 남은 그림 중
+ * 게임 폴더(img/pictures, 하위 폴더 규칙 포함)에 파일이 없고 아직 복사해 둔 것(rpg-viewer/pictures)도 없는 것.
+ * 이름 순, 최대 PICTURE_WANTS_MAX개. 그림 폴더를 못 읽었으면(files 없음) 빈 목록. 예외를 던지지 않는다.
+ */
+export function pictureWants(data: GameData, files: ImageListing | null | undefined, log?: readonly LogRecord[] | null): string[] {
+  try {
+    if (!files || !Array.isArray(files.pictures)) return [];
+    const rules = arr<FolderRule>(data?.pictureFolders);
+    const onDisk = pictureResolver(files.pictures, rules);
+    const copied = pictureResolver(files.copies, rules);
+    const names = new Set<string>([...scanCommands(data).pictureRefs.keys(), ...drawnPictureNames(Array.isArray(log) ? log : []).keys()]);
+    return [...names].filter(n => n !== "" && !onDisk(n) && !copied(n)).sort().slice(0, PICTURE_WANTS_MAX);
+  } catch {
+    return [];
+  }
+}
+
+/** missing-pictures.json 본문(계약 v1): { v: 1, pictures: [이름…] } */
+export function pictureWantsText(names: readonly string[]): string {
+  return JSON.stringify({ v: 1, pictures: [...names] }) + "\n";
+}
+
 export function diagnoseGame(
   data: GameData, pluginsText: string | null | undefined, files?: ImageListing | null, log?: readonly LogRecord[] | null,
   extra?: DiagnoseExtra | null,
@@ -290,7 +316,7 @@ function run(
         id: "missing-pictures", area: "그림", status: "ok",
         title: `게임 폴더에 없는 그림 ${missing.length}개`,
         detail: "이벤트가 띄우는 그림인데 게임 폴더(img/ 아래 모든 폴더)에 같은 이름의 파일이 없어요. 게임에서 뺀 장면이거나, 게임 실행 파일 안에 묶여 있는 그림일 수 있어요. " +
-          `묶인 그림은 게임에서 한 번 보이면 기록 플러그인(${PICTURE_COPY_MIN_VERSION} 이상)이 복사해 둬서 읽기에서도 보여요.${copiedNote}`,
+          `뷰어가 게임을 열 때 이 그림 목록을 넘겨 두므로, 다음에 게임을 켤 때 기록 플러그인(${PICTURE_COPY_MIN_VERSION} 이상)이 게임 안에 묶인 그림을 복사해 둬서 읽기에서도 보여요(정말 없는 그림은 그대로 빈 자리예요).${copiedNote}`,
         evidence: [
           ...(shown > 0 ? [`플레이 중에 보인 그림 ${shown}개 — 게임 안에 묶여 있어요`] : []),
           ...cap(missing.map(([name, at]) => `${name} (${at})`)),
@@ -495,7 +521,7 @@ function run(
         id: "log-missing-pictures", area: "그림", status: "needs-addon", action: { kind: "none" },
         title: `게임 안에 묶인 그림 ${waiting.length}개 — 아직 읽기에서 안 보여요`,
         detail: "게임이 화면에 띄운 그림인데 게임 폴더에 파일이 없어요(게임 실행 파일 안에 묶여 있어요). " +
-          `기록 플러그인이 새 버전(${PICTURE_COPY_MIN_VERSION} 이상)이면 게임에서 그 그림이 다시 보일 때 복사해 둬서 읽기에서도 보여요.` +
+          `기록 플러그인이 새 버전(${PICTURE_COPY_MIN_VERSION} 이상)이면 다음에 게임을 켤 때(또는 게임에서 그 그림이 보일 때) 복사해 둬서 읽기에서도 보여요.` +
           (done > 0 ? ` ${done}개는 이미 복사해 뒀어요.` : ""),
         evidence: list(waiting),
       });

@@ -214,6 +214,7 @@ describe("mirror kinds", () => {
     expect(mirrorKindOf("www/img/pictures/a.png", "www")).toBe("placeholder");
     expect(mirrorKindOf("www/rpg-viewer/pictures/sub/a.png", "www")).toBe("placeholder");
     expect(mirrorKindOf("rpg-viewer/control.json", "")).toBeNull();
+    expect(mirrorKindOf("www/rpg-viewer/missing-pictures.json", "www")).toBe("json");
     expect(mirrorKindOf("package.json", "www")).toBe("json");
     expect(mirrorKindOf("www/index.html", "www")).toBe("text");
     expect(mirrorKindOf("www/save/file1.rpgsave", "www")).toBeNull();

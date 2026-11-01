@@ -106,3 +106,90 @@ describe("copies of pictures missing from the game folder (1.31.0)", () => {
     expect(writes(h)).toEqual([]);
   });
 });
+
+// 1.31.0: the viewer's want-list (rpg-viewer/missing-pictures.json) is copied through the game's own file system, one
+// per frame, even when that file system says the file exists (a packer serving packed files).
+describe("want-list copies (1.31.0)", () => {
+  const PNG = Buffer.from(PNG_B64, "base64");
+  const WANTS = BASE_DIR + "/rpg-viewer/missing-pictures.json";
+  const PICS = BASE_DIR + "/img/pictures";
+  /** Encrypted like RPG Maker: "RPGMV" head + PNG whose first 16 bytes are scrambled. */
+  const encrypted = () => {
+    const body = Buffer.from(PNG);
+    for (let i = 0; i < 16; i++) body[i] ^= 0x5a;
+    return Buffer.concat([Buffer.from([0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0]), body]);
+  };
+  /** MemFs keeps text: binary goes in as latin1 (the bridge reads strings back as latin1). */
+  const bin = (b: Buffer) => b.toString("latin1");
+
+  function setup(names: string[]) {
+    const hh = createHarness({ engine: "MV" });
+    hh.g.DataManager.setupNewGame();
+    fakeDocument(hh);
+    hh.fs.dirs.add(BASE_DIR + "/rpg-viewer");
+    hh.fs.dirs.add(PICS);
+    hh.fs.writeFileSync(WANTS, JSON.stringify({ v: 1, pictures: names }));
+    const written = new Map<string, Buffer>();
+    const write = hh.fs.writeFileSync.bind(hh.fs);
+    hh.fs.writeFileSync = (p: string, d: any) => {
+      if (p.startsWith(CACHE + "/")) written.set(p, Buffer.isBuffer(d) ? d : Buffer.from(String(d), "latin1"));
+      write(p, Buffer.isBuffer(d) ? bin(d) : d);
+    };
+    return { hh, written };
+  }
+
+  it("copies listed pictures one per frame, plain and encrypted, even though the file system says they exist", () => {
+    const s = setup(["cut/a", "b", "absent", "junk"]);
+    h = s.hh;
+    h.fs.dirs.add(PICS + "/cut");
+    h.fs.writeFileSync(PICS + "/cut/a.png", bin(PNG));
+    h.fs.writeFileSync(PICS + "/b.rpgmvp", bin(encrypted()));
+    h.fs.writeFileSync(PICS + "/junk.png", "not a png at all, really not");
+    h.frame();
+    expect([...s.written.keys()]).toEqual([CACHE + "/cut/a.png"]);
+    h.frame();
+    expect([...s.written.keys()]).toEqual([CACHE + "/cut/a.png", CACHE + "/b.png"]);
+    expect(s.written.get(CACHE + "/cut/a.png")).toEqual(PNG);
+    expect(s.written.get(CACHE + "/b.png")).toEqual(PNG);
+    for (let i = 0; i < 5; i++) expect(() => h.frame()).not.toThrow(); // absent + junk: skipped
+    expect(s.written.size).toBe(2);
+  });
+
+  it("skips pictures already copied, and reads the list again when it changes", () => {
+    const s = setup(["done"]);
+    h = s.hh;
+    h.fs.dirs.add(CACHE);
+    h.fs.writeFileSync(CACHE + "/done.png", "old");
+    h.fs.writeFileSync(PICS + "/done.png", bin(PNG));
+    s.written.clear();
+    h.frame(); h.frame();
+    expect(s.written.size).toBe(0);
+    h.fs.writeFileSync(PICS + "/later.png", bin(PNG));
+    h.fs.writeFileSync(WANTS, JSON.stringify({ v: 1, pictures: ["done", "later"] }));
+    h.frame();
+    expect(s.written.size).toBe(0); // checked again only after 5 s
+    h.clock.t += 5000;
+    h.frame();
+    expect([...s.written.keys()]).toEqual([CACHE + "/later.png"]);
+  });
+
+  it("a listed picture shown in play is copied from its bitmap without asking whether the file exists", () => {
+    const s = setup(["packed"]);
+    h = s.hh;
+    h.fs.writeFileSync(PICS + "/packed.png", "the packer says it is here but it does not read back as PNG");
+    h.frame(); // reads the list; the file-system copy fails
+    expect(s.written.size).toBe(0);
+    show(h, "packed");
+    expect([...s.written.keys()]).toEqual([CACHE + "/packed.png"]);
+  });
+
+  it("never throws into the game when the list or the files cannot be read", () => {
+    const s = setup(["x"]);
+    h = s.hh;
+    h.fs.readFileSync = () => { throw new Error("EACCES"); };
+    expect(() => { h.frame(); h.clock.t += 6000; h.frame(); h.frame(); }).not.toThrow();
+    h.fs.writeFileSync(WANTS, "{ broken json");
+    expect(() => { h.clock.t += 6000; h.frame(); }).not.toThrow();
+    expect(s.written.size).toBe(0);
+  });
+});

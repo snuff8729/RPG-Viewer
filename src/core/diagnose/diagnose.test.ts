@@ -5,7 +5,7 @@ import type { LogRecord } from "../live/types";
 import { parseManifest, type AdapterManifest } from "../adapters/manifest";
 import type { CommonEvent, EventCommand, EventPage, GameData, MapData, PageConditions } from "../types";
 import {
-  attentionCount, diagnoseGame, gatherDiagnosisInput, parseLogText, recommendedActions, reportMarkdown, scanPluginSource,
+  attentionCount, diagnoseGame, gatherDiagnosisInput, parseLogText, pictureWants, pictureWantsText, recommendedActions, reportMarkdown, scanPluginSource,
   settingsOfAddonFile, type DiagnosisReport,
 } from "./index";
 
@@ -218,7 +218,7 @@ describe("diagnoseGame with a play log", () => {
       evidence: ["missing_one ×1", "ghost_pic ×1"],
     });
     expect(find(old, "log-missing-pictures")?.detail).toContain("1.31.0 이상");
-    expect(find(old, "log-missing-pictures")?.detail).toContain("다시 보일 때");
+    expect(find(old, "log-missing-pictures")?.detail).toContain("다음에 게임을 켤 때");
     expect(recommendedActions(old).some(a => a.kind === "none")).toBe(false);
     // the static rule no longer says the game lacks it; it points at the ones seen in play
     const stat = find(old, "missing-pictures")!;
@@ -235,6 +235,15 @@ describe("diagnoseGame with a play log", () => {
     expect(find(all, "log-missing-pictures")).toMatchObject({
       status: "auto-fixed", title: "게임 안에 묶인 그림 2개", detail: "게임 안에 묶인 그림을 기록 플러그인이 복사해 둬서 보여줘요.",
     });
+  });
+
+  it("pictureWants lists event and play-log pictures missing from the folder, minus copies", () => {
+    const data = { ...g.data, pictureFolders: [{ token: "cg_09", folder: "cg_09" }] };
+    const drawn = [rec({ type: "picture", src: null, cmd: 0, pictureId: 5, name: "ghost_pic" })];
+    expect(pictureWants(data, g.files, drawn)).toEqual(["ghost_pic", "missing_one"]);
+    expect(pictureWants(data, { ...g.files, copies: ["Missing_One"] }, drawn)).toEqual(["ghost_pic"]);
+    expect(pictureWants(data, null, drawn)).toEqual([]);
+    expect(pictureWantsText(["a"])).toBe('{"v":1,"pictures":["a"]}\n');
   });
 
   it("gathers the plugin's picture copies from rpg-viewer/pictures", async () => {

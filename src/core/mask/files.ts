@@ -5,7 +5,7 @@ import { maskString, type MaskContext } from "./text";
 
 export type MirrorKind = "json" | "jsonl" | "plugins" | "pluginJs" | "text" | "placeholder";
 
-const RV_FILES = new Set(["log.jsonl", "live.json", "addons.json", "meta.json"]);
+const RV_FILES = new Set(["log.jsonl", "live.json", "addons.json", "meta.json", "missing-pictures.json"]);
 
 /**
  * 게임 루트 기준 경로(`/` 구분)와 데이터가 있는 바탕 폴더(MV `www`, MZ ``) → 옮길 종류. 안 옮기면 null(세이브 등).
