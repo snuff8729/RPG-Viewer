@@ -585,7 +585,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     autoRef.current = false;
     follow.current = false;
     applyRange(rangeShowing(range, idx, total, PAGE), { kind: "key", key: keyFrom(idx) });
-  }, [items, screenShown, total, range, keyFrom, applyRange, onAutoFollow]);
+  }, [items, screenShown, total, range, keyFrom, applyRange, onAutoFollow, setTocOpen]);
   const jumpToSeq = useCallback((seq: number) => jumpToIdx(indexOfSeq(items, seq)), [items, jumpToIdx]);
   const goFirst = useCallback(() => jumpToIdx(0), [jumpToIdx]);
   /** 읽던 곳: 첫 안 읽은 항목(다 읽었으면 맨 끝) */
@@ -593,12 +593,12 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
     if (firstUnreadIdx >= 0) { jumpToIdx(firstUnreadIdx); return; }
     setTocOpen(false);
     applyRange(tailRange(total, PAGE), { kind: "bottom" });
-  }, [firstUnreadIdx, jumpToIdx, applyRange, total]);
+  }, [firstUnreadIdx, jumpToIdx, applyRange, total, setTocOpen]);
   /** 맨 끝: 자동으로 맨 아래로는 그대로 둔다(읽음 표시는 보이는 만큼만) */
   const goLast = useCallback(() => {
     setTocOpen(false);
     applyRange(tailRange(total, PAGE), { kind: "bottom" });
-  }, [applyRange, total]);
+  }, [applyRange, total, setTocOpen]);
   // 다른 갈래의 북마크로 갈래를 바꿨으면 처음 위치를 잡은 뒤 그 줄로 간다(한 번)
   const jumpDone = useRef<number | null>(null);
   useEffect(() => {
@@ -622,7 +622,7 @@ function FullReaderBody({ gameKey, branch, withLive, autoFollow, onAutoFollow, o
   const goBookmark = useCallback((b: Bookmark) => {
     if (b.branch === branch) jumpToSeq(b.seq);
     else { setTocOpen(false); onJumpBranch(b.branch, b.seq); }
-  }, [branch, jumpToSeq, onJumpBranch]);
+  }, [branch, jumpToSeq, onJumpBranch, setTocOpen]);
 
   // 줄 메뉴: 같은 함수를 계속 넘겨 줄을 다시 그리지 않게(값은 ref로 읽는다)
   const { addHideRule, removeHideRule } = readerFile;
