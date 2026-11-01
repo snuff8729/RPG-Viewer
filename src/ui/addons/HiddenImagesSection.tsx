@@ -1,9 +1,10 @@
+import { SettingsDescription } from "./SettingsDescription";
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { useAddons } from "@/app/AddonsProvider";
 import { cleanHiddenPattern, HIDDEN_IMAGES_MAX, withHidden } from "@/core/addons/hiddenImages";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -32,9 +33,7 @@ export function HiddenImagesSection() {
     <Card>
       <CardHeader>
         <CardTitle>숨긴 그림</CardTitle>
-        <CardDescription>
-          읽기에서 그리지 않을 그림이에요. 이 그림만 바뀐 곳은 새 그림으로 보이지 않아요. 끝에 *를 붙이면 그 이름으로 시작하는 그림을 모두 숨겨요(예: Guage*).
-        </CardDescription>
+        <SettingsDescription summary="읽기에서 표시하지 않을 그림을 골라요." detail="이 그림만 바뀐 곳은 새 그림으로 보이지 않아요. 끝에 *를 붙이면 그 이름으로 시작하는 그림을 모두 숨겨요(예: Guage*)." />
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {hiddenImages.length > 0 ? (

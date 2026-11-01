@@ -21,7 +21,7 @@ export function safeStore(store: KeyValueStore | null = defaultStore()): KeyValu
 }
 
 /** PC 플레이 화면 도구 칸의 탭 */
-export const TOOL_TABS = ["cheat", "assist", "read"] as const;
+export const TOOL_TABS = ["assist", "cheat", "read"] as const;
 export type ToolTab = (typeof TOOL_TABS)[number];
 export const isToolTab = (v: unknown): v is ToolTab => (TOOL_TABS as readonly unknown[]).includes(v);
 

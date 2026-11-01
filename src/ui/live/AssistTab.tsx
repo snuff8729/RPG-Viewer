@@ -1,4 +1,6 @@
-import { useAssist } from "@/app/LiveProvider";
+import { NotConnectedEmpty } from "./NotConnectedEmpty";
+import { terms } from "@/ui/terms";
+import { useAssist, useLive } from "@/app/LiveProvider";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -22,7 +24,9 @@ export interface AssistTabProps {
  */
 export function AssistTab({ session, active = true, className }: AssistTabProps) {
   const { supported } = useAssist();
+  const { connection } = useLive();
   const backup = useBackupControls();
+  if (connection !== "connected") return <NotConnectedEmpty />;
   return (
     <div className={cn("flex flex-col gap-4", className)}>
       {!supported && <p className="text-xs text-muted-foreground">게임이 연결되고 기록 플러그인이 1.1.0 이상이면 쓸 수 있어요</p>}
@@ -31,7 +35,7 @@ export function AssistTab({ session, active = true, className }: AssistTabProps)
         <>
           <Separator />
           <div className="flex flex-col gap-2">
-            <Label>백업</Label>
+            <Label>{terms.backups}</Label>
             <div className={ASSIST_FAVORITE_GRID}>
               <BackupNowButton favorite={<AssistFavoriteStar id="backup" />} />
               <RestoreLatestButton favorite={<AssistFavoriteStar id="restore" />} />

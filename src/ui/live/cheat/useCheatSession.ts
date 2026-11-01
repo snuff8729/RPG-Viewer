@@ -29,11 +29,6 @@ export interface CheatSession {
   tab: string;
   setTab(t: string): void;
   finder: VariableFinder;
-  /** 이 기기에서 백업할 수 있음(휴대폰 보기에서는 PC에서) */
-  canBackup: boolean;
-  backupNote: string | null;
-  backingUp: boolean;
-  backupNow(): Promise<void>;
 }
 
 /** initialTab = 처음 보일 치트 탭(items · actors · switches). 휴대폰은 변수(switches)부터. */
@@ -48,8 +43,6 @@ export function useCheatSession(initialTab = "items"): CheatSession {
   const { path } = useGamePath(gameKey);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const seq = useRef(0);
-  const [backupNote, setBackupNote] = useState<string | null>(null);
-  const [backingUp, setBackingUp] = useState(false);
   // 창을 닫았다 열어도 보던 탭과 변수 찾기 상태가 남는다(게임에서 값을 바꾸고 돌아오는 흐름)
   const [tab, setTab] = useState<string>(initialTab);
   const finder = useVariableFinder(gameKey, live);
@@ -80,18 +73,8 @@ export function useCheatSession(initialTab = "items"): CheatSession {
     apply(e.inverse, `되돌리기: ${e.label}`);
   };
 
-  const backupNow = async () => {
-    if (!path) return;
-    setBackingUp(true);
-    setBackupNote(null);
-    const r = await makeBackup(path, "manual", "치트 전");
-    setBackingUp(false);
-    if (r.ok) { notifyBackupsChanged(); setBackupNote(r.skipped ? "바뀐 게 없어서 지난 백업을 그대로 둬요" : "백업했어요"); }
-    else setBackupNote(r.error);
-  };
 
   return {
     history, apply, undo, tab, setTab, finder,
-    canBackup: available && !!path, backupNote, backingUp, backupNow,
   };
 }

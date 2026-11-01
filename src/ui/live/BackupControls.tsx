@@ -25,7 +25,7 @@ const formatTime = (iso: string) => {
 const NOTE_MS = 4000;
 
 /**
- * 백업·복원 버튼 하나씩을 쓸 수 있는지: 백업 창(BackupButton)과 같은 조건(PC의 뷰어 서버, 게임 연결 지원).
+ * 백업·복원 버튼 하나씩을 쓸 수 있는지: 관리의 세이브 백업과 같은 조건(PC의 뷰어 서버, 게임 연결 지원).
  * 휴대폰 보기에서는 쓰지 않는다(null). 게임 폴더 위치를 모르면 path = null(버튼은 꺼지고 백업 창에서 정하라고 안내).
  */
 // eslint-disable-next-line react-refresh/only-export-components

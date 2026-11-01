@@ -1,4 +1,5 @@
 import { NotConnectedEmpty } from "./NotConnectedEmpty";
+import { MapDetailsButton } from "./MapDetailsButton";
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -63,6 +64,7 @@ function MapColumnBody({ actions, layoutId }: { actions?: ReactNode; layoutId: s
               <TabsTrigger value="story">다음 스토리</TabsTrigger>
             </TabsList>
             <div className="ml-auto flex items-center gap-1">
+              <MapDetailsButton />
               {actions}
               <Button variant="ghost" size="icon-sm" aria-label={collapsed ? "목록 펼치기" : "목록 접기"} onClick={toggle}>
                 {collapsed ? <ChevronUp /> : <ChevronDown />}

@@ -3,7 +3,7 @@ import { useGame } from "@/app/GameProvider";
 import { POPOUT_LABEL, type ModuleWindowParams, type PopoutModule } from "@/app/popout";
 import { StartScreen } from "@/ui/StartScreen";
 import { AssistTab } from "./AssistTab";
-import { CheatContent } from "./cheat/CheatSheet";
+import { CheatContent } from "./cheat/CheatContent";
 import { ConnectionStatusButton } from "./ConnectionStatusButton";
 import { MapColumn } from "./PlayMapColumn";
 import { ReaderFill } from "./PlayTools";

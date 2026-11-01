@@ -1,3 +1,4 @@
+import { NotConnectedEmpty } from "../NotConnectedEmpty";
 import { useEffect } from "react";
 import { useAssist, useLive, useLiveData } from "@/app/LiveProvider";
 import { CHEAT_MIN_VERSION, CHEAT_STATUS_TEXT, type CheatStatus } from "@/core/live/cheat";
@@ -79,6 +80,7 @@ function CheatBody({ session, active = true, tab, onTabChange, className, variab
   }, [active, cheatSupported, holdLiveActors]);
 
   if (!data) return null;
+  if (connection !== "connected") return <NotConnectedEmpty />;
   const disabled = !cheatSupported;
   const connected = connection === "connected" && live !== null;
   const props = { data, live, disabled, apply };

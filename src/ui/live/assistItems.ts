@@ -4,7 +4,7 @@ import { battleOnly, type AssistFavoriteId } from "@/core/live/favoritesFile";
 
 /**
  * 게임 보조 조작 하나하나의 고정 id(즐겨찾기 ☆가 이 id로 가리킨다)와 이름.
- * 백업·복원은 게임 보조가 아니라 BackupButton 쪽이라 여기 없다.
+ * 백업·복원은 게임 보조가 아니라 관리의 세이브 백업 쪽이라 여기 없다.
  */
 export const ASSIST_ITEMS = [
   { id: "speed", label: "배속", short: "배속" },

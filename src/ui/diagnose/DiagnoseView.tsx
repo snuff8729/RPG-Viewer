@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ChevronDown, ClipboardCopy, RefreshCw, Wand2 } from "lucide-react";
 import { useDiagnosis } from "@/app/DiagnosisProvider";
 import {
-  attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, STATUS_LABELS, type DiagnoseFinding, type DiagnoseStatus,
+  attentionCount, DIAGNOSE_AREAS, recommendedActions, reportMarkdown, type DiagnoseFinding, type DiagnoseStatus,
 } from "@/core/diagnose";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AiHandoff } from "./AiHandoff";
 import { useApplyDiagnosis } from "./useApplyDiagnosis";
 
+const LABEL: Record<DiagnoseStatus, string> = { ok: "괜찮아요", "auto-fixed": "자동 처리", "needs-addon": "확인 필요", unsupported: "문제", unknown: "확인 필요" };
+
 const BADGE: Record<DiagnoseStatus, "success" | "secondary" | "destructive" | "warning"> = {
   ok: "success", "auto-fixed": "secondary", "needs-addon": "warning", unsupported: "destructive", unknown: "warning",
 };
@@ -25,7 +27,7 @@ function FindingItem({ f, onApply, busy }: { f: DiagnoseFinding; onApply: () => 
     <Item variant="outline" size="sm" className="items-start">
       <ItemContent>
         <ItemTitle className="flex flex-wrap items-center gap-2">
-          <Badge variant={BADGE[f.status]}>{STATUS_LABELS[f.status]}</Badge>
+          <Badge variant={BADGE[f.status]}>{LABEL[f.status]}</Badge>
           {f.title}
         </ItemTitle>
         <ItemDescription className="line-clamp-none">{f.detail}</ItemDescription>

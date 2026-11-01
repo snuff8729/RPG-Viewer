@@ -1,3 +1,4 @@
+import { terms } from "@/ui/terms";
 import { useRoute } from "@/app/route";
 import { ReadModule } from "./ReadModule";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +7,7 @@ import type { PopoutModule } from "@/app/popout";
 import { LiveFreeze } from "@/app/LiveProvider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AssistTab } from "./AssistTab";
-import { CheatContent, onOpenCheatRequest } from "./cheat/CheatSheet";
+import { CheatContent, onOpenCheatRequest } from "./cheat/CheatContent";
 import { useCheatSession } from "./cheat/useCheatSession";
 import { isToolTab, loadToolTab, saveToolTab, type ToolTab } from "./playLayout";
 import { focusPopout } from "./popouts";
@@ -25,7 +26,7 @@ export function ReaderFill() {
 }
 
 /**
- * PC 플레이 화면 도구 칸: 탭 `치트 | 보조 | 읽기`(마지막 탭 기억). 치트·보조는 칸 안에 그대로(덮개 없이) 그린다.
+ * PC 플레이 화면 도구 칸: 탭 `보조 | 치트 | 읽기`(마지막 탭 기억). 치트·보조는 칸 안에 그대로(덮개 없이) 그린다.
  * 탭을 바꿔도 남아야 하는 것(치트 기록·보조 응답 글)은 여기서 가진다. 읽기는 늘 살려 두고 숨기기만 한다(읽은 위치 유지).
  * 숨긴 동안은 기록·게임 상태를 멈춰 두어(LiveFreeze) 새 기록마다 긴 기록 전체로 읽기 항목을 다시 만들지 않는다.
  * 떼어 낸 탭은 "따로 창에서 보는 중"만 보인다(치트를 두 곳에서 동시에 켜지 않는다).
@@ -57,9 +58,9 @@ export function ToolsColumn() {
     <Tabs value={tab} onValueChange={(v) => { if (isToolTab(v)) setTab(v); }} className="h-full min-h-0 gap-0">
       <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
         <TabsList>
-          <TabsTrigger value="cheat"><WandSparkles />치트</TabsTrigger>
-          <TabsTrigger value="assist"><Gauge />보조</TabsTrigger>
-          <TabsTrigger value="read"><BookOpen />읽기</TabsTrigger>
+          <TabsTrigger value="assist"><Gauge />{terms.assist}</TabsTrigger>
+          <TabsTrigger value="cheat"><WandSparkles />{terms.cheat}</TabsTrigger>
+          <TabsTrigger value="read"><BookOpen />{terms.read}</TabsTrigger>
         </TabsList>
         <PopoutButton module={MODULE_OF[tab]} className="ml-auto" />
       </div>

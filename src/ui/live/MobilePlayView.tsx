@@ -1,6 +1,7 @@
 import { useRoute } from "@/app/route";
 import { ReadModule } from "./ReadModule";
 import { NotConnectedEmpty } from "./NotConnectedEmpty";
+import { MapDetailsButton } from "./MapDetailsButton";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronUp, ListChecks } from "lucide-react";
 import { LiveFreeze, useLive } from "@/app/LiveProvider";
@@ -11,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AssistFavoritesBar } from "./AssistFavoritesBar";
 import { AssistTab } from "./AssistTab";
-import { CheatContent, onOpenCheatRequest } from "./cheat/CheatSheet";
+import { CheatContent, onOpenCheatRequest } from "./cheat/CheatContent";
 import { useCheatSession } from "./cheat/useCheatSession";
 import { isPlayTab, loadPlayTab, savePlayTab, type PlayTab } from "./mobilePlay";
 import { isMapBelowTab, loadMapBelowTab, saveMapBelowTab, type MapBelowTab } from "./playLayout";
@@ -64,6 +65,7 @@ function MobileMapTab() {
               </TabsTrigger>
               <TabsTrigger value="story">다음 스토리</TabsTrigger>
             </TabsList>
+            <div className="flex justify-end"><MapDetailsButton /></div>
             <TabsContent value="todo" className="flex min-h-0 flex-col">
               {connected ? <TodoList header={false} className="min-h-0 flex-1" onChoose={() => setOpen(false)} /> : <NotConnectedNote />}
             </TabsContent>
@@ -77,12 +79,7 @@ function MobileMapTab() {
   );
 }
 
-/**
- * 휴대폰 너비 플레이 화면: 위 한 줄 + 한 번에 한 패널 + 아래 탭 `보조 | 치트 | 맵 | 읽기`(처음엔 보조, 마지막 탭 기억).
- * 보조 탭은 즐겨찾기를 큰 버튼으로 맨 위에(전투 중이면 전투 버튼이 맨 앞), 그 아래 나머지 보조. 치트 탭은 변수부터.
- * 읽기는 다른 탭에서도 살려 둬(읽은 위치·따라가기 유지) 새 대사 수를 탭에 보여 준다. 새 선택지가 뜨면 읽기로 넘긴다.
- * 탭을 바꿔도 남아야 하는 것(치트 기록·보조 응답 글)은 여기서 가진다.
- */
+/** 공통 머리줄과 아래 탭 사이에 기존 모듈 내용을 보여줘요. 읽기는 숨겨도 위치를 유지해요. */
 export function MobilePlayView() {
   const { connection } = useLive();
   const [route] = useRoute();

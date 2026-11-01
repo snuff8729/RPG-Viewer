@@ -28,36 +28,93 @@ const sections: Record<ManageSection, { title: string; description: string; pc?:
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
-  return <ToggleGroup type="single" variant="outline" value={theme} onValueChange={v => { if (v) setTheme(v as Theme); }} aria-label="화면 테마">
-    <ToggleGroupItem value="system">시스템</ToggleGroupItem><ToggleGroupItem value="light">밝게</ToggleGroupItem><ToggleGroupItem value="dark">어둡게</ToggleGroupItem>
-  </ToggleGroup>;
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      value={theme}
+      onValueChange={(v) => {
+        if (v) setTheme(v as Theme);
+      }}
+      aria-label="화면 테마"
+    >
+      <ToggleGroupItem value="system">시스템</ToggleGroupItem>
+      <ToggleGroupItem value="light">밝게</ToggleGroupItem>
+      <ToggleGroupItem value="dark">어둡게</ToggleGroupItem>
+    </ToggleGroup>
+  );
 }
 function DiagnosisSection() {
   const errors = useLoadErrors();
-  return <div className="space-y-4">
-    {errors.length > 0 && <Alert variant="destructive"><AlertTitle>불러오기 오류 {errors.length}개가 있어요</AlertTitle><AlertDescription><ul className="space-y-1 break-all">{errors.map((e, i) => <li key={i}>{e.file}: {e.message}</li>)}</ul></AlertDescription></Alert>}
-    <DiagnoseView />
-  </div>;
+  return (
+    <div className="space-y-4">
+      {errors.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTitle>불러오기 오류 {errors.length}개가 있어요</AlertTitle>
+          <AlertDescription>
+            <ul className="space-y-1 break-all">
+              {errors.map((e, i) => (
+                <li key={i}>
+                  {e.file}: {e.message}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+      <DiagnoseView />
+    </div>
+  );
 }
 export function ManageView({ section }: { section?: ManageSection }) {
   const compact = useCompact();
   const remote = isRemoteView();
   const active = section ?? (compact ? null : "connection");
   const item = active ? sections[active] : null;
-  return <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 min-[900px]:flex-row min-[900px]:p-6">
-    {(!compact || !active) && <nav aria-label="관리 섹션" className="flex shrink-0 flex-col gap-1 min-[900px]:w-48">{MANAGE_SECTIONS.map(s => <Button key={s} asChild variant={active === s ? "secondary" : "ghost"} className={`justify-start ${remote && sections[s].pc ? "text-muted-foreground" : ""}`}><a href={`#/manage/${s}`}>{sections[s].title}</a></Button>)}</nav>}
-    {active && item && <section className="min-w-0 flex-1 space-y-6">
-      {compact && <Button variant="ghost" size="sm" asChild><a href="#/manage"><ArrowLeft />관리 목록으로</a></Button>}
-      <SectionHeader title={item.title} description={item.description} />
-      {remote && item.pc ? <Alert><AlertDescription>{terms.pcOnly}</AlertDescription></Alert> : <>
-        {active === "connection" && <ConnectionSection />}
-        {active === "backups" && <BackupSection />}
-        {active === "share" && <ShareSection />}
-        {active === "settings" && <GameSettingsSection />}
-        {active === "diagnose" && <DiagnosisSection />}
-        {active === "appearance" && <AppearanceSection />}
-        {active === "games" && <GameActions />}
-      </>}
-    </section>}
-  </div>;
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 p-4 min-[900px]:flex-row min-[900px]:p-6">
+      {(!compact || !active) && (
+        <nav aria-label="관리 섹션" className="flex shrink-0 flex-col gap-1 min-[900px]:w-48">
+          {MANAGE_SECTIONS.map((s) => (
+            <Button
+              key={s}
+              asChild
+              variant={active === s ? "secondary" : "ghost"}
+              className={`justify-start ${remote && sections[s].pc ? "text-muted-foreground" : ""}`}
+            >
+              <a href={`#/manage/${s}`}>{sections[s].title}</a>
+            </Button>
+          ))}
+        </nav>
+      )}
+      {active && item && (
+        <section className="min-w-0 flex-1 space-y-6">
+          {compact && (
+            <Button variant="ghost" size="sm" asChild>
+              <a href="#/manage">
+                <ArrowLeft />
+                관리 목록으로
+              </a>
+            </Button>
+          )}
+          <SectionHeader title={item.title} description={item.description} />
+          {remote && item.pc ? (
+            <Alert>
+              <AlertDescription>{terms.pcOnly}</AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              {active === "connection" && <ConnectionSection />}
+              {active === "backups" && <BackupSection />}
+              {active === "share" && <ShareSection />}
+              {active === "settings" && <GameSettingsSection />}
+              {active === "diagnose" && <DiagnosisSection />}
+              {active === "appearance" && <AppearanceSection />}
+              {active === "games" && <GameActions />}
+            </>
+          )}
+        </section>
+      )}
+    </div>
+  );
 }

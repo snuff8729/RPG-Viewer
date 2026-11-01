@@ -1,9 +1,10 @@
+import { SettingsDescription } from "./SettingsDescription";
 import { useMemo } from "react";
 import { useAddons } from "@/app/AddonsProvider";
 import { useGame } from "@/app/GameProvider";
 import { useLive } from "@/app/LiveProvider";
 import { keyText, parseKeyText, storyCandidates, storyKeyLabel, storyValue, type StoryKey } from "@/core/story/progress";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -28,9 +29,7 @@ export function StoryProgressSection() {
     <Card>
       <CardHeader>
         <CardTitle><Label htmlFor="story-progress">스토리 진행 기준</Label></CardTitle>
-        <CardDescription>
-          다음 스토리를 찾을 때 이 값이 커지는 쪽을 따라가요. 보통은 자동으로 고른 것이 맞지만, 틀리면 직접 골라 주세요.
-        </CardDescription>
+        <SettingsDescription summary="다음 스토리를 찾을 때 따라갈 기준을 정해요." detail="이 값이 커지는 쪽을 따라가요. 보통은 자동으로 고른 것이 맞지만, 틀리면 직접 골라 주세요." />
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         <Select

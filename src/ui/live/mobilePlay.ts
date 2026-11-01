@@ -1,4 +1,4 @@
-/** 휴대폰 너비 플레이 화면: 아래 탭(보조·치트·맵·읽기) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
+/** 휴대폰 너비 플레이 화면: 아래 탭(맵·보조·치트·읽기) 기억과 새 대사 수. 저장소 오류로 예외를 던지지 않는다. */
 import type { LogRecord } from "@/core/live/types";
 import { extendsArray } from "@/core/live/lineage";
 
@@ -29,13 +29,13 @@ export function isPlayTab(v: unknown): v is PlayTab {
 
 /**
  * 예전 탭 값을 새 탭으로: 맵·스토리(스토리는 이제 맵 탭 아래 목록에)는 맵으로.
- * 읽기는 예전 기본값이라 일부러 고른 것인지 알 수 없어 새 기본값(보조)으로 시작한다.
+ * 읽기는 예전 기본값이라 일부러 고른 것인지 알 수 없어 새 기본값(맵)으로 시작한다.
  */
 export function migrateOldTab(old: string | null | undefined): PlayTab {
   return old === "map" || old === "story" ? "map" : DEFAULT_TAB;
 }
 
-/** 저장된 탭. 없으면 예전 기억을 옮기고, 그것도 없거나 읽을 수 없으면 `assist`(보조). */
+/** 저장된 탭. 없으면 예전 기억을 옮기고, 그것도 없거나 읽을 수 없으면 `map`(맵). */
 export function loadPlayTab(store: TabStore | null = defaultStore()): PlayTab {
   try {
     const raw = store?.getItem(KEY);
