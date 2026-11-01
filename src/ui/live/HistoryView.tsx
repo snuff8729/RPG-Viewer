@@ -20,6 +20,7 @@ import { NowNextCard } from "./NowNextCard";
 import { TimelineItem, type TimelineCtx } from "./TimelineItem";
 import { choiceTexts } from "./historyText";
 import { loadAutoFollow, saveAutoFollow } from "./autoFollow";
+import { isNearBottom, stillAtBottom } from "./stickToBottom";
 import { ALL_KINDS, filterItems, loadKinds, saveKinds, type Kind } from "./historyFilter";
 import { classifyPluginRecord } from "@/core/live/pluginText";
 import { usePluginOverrides, usePluginShowAll } from "./pluginDisplay";
@@ -100,7 +101,9 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
 
   // 타임라인 영역이 바닥 근처(80px 이내)일 때만 새 기록에 맞춰 스크롤
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const lastTop = useRef(0);
   const [autoFollow, setAutoFollow] = useState(loadAutoFollow);
   const autoRef = useRef(autoFollow);
   const [atBottom, setAtBottom] = useState(true);
@@ -109,19 +112,22 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
   const prevKey = useRef("");
   const scrollToBottom = useCallback(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) { el.scrollTop = el.scrollHeight; lastTop.current = el.scrollTop; }
     nearBottom.current = true;
     setAtBottom(true);
     setFresh(0);
   }, []);
-  const onScroll = useCallback(() => {
+  /** sticky: 스크롤 이벤트 — 위로 올렸을 때만 맨 아래에서 떨어진다(맨 아래로 붙인 뒤 늦게 온 이벤트에 내용이 늘었어도). 아니면 지금 위치로 잰다 */
+  const measure = useCallback((sticky: boolean) => {
     const el = scroller.current;
     if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    const near = sticky ? stillAtBottom(nearBottom.current, lastTop.current, el) : isNearBottom(el);
+    lastTop.current = el.scrollTop;
     nearBottom.current = near;
     setAtBottom(near);
     if (near) setFresh(0);
   }, []);
+  const onScroll = useCallback(() => measure(true), [measure]);
   // "이전 기록 더 보기"로 앞쪽에 항목이 붙어도 읽던 위치를 유지
   const anchor = useRef<{ h: number; top: number } | null>(null);
   const showMore = () => {
@@ -133,19 +139,20 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
     const el = scroller.current;
     const a = anchor.current;
     anchor.current = null;
-    if (el && a) el.scrollTop = a.top + (el.scrollHeight - a.h);
-  }, [shown]);
-  // 하단 카드가 접히고 펼쳐져 영역 높이가 바뀌면 바닥 여부를 다시 판단
+    if (el && a) { el.scrollTop = a.top + (el.scrollHeight - a.h); measure(false); }
+  }, [shown, measure]);
+  // 영역 높이(하단 카드 접힘·펼침)나 내용 높이(그림 로딩 등)가 바뀌면, 맨 아래에 붙어 있던 때만 다시 붙이고 바닥 여부를 다시 판단
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       if (nearBottom.current || autoRef.current) el.scrollTop = el.scrollHeight;
-      onScroll();
+      measure(false);
     });
     ro.observe(el);
+    if (content.current) ro.observe(content.current);
     return () => ro.disconnect();
-  }, [onScroll]);
+  }, [measure]);
   useLayoutEffect(() => {
     const key = `${selected}|${[...kinds].join(",")}`;
     const grew = filtered.length - prevLen.current;
@@ -210,7 +217,8 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
         </div>
       </div>
       <div className="relative min-h-0 flex-1">
-        <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto pr-1">
+        <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto pr-1">
+          <div ref={content} className="space-y-1">
           {ctx ? (
             <>
               {visible.length < filtered.length && (
@@ -223,6 +231,7 @@ export function HistoryView({ mobile = false, toolbarStart }: { mobile?: boolean
               {installed ? "게임을 실행해 새 게임을 시작하거나 세이브를 불러오세요" : "플러그인을 설치하면 플레이 기록이 여기에 쌓여요"}
             </p>
           )}
+          </div>
         </div>
         {!atBottom && (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
